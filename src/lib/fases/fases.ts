@@ -50,6 +50,23 @@ export async function travarPipeline(tx: Tx, pipelineId: string): Promise<boolea
   return linhas.length > 0;
 }
 
+/**
+ * Trava VÁRIOS pipelines na mesma transação, sempre em ordem crescente de id
+ * (e cada um uma vez). Ordem fixa = duas operações que cruzam quadros
+ * (ex.: ganho em vendas criando card em projetos × algo que pegue projetos e
+ * vendas) nunca se travam mutuamente. Quem precisa de mais de um quadro usa
+ * SÓ isto, tudo de uma vez, no início da transação — nunca `travarPipeline`
+ * avulso depois. `false` se algum id não existe.
+ */
+export async function travarPipelines(tx: Tx, pipelineIds: Iterable<string>): Promise<boolean> {
+  const ids = [...new Set(pipelineIds)].sort();
+  let todos = true;
+  for (const id of ids) {
+    if (!(await travarPipeline(tx, id))) todos = false;
+  }
+  return todos;
+}
+
 async function carregarPipelines(): Promise<PipelineComFases[]> {
   return db.pipeline.findMany({
     orderBy: { ordem: "asc" },
