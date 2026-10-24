@@ -1,0 +1,91 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+import { z } from "zod";
+import { exigirPapel } from "@/lib/auth/atual";
+import { atualizarUsuario, criarConvite, reemitirConvite, type ErroUsuario } from "@/lib/auth/usuarios";
+
+const MENSAGEM: Record<ErroUsuario, string> = {
+  PAPEL_NAO_PERMITIDO: "Você não pode atribuir esse papel.",
+  EMAIL_INVALIDO: "Email inválido.",
+  EMAIL_EM_USO: "Já existe um usuário com esse email.",
+  TELEFONE_INVALIDO: "Telefone inválido. Use DDD + número.",
+  TELEFONE_EM_USO: "Esse telefone já está em outro usuário.",
+  CONVITE_INVALIDO: "Convite inválido.",
+  SENHA_FRACA: "Senha fraca.",
+  CREDENCIAIS_INVALIDAS: "Credenciais inválidas.",
+  NAO_PODE_ALTERAR_A_SI: "Você não pode alterar seu próprio papel ou se desativar.",
+  USUARIO_NAO_ENCONTRADO: "Usuário não encontrado.",
+};
+
+export type EstadoConvite = { erro?: string; link?: string; expiraEm?: string } | undefined;
+
+const papelSchema = z.enum(["ADMIN", "GESTOR", "VENDEDOR"]);
+
+const conviteSchema = z.object({
+  nome: z.string().trim().min(2, "Nome muito curto."),
+  email: z.string().trim().min(3),
+  papel: papelSchema,
+  telefone: z.string().trim().optional(),
+});
+
+function linkConvite(token: string): string {
+  const base = (process.env.APP_URL ?? "http://localhost:3000").replace(/\/+$/, "");
+  return `${base}/convite/${token}`;
+}
+
+export async function criarConviteAction(_prev: EstadoConvite, form: FormData): Promise<EstadoConvite> {
+  const ator = await exigirPapel("GESTOR");
+  const parsed = conviteSchema.safeParse({
+    nome: form.get("nome"),
+    email: form.get("email"),
+    papel: form.get("papel"),
+    telefone: form.get("telefone") ?? undefined,
+  });
+  if (!parsed.success) return { erro: parsed.error.issues[0]?.message ?? "Dados inválidos." };
+  const r = await criarConvite(parsed.data, ator);
+  if (!r.ok) return { erro: MENSAGEM[r.erro] };
+  revalidatePath("/gestao/usuarios");
+  return { link: linkConvite(r.token), expiraEm: r.expiraEm.toISOString() };
+}
+
+export async function reemitirConviteAction(usuarioId: string): Promise<EstadoConvite> {
+  const ator = await exigirPapel("GESTOR");
+  const r = await reemitirConvite(usuarioId, ator);
+  if (!r.ok) return { erro: MENSAGEM[r.erro] };
+  revalidatePath("/gestao/usuarios");
+  return { link: linkConvite(r.token), expiraEm: r.expiraEm.toISOString() };
+}
+
+const edicaoSchema = z.object({
+  usuarioId: z.string().min(1),
+  nome: z.string().trim().min(2).optional(),
+  telefone: z.string().trim().optional(),
+  papel: papelSchema.optional(),
+});
+
+export type EstadoEdicao = { erro?: string; ok?: true } | undefined;
+
+export async function editarUsuarioAction(_prev: EstadoEdicao, form: FormData): Promise<EstadoEdicao> {
+  const ator = await exigirPapel("GESTOR");
+  const parsed = edicaoSchema.safeParse({
+    usuarioId: form.get("usuarioId"),
+    nome: form.get("nome") ?? undefined,
+    telefone: form.get("telefone") ?? undefined,
+    papel: form.get("papel") ?? undefined,
+  });
+  if (!parsed.success) return { erro: "Dados inválidos." };
+  const { usuarioId, ...dados } = parsed.data;
+  const r = await atualizarUsuario(usuarioId, dados, ator);
+  if (!r.ok) return { erro: MENSAGEM[r.erro] };
+  revalidatePath("/gestao/usuarios");
+  return { ok: true };
+}
+
+export async function alternarAtivoAction(usuarioId: string, ativo: boolean): Promise<EstadoEdicao> {
+  const ator = await exigirPapel("GESTOR");
+  const r = await atualizarUsuario(usuarioId, { ativo }, ator);
+  if (!r.ok) return { erro: MENSAGEM[r.erro] };
+  revalidatePath("/gestao/usuarios");
+  return { ok: true };
+}

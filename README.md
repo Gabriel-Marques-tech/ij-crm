@@ -23,6 +23,23 @@ pnpm db:seed               # pipelines e fases do Pipefy
 pnpm dev
 ```
 
+## Primeiro acesso
+
+```bash
+ADMIN_NOME="Seu Nome" ADMIN_EMAIL=voce@ij.com ADMIN_SENHA='min 8 chars' pnpm admin:criar
+```
+
+Entre em `/login`. Em **Gestão → Usuários** gere convites: o link é mostrado uma vez,
+vale 7 dias, e quem abre define a própria senha. Papéis: `VENDEDOR` (opera),
+`GESTOR` (+ usuários, fases, import), `ADMIN` (+ config técnica). Sessões vivem no
+banco (`sessao`): desativar alguém derruba o acesso na hora.
+
+## Testes
+
+`pnpm test` roda unitários e de integração. Os de integração (`*.int.test.ts`)
+usam o Postgres do compose no schema `ijcrm_test`, migrado automaticamente —
+suba o `db` antes (`docker compose up -d db`).
+
 ## Comandos
 
 | comando | faz |

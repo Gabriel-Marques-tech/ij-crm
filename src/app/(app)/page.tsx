@@ -1,4 +1,3 @@
-import { connection } from "next/server";
 import { PageHeader } from "@/components/shell/page-header";
 import { Wordmark } from "@/components/shell/wordmark";
 import { Button } from "@/components/ui/button";
@@ -20,12 +19,7 @@ export function saudacao(agora: Date): string {
   return "Boa noite.";
 }
 
-// Data/hora mudam a cada request: rota dinâmica, sem prerender. `instant = false`
-// é a saída que o próprio `next build` (16.x) indica para rotas bloqueantes.
-export const instant = false;
-
 export default async function HomePage() {
-  await connection();
   const agora = new Date();
   return (
     <>

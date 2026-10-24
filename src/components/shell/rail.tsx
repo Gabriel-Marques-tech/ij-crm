@@ -2,16 +2,19 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { cn } from "@/lib/utils";
-import { NAV_ITEMS, isActive } from "./nav-config";
+import { cn } from "cn";
+import type { Papel } from "@prisma/client";
+import { isActive, itensParaPapel } from "./nav-config";
 import { Wordmark } from "./wordmark";
 
 /**
  * Rail lateral (desktop) + barra inferior (mobile).
  * Visual: bg-subtle (sidebar) com borda, item ativo em primary-soft + coral.
+ * Recebe só o papel (serializável); ícones são resolvidos aqui, no client.
  */
-export function Rail() {
+export function Rail({ papel }: { papel: Papel }) {
   const pathname = usePathname();
+  const itens = itensParaPapel(papel);
 
   return (
     <>
@@ -23,7 +26,7 @@ export function Rail() {
         <Link href="/" className="mb-4 flex h-10 w-10 items-center justify-center" aria-label="Início">
           <Wordmark compact />
         </Link>
-        {NAV_ITEMS.map((item) => {
+        {itens.map((item) => {
           const active = isActive(pathname, item.href);
           const Icon = item.icon;
           return (
@@ -50,7 +53,7 @@ export function Rail() {
         aria-label="Principal"
         className="md:hidden fixed inset-x-0 bottom-0 z-20 flex border-t border-sidebar-border bg-sidebar"
       >
-        {NAV_ITEMS.map((item) => {
+        {itens.map((item) => {
           const active = isActive(pathname, item.href);
           const Icon = item.icon;
           return (

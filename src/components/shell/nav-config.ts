@@ -1,3 +1,5 @@
+import type { Papel } from "@prisma/client";
+import { temPapelMinimo } from "@/lib/auth/papeis";
 import {
   Building2,
   CalendarCheck,
@@ -24,6 +26,10 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/empresas", label: "Empresas", icon: Building2 },
   { href: "/gestao", label: "Gestão", icon: Settings2, minPapel: "GESTOR" },
 ];
+
+export function itensParaPapel(papel: Papel): NavItem[] {
+  return NAV_ITEMS.filter((i) => !i.minPapel || temPapelMinimo(papel, i.minPapel));
+}
 
 /** Item ativo: "/" só em match exato; demais por prefixo. */
 export function isActive(pathname: string, href: string): boolean {
