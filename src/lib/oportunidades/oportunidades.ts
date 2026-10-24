@@ -123,6 +123,14 @@ export async function listarResponsaveis() {
   return db.usuario.findMany({ where: { ativo: true }, orderBy: { nome: "asc" }, select: { id: true, nome: true } });
 }
 
+/** id → nome, inclusive inativos (a Timeline cita quem já saiu). */
+export async function nomesDeUsuarios(ids: Iterable<string>): Promise<Map<string, string>> {
+  const lista = [...new Set(ids)];
+  if (lista.length === 0) return new Map();
+  const us = await db.usuario.findMany({ where: { id: { in: lista } }, select: { id: true, nome: true } });
+  return new Map(us.map((u) => [u.id, u.nome]));
+}
+
 // ---------------------------------------------------------------- escrita
 
 export async function criarCard(
