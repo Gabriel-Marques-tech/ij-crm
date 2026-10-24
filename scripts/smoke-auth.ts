@@ -48,6 +48,8 @@ async function main() {
   esperar("vendedor /gestao → /403", r.status === 307 && r.location?.endsWith("/403") === true, r);
   r = await get("/gestao/usuarios", sVend);
   esperar("vendedor /gestao/usuarios → /403", r.status === 307 && r.location?.endsWith("/403") === true, r);
+  r = await get("/perfil", sVend);
+  esperar("vendedor /perfil 200", r.status === 200, r);
   r = await get("/login", sAdmin);
   esperar("logado em /login → /", r.status === 307 && r.location?.endsWith("/") === true, r);
 

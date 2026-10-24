@@ -130,12 +130,17 @@ export async function atualizarUsuario(
 ): Promise<Resultado> {
   const alvo = await db.usuario.findUnique({ where: { id: usuarioId }, select: { id: true, papel: true } });
   if (!alvo) return { ok: false, erro: "USUARIO_NAO_ENCONTRADO" };
-  // Mexer em alguém exige poder atribuir o papel ATUAL dele (gestor não toca admin)
-  // e, se houver mudança de papel, o papel NOVO também.
-  if (!podeAtribuirPapel(por.papel, alvo.papel)) return { ok: false, erro: "PAPEL_NAO_PERMITIDO" };
-  if (dados.papel !== undefined && !podeAtribuirPapel(por.papel, dados.papel)) return { ok: false, erro: "PAPEL_NAO_PERMITIDO" };
-  if (alvo.id === por.id && (dados.ativo === false || (dados.papel !== undefined && dados.papel !== por.papel))) {
-    return { ok: false, erro: "NAO_PODE_ALTERAR_A_SI" };
+  const ehEu = alvo.id === por.id;
+  const soPerfil = dados.papel === undefined && dados.ativo === undefined;
+  // Qualquer um edita o próprio nome/telefone. Fora isso: mexer em alguém exige
+  // poder atribuir o papel ATUAL dele (gestor não toca admin) e, se houver
+  // mudança de papel, o papel NOVO também; e ninguém se rebaixa/desativa.
+  if (!(ehEu && soPerfil)) {
+    if (!podeAtribuirPapel(por.papel, alvo.papel)) return { ok: false, erro: "PAPEL_NAO_PERMITIDO" };
+    if (dados.papel !== undefined && !podeAtribuirPapel(por.papel, dados.papel)) return { ok: false, erro: "PAPEL_NAO_PERMITIDO" };
+    if (ehEu && (dados.ativo === false || (dados.papel !== undefined && dados.papel !== por.papel))) {
+      return { ok: false, erro: "NAO_PODE_ALTERAR_A_SI" };
+    }
   }
 
   const tel = dados.telefone !== undefined ? resolverTelefone(dados.telefone) : null;

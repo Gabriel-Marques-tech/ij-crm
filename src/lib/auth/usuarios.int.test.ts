@@ -202,6 +202,22 @@ describe("atualizarUsuario", () => {
     expect(await atualizarUsuario(a.id, { ativo: false }, a)).toEqual({ ok: false, erro: "NAO_PODE_ALTERAR_A_SI" });
   });
 
+  it("vendedor edita o próprio nome e telefone", async () => {
+    const v = await db.usuario.create({ data: { nome: "V", email: "v@ij.test", papel: "VENDEDOR" } });
+    expect(await atualizarUsuario(v.id, { nome: "Vera", telefone: "11 97777-6666" }, v)).toEqual({ ok: true });
+    const u = await db.usuario.findUniqueOrThrow({ where: { id: v.id } });
+    expect(u.nome).toBe("Vera");
+    expect(u.telefoneWhatsapp).toBe("+5511977776666");
+  });
+
+  it("vendedor não muda o próprio papel nem se desativa, nem edita outro usuário", async () => {
+    const v = await db.usuario.create({ data: { nome: "V", email: "v@ij.test", papel: "VENDEDOR" } });
+    const w = await db.usuario.create({ data: { nome: "W", email: "w@ij.test", papel: "VENDEDOR" } });
+    expect(await atualizarUsuario(v.id, { papel: "GESTOR" }, v)).toEqual({ ok: false, erro: "PAPEL_NAO_PERMITIDO" });
+    expect(await atualizarUsuario(v.id, { ativo: false }, v)).toEqual({ ok: false, erro: "PAPEL_NAO_PERMITIDO" });
+    expect(await atualizarUsuario(w.id, { nome: "X" }, v)).toEqual({ ok: false, erro: "PAPEL_NAO_PERMITIDO" });
+  });
+
   it("telefone já usado por outro usuário → TELEFONE_EM_USO", async () => {
     const a = await admin();
     await db.usuario.create({ data: { nome: "V", email: "v@ij.test", papel: "VENDEDOR", telefoneWhatsapp: "+5511977776666" } });

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { logoutAction } from "@/lib/auth/actions";
@@ -19,16 +20,18 @@ export function Topbar({ usuario }: { usuario: UsuarioSessao }) {
       </span>
       <span className="hidden md:block" />
       <div className="flex items-center gap-3">
-        <div className="hidden text-right sm:block">
-          <p className="text-sm leading-tight text-fg-soft">{usuario.nome}</p>
-          <p className="eyebrow">{ROTULO_PAPEL[usuario.papel]}</p>
-        </div>
-        <div
-          className="flex h-8 w-8 items-center justify-center rounded-full border border-border-strong bg-surface font-mono text-xs text-fg-soft"
-          aria-hidden
-        >
-          {iniciais(usuario.nome)}
-        </div>
+        <Link href="/perfil" className="flex items-center gap-3 rounded-lg px-2 py-1 hover:bg-surface-hover" title="Meu perfil">
+          <div className="hidden text-right sm:block">
+            <p className="text-sm leading-tight text-fg-soft">{usuario.nome}</p>
+            <p className="eyebrow">{ROTULO_PAPEL[usuario.papel]}</p>
+          </div>
+          <div
+            className="flex h-8 w-8 items-center justify-center rounded-full border border-border-strong bg-surface font-mono text-xs text-fg-soft"
+            aria-hidden
+          >
+            {iniciais(usuario.nome)}
+          </div>
+        </Link>
         <form action={logoutAction}>
           <Button type="submit" variant="ghost" size="icon" aria-label="Sair" title="Sair">
             <LogOut className="h-4 w-4" />
