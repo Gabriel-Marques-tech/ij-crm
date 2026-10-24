@@ -196,6 +196,9 @@ model Fase {
   tipoTerminal      TipoTerminal? @map("tipo_terminal")
   cor               String?
   limiteDiasAlerta  Int?          @map("limite_dias_alerta")
+  // Fase com histórico (transicao_fase.de_fase_id é RESTRICT) não pode ser
+  // apagada: é arquivada. Some do Kanban e da criação de cards, mantém o histórico.
+  arquivadaEm       DateTime?     @map("arquivada_em")
   criadoEm          DateTime      @default(now()) @map("criado_em")
   atualizadoEm      DateTime      @updatedAt @map("atualizado_em")
 
