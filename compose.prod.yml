@@ -1,14 +1,22 @@
 # Produção (GAB-30) — VPS Linux, docker compose puro (design §4.1).
 #
 #   cp .env.prod.example .env    # e preencha (ver comentários lá)
-#   scripts/deploy.sh            # build → backup → migrations (one-shot) → up -d → health
+#   scripts/deploy.sh            # checa → build → backup → migrations (one-shot) → up -d → health
 #
 # Migrations NÃO rodam no boot do app: são o serviço one-shot `migrate`
 # (perfil `ops`), chamado pelo deploy.sh antes de subir a imagem nova.
-# Só o Caddy publica portas (80/443). App e Evolution ficam na rede `edge`
-# (alcançados pelo Caddy e com saída para a internet: Anthropic, WhatsApp);
-# bancos e Redis só na rede `interno`, sem saída nenhuma.
 # Runbook: docs/runbook.md.
+#
+# Exposição: só o Caddy publica portas para fora (80/443) e só serve o app.
+# A Evolution NÃO tem rota pública: a porta dela é publicada só em 127.0.0.1 da
+# VPS, acessada por túnel SSH (runbook §5).
+#
+# Redes (alcance mínimo; `internal` = sem saída para a internet):
+#   edge            caddy, app            — Caddy → app; saída do app (API da Anthropic)
+#   rede-app        app, db, migrate      — internal
+#   rede-whatsapp   app, evolution        — internal; app → Evolution e webhook Evolution → app
+#   rede-evolution  evolution, evolution-db, evolution-redis — internal
+#   evolution-saida evolution             — saída para o WhatsApp + porta em 127.0.0.1
 
 # Nome fixo: não colide com o projeto de dev (`ij-crm`, mesmo diretório).
 # COMPOSE_PROJECT_NAME ou `-p` sobrescrevem (teste local usa outro nome).
@@ -35,7 +43,6 @@ services:
       - "${HTTPS_PORT:-443}:443/udp"
     environment:
       APP_DOMAIN: ${APP_DOMAIN:?defina APP_DOMAIN no .env}
-      EVOLUTION_DOMAIN: ${EVOLUTION_DOMAIN:?defina EVOLUTION_DOMAIN no .env}
       ACME_EMAIL: ${ACME_EMAIL:?defina ACME_EMAIL no .env}
     volumes:
       # :z = label SELinux (hosts Fedora/RHEL); inofensivo em Debian/Ubuntu.
@@ -69,13 +76,14 @@ services:
       EVOLUTION_INSTANCE: ${EVOLUTION_INSTANCE:-ij-crm}
       EVOLUTION_WEBHOOK_SECRET: ${EVOLUTION_WEBHOOK_SECRET:?defina EVOLUTION_WEBHOOK_SECRET no .env}
       GRUPO_JID: ${GRUPO_JID:-}
-      # Safe mode: só "true" libera envio real. Só o .env de PRODUÇÃO define true.
+      # Safe mode: só "true" libera envio real. Só o .env da VPS define true.
       NOTIFICATIONS_ENABLED: ${NOTIFICATIONS_ENABLED:-false}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       LLM_EXTRACAO_MODELO: ${LLM_EXTRACAO_MODELO:-claude-sonnet-5-5}
       LLM_CLASSIFICACAO_MODELO: ${LLM_CLASSIFICACAO_MODELO:-claude-haiku-5-5}
+      # Único controle de acesso a /api/cron/* (header x-cron-secret, GAB-41).
       CRON_SECRET: ${CRON_SECRET:?defina CRON_SECRET no .env}
-    networks: [edge, interno]
+    networks: [edge, rede-app, rede-whatsapp]
     depends_on:
       db:
         condition: service_healthy
@@ -86,8 +94,8 @@ services:
       start_period: 20s
       retries: 5
 
-  # One-shot: `docker compose -f compose.prod.yml run --rm migrate` (deploy.sh faz isso).
-  # Também serve para seed e admin: `... run --rm migrate ./node_modules/.bin/prisma db seed`.
+  # One-shot: `docker compose -f compose.prod.yml --profile ops run --rm migrate` (deploy.sh faz isso).
+  # Também serve para seed e admin: `... run --rm migrate prisma db seed`.
   migrate:
     image: ${OPS_IMAGE:-ij-crm/ops}:${APP_TAG:-latest}
     build:
@@ -96,7 +104,7 @@ services:
     profiles: ["ops"]
     logging: *logging
     environment: *app-env
-    networks: [interno]
+    networks: [rede-app]
     depends_on:
       db:
         condition: service_healthy
@@ -112,7 +120,7 @@ services:
       POSTGRES_DB: ijcrm
     volumes:
       - db_data:/var/lib/postgresql/data
-    networks: [interno]
+    networks: [rede-app]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ijcrm -d ijcrm"]
       interval: 5s
@@ -120,15 +128,28 @@ services:
       retries: 10
 
   # ---- WhatsApp: Evolution API v2 (mesma config de privacidade do compose.yml de dev) ----
+  # O que a Evolution v2.3.7 guarda com esta config (lido no código-fonte da v2.3.7):
+  #   evolution-db  instância, config do webhook e `creds` do Baileys (tabela Session);
+  #                 mensagens/contatos/chats NÃO (DATABASE_SAVE_DATA_*=false).
+  #   redis         chaves Signal do Baileys (pre-keys, sessions, sender-keys) — sem elas
+  #                 a sessão do WhatsApp quebra, por isso AOF; marcadores de dedup
+  #                 (jid_timestamp, TTL 5 min), mapa de ids de mensagem editada (24h) e
+  #                 metadados de grupo (nome + JIDs dos participantes). Nenhum corpo de mensagem.
+  #   /evolution/instances  chaves Signal só quando o Redis está desligado (aqui fica vazio).
   evolution:
     image: evoapicloud/evolution-api:v2.3.7
     restart: unless-stopped
     logging: *logging
+    # SÓ loopback da VPS: acesso por túnel SSH (`ssh -L 8080:127.0.0.1:8080 vps`, runbook §5).
+    ports:
+      - "127.0.0.1:${EVOLUTION_HOST_PORT:-8080}:8080"
     environment:
-      # URL pública (atrás do Caddy): usada pela Evolution para montar links do manager.
-      SERVER_URL: https://${EVOLUTION_DOMAIN}
+      # Endereço visto pelo operador através do túnel SSH.
+      SERVER_URL: http://localhost:${EVOLUTION_HOST_PORT:-8080}
       AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY:?defina EVOLUTION_API_KEY no .env}
-      AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES: "true"
+      # false: o token da instância não vai no corpo do webhook nem no fetchInstances.
+      # O webhook autentica só pelo header x-webhook-secret (webhook.headers da instância).
+      AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES: "false"
       DATABASE_PROVIDER: postgresql
       DATABASE_CONNECTION_URI: postgresql://evolution:${EVOLUTION_DB_PASSWORD:?defina EVOLUTION_DB_PASSWORD no .env}@evolution-db:5432/evolution?schema=public
       DATABASE_CONNECTION_CLIENT_NAME: ij-crm
@@ -142,11 +163,12 @@ services:
       DATABASE_SAVE_DATA_HISTORIC: "false"
       DATABASE_SAVE_IS_ON_WHATSAPP: "false"
       CACHE_REDIS_ENABLED: "true"
-      CACHE_REDIS_URI: redis://evolution-redis:6379/1
+      CACHE_REDIS_URI: redis://:${EVOLUTION_REDIS_PASSWORD:?defina EVOLUTION_REDIS_PASSWORD no .env}@evolution-redis:6379/1
       CACHE_REDIS_PREFIX_KEY: evolution
+      # false: `creds` ficam só no evolution-db (Redis guarda as chaves Signal de qualquer jeito).
       CACHE_REDIS_SAVE_INSTANCES: "false"
       CACHE_LOCAL_ENABLED: "false"
-      # Webhook é configurado POR INSTÂNCIA (runbook); o global fica desligado.
+      # Webhook é configurado POR INSTÂNCIA (runbook §5); o global fica desligado.
       WEBHOOK_GLOBAL_ENABLED: "false"
       WEBHOOK_EVENTS_MESSAGES_UPSERT: "true"
       # Re-tentativas: 5xx/timeout re-tentam; 4xx não (app devolve 4xx só para erro definitivo).
@@ -162,11 +184,13 @@ services:
       DEL_INSTANCE: "false"
       QRCODE_LIMIT: "30"
       LANGUAGE: pt-BR
-      LOG_LEVEL: ERROR,WARN,INFO
+      # Sem INFO/LOG/VERBOSE/WEBHOOKS: na v2.3.7 o corpo da mensagem é logado em
+      # VERBOSE (messageRaw) e o payload do webhook em WEBHOOKS.
+      LOG_LEVEL: ERROR,WARN
       LOG_BAILEYS: error
     volumes:
       - evolution_instances:/evolution/instances
-    networks: [edge, interno]
+    networks: [evolution-saida, rede-whatsapp, rede-evolution]
     depends_on:
       evolution-db:
         condition: service_healthy
@@ -189,7 +213,7 @@ services:
       POSTGRES_DB: evolution
     volumes:
       - evolution_db_data:/var/lib/postgresql/data
-    networks: [interno]
+    networks: [rede-evolution]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U evolution -d evolution"]
       interval: 5s
@@ -200,21 +224,29 @@ services:
     image: redis:7-alpine
     restart: unless-stopped
     logging: *logging
-    command: redis-server --appendonly yes
+    # AOF: guarda as chaves Signal do Baileys (ver comentário da `evolution`).
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${EVOLUTION_REDIS_PASSWORD:?defina EVOLUTION_REDIS_PASSWORD no .env}"]
+    environment:
+      # redis-cli do healthcheck autentica por esta variável.
+      REDISCLI_AUTH: ${EVOLUTION_REDIS_PASSWORD}
     volumes:
       - evolution_redis_data:/data
-    networks: [interno]
+    networks: [rede-evolution]
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
       interval: 5s
       timeout: 3s
       retries: 10
 
 networks:
   edge:
-  interno:
-    # Sem rota para fora: bancos/Redis não falam com a internet.
+  rede-app:
     internal: true
+  rede-whatsapp:
+    internal: true
+  rede-evolution:
+    internal: true
+  evolution-saida:
 
 volumes:
   db_data:
