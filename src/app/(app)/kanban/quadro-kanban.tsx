@@ -20,9 +20,11 @@ import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalList
 import { CSS } from "@dnd-kit/utilities";
 import { ChevronsLeftRight, Plus } from "lucide-react";
 import { cn } from "cn";
+import { MensagemErro } from "@/components/erros/mensagem-erro";
 import { ConfirmarTerminal, type PedidoTerminal } from "@/components/kanban/confirmar-terminal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { executarAcao, type FalhaUI } from "@/lib/erros/cliente";
 import { criarCardAction, moverCardAction } from "./actions";
 import { CardVisual } from "./card-visual";
 import { desfazerMovimento } from "./otimista";
@@ -44,7 +46,7 @@ export function QuadroKanban({ pipelineId, fases, cards: cardsServidor, agoraMs 
   const [ativo, setAtivo] = useState<CardCliente | null>(null);
   const [expandidas, setExpandidas] = useState<Set<string>>(new Set());
   const [pedido, setPedido] = useState<(PedidoTerminal & { cardId: string; faseId: string }) | null>(null);
-  const [erro, setErro] = useState<string | null>(null);
+  const [erro, setErro] = useState<FalhaUI | null>(null);
   const [, startTransition] = useTransition();
   const router = useRouter();
 
@@ -70,18 +72,13 @@ export function QuadroKanban({ pipelineId, fases, cards: cardsServidor, agoraMs 
     // Otimista: vai para o topo da coluna destino, zerando os dias na fase.
     setCards((cs) => [{ ...original, faseId: paraFaseId, faseDesdeMs: Date.now() }, ...cs.filter((c) => c.id !== cardId)]);
     startTransition(async () => {
-      let r: { erro?: string };
-      try {
-        r = await moverCardAction(cardId, paraFaseId);
-      } catch {
-        r = { erro: "Falha de rede ao mover o card." };
-      }
-      if (r.erro) {
+      const falha = await executarAcao(() => moverCardAction(cardId, paraFaseId), "mover o card");
+      if (falha) {
         // Reconcilia com o estado ATUAL (outros movimentos podem ter acontecido
         // nesse meio-tempo): desfaz só este movimento, e só se o card ainda está
         // onde o otimista o pôs. Depois busca a verdade no servidor.
         setCards((cs) => desfazerMovimento(cs, cardId, paraFaseId, original));
-        setErro(r.erro);
+        setErro(falha);
         router.refresh();
       }
     });
@@ -123,9 +120,9 @@ export function QuadroKanban({ pipelineId, fases, cards: cardsServidor, agoraMs 
   return (
     <>
       {erro ? (
-        <p role="alert" className="mb-4 rounded-lg border border-danger/50 bg-surface px-3 py-2 text-sm text-fg-soft">
-          {erro}
-        </p>
+        <div className="mb-4 rounded-lg border border-danger/50 bg-surface px-3 py-2">
+          <MensagemErro falha={erro} className="text-sm" />
+        </div>
       ) : null}
       <DndContext
         id={`kanban-${pipelineId}`}
@@ -282,7 +279,7 @@ function CardArrastavel({ card, fase, agoraMs }: { card: CardCliente; fase: Fase
 
 function NovoCard({ pipelineId, faseId, onFim }: { pipelineId: string; faseId: string; onFim: () => void }) {
   const [titulo, setTitulo] = useState("");
-  const [erro, setErro] = useState<string | null>(null);
+  const [erro, setErro] = useState<FalhaUI | null>(null);
   const [pendente, startTransition] = useTransition();
 
   function enviar(e: React.FormEvent) {
@@ -290,13 +287,8 @@ function NovoCard({ pipelineId, faseId, onFim }: { pipelineId: string; faseId: s
     if (!titulo.trim()) return onFim();
     setErro(null);
     startTransition(async () => {
-      let r: { erro?: string };
-      try {
-        r = await criarCardAction(pipelineId, faseId, titulo);
-      } catch {
-        r = { erro: "Falha de rede ao criar o card. Tente de novo." };
-      }
-      if (r.erro) setErro(r.erro);
+      const falha = await executarAcao(() => criarCardAction(pipelineId, faseId, titulo), "criar o card");
+      if (falha) setErro(falha);
       else {
         setTitulo("");
         onFim();
@@ -316,11 +308,7 @@ function NovoCard({ pipelineId, faseId, onFim }: { pipelineId: string; faseId: s
         maxLength={200}
         disabled={pendente}
       />
-      {erro ? (
-        <p role="alert" className="mt-1 text-xs text-danger">
-          {erro}
-        </p>
-      ) : null}
+      <MensagemErro falha={erro} className="mt-1" />
       <div className="mt-2 flex justify-end gap-1">
         <Button type="button" variant="ghost" size="xs" onClick={onFim}>
           Cancelar

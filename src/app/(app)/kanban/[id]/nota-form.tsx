@@ -2,24 +2,22 @@
 
 import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
+import { MensagemErro } from "@/components/erros/mensagem-erro";
+import { executarAcao, type FalhaUI } from "@/lib/erros/cliente";
 import { adicionarNotaAction } from "../actions";
 
 export function NotaForm({ cardId }: { cardId: string }) {
   const [texto, setTexto] = useState("");
-  const [erro, setErro] = useState<string | null>(null);
+  const [erro, setErro] = useState<FalhaUI | null>(null);
   const [pendente, startTransition] = useTransition();
 
   function enviar(e: React.FormEvent) {
     e.preventDefault();
     if (!texto.trim()) return;
     startTransition(async () => {
-      let r: { erro?: string };
-      try {
-        r = await adicionarNotaAction(cardId, texto);
-      } catch {
-        r = { erro: "Falha de rede ao salvar a nota. O texto continua aqui; tente de novo." };
-      }
-      if (r.erro) setErro(r.erro);
+      // Em falha o texto continua no campo para tentar de novo.
+      const falha = await executarAcao(() => adicionarNotaAction(cardId, texto), "registrar a nota");
+      if (falha) setErro(falha);
       else {
         setErro(null);
         setTexto("");
@@ -44,11 +42,7 @@ export function NotaForm({ cardId }: { cardId: string }) {
         placeholder="Escreva uma nota (Ctrl+Enter envia)"
         className="w-full resize-y rounded-lg border border-input bg-input/30 px-2.5 py-1.5 text-sm text-foreground outline-none placeholder:text-fg-faint focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
       />
-      {erro ? (
-        <p role="alert" className="text-xs text-danger">
-          {erro}
-        </p>
-      ) : null}
+      <MensagemErro falha={erro} />
       <div className="flex justify-end">
         <Button type="submit" size="sm" disabled={pendente || !texto.trim()}>
           Adicionar nota

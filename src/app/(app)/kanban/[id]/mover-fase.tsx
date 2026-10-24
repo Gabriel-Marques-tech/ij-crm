@@ -2,24 +2,21 @@
 
 import { useState, useTransition } from "react";
 import { ConfirmarTerminal, type PedidoTerminal } from "@/components/kanban/confirmar-terminal";
+import { MensagemErro } from "@/components/erros/mensagem-erro";
+import { executarAcao, type FalhaUI } from "@/lib/erros/cliente";
 import { moverCardAction } from "../actions";
 import type { FaseCliente } from "../tipos";
 
 /** Mover de fase pelo detalhe (alternativa ao arrasto, boa no celular). */
 export function MoverFase({ cardId, titulo, faseAtualId, fases }: { cardId: string; titulo: string; faseAtualId: string; fases: FaseCliente[] }) {
   const [pedido, setPedido] = useState<(PedidoTerminal & { faseId: string }) | null>(null);
-  const [erro, setErro] = useState<string | null>(null);
+  const [erro, setErro] = useState<FalhaUI | null>(null);
   const [pendente, startTransition] = useTransition();
 
   function mover(faseId: string) {
     setErro(null);
     startTransition(async () => {
-      try {
-        const r = await moverCardAction(cardId, faseId);
-        if (r.erro) setErro(r.erro);
-      } catch {
-        setErro("Falha de rede ao mover o card. Tente de novo.");
-      }
+      setErro(await executarAcao(() => moverCardAction(cardId, faseId), "mover o card"));
     });
   }
 
@@ -49,11 +46,7 @@ export function MoverFase({ cardId, titulo, faseAtualId, fases }: { cardId: stri
           </option>
         ))}
       </select>
-      {erro ? (
-        <p role="alert" className="mt-1 text-xs text-danger">
-          {erro}
-        </p>
-      ) : null}
+      <MensagemErro falha={erro} className="mt-1" />
       <ConfirmarTerminal
         pedido={pedido}
         onCancelar={() => setPedido(null)}

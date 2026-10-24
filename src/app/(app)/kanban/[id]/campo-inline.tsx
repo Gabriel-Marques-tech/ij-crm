@@ -4,6 +4,8 @@ import { useState, useTransition } from "react";
 import { cn } from "cn";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { MensagemErro } from "@/components/erros/mensagem-erro";
+import { executarAcao, type FalhaUI } from "@/lib/erros/cliente";
 import type { CampoEditavel } from "@/lib/oportunidades/campos";
 import { editarCampoAction } from "../actions";
 
@@ -41,7 +43,7 @@ export function CampoInline({
 }) {
   const [editando, setEditando] = useState(false);
   const [rascunho, setRascunho] = useState(valor);
-  const [erro, setErro] = useState<string | null>(null);
+  const [erro, setErro] = useState<FalhaUI | null>(null);
   const [pendente, startTransition] = useTransition();
   const idCampo = `campo-${campo}`;
 
@@ -52,13 +54,8 @@ export function CampoInline({
       return;
     }
     startTransition(async () => {
-      let r: { erro?: string };
-      try {
-        r = await editarCampoAction(cardId, campo, novo);
-      } catch {
-        r = { erro: "Falha de rede ao salvar. Tente de novo." };
-      }
-      if (r.erro) setErro(r.erro);
+      const falha = await executarAcao(() => editarCampoAction(cardId, campo, novo), `salvar ${rotulo.toLowerCase()}`);
+      if (falha) setErro(falha);
       else {
         setErro(null);
         setEditando(false);
@@ -161,17 +158,13 @@ export function CampoInline({
           abrir link ↗
         </a>
       ) : null}
-      {erro ? (
-        <p role="alert" className="mt-1 text-xs text-danger">
-          {erro}
-        </p>
-      ) : null}
+      <MensagemErro falha={erro} className="mt-1" />
     </div>
   );
 }
 
 export function RevisarSwitch({ cardId, valor }: { cardId: string; valor: boolean }) {
-  const [erro, setErro] = useState<string | null>(null);
+  const [erro, setErro] = useState<FalhaUI | null>(null);
   const [pendente, startTransition] = useTransition();
   return (
     <div>
@@ -181,22 +174,13 @@ export function RevisarSwitch({ cardId, valor }: { cardId: string; valor: boolea
           disabled={pendente}
           onCheckedChange={(v) =>
             startTransition(async () => {
-              try {
-                const r = await editarCampoAction(cardId, "revisar", v ? "true" : "false");
-                setErro(r.erro ?? null);
-              } catch {
-                setErro("Falha de rede ao salvar. Tente de novo.");
-              }
+              setErro(await executarAcao(() => editarCampoAction(cardId, "revisar", v ? "true" : "false"), "salvar revisar"));
             })
           }
         />
         Marcar para revisar
       </label>
-      {erro ? (
-        <p role="alert" className="mt-1 text-xs text-danger">
-          {erro}
-        </p>
-      ) : null}
+      <MensagemErro falha={erro} className="mt-1" />
     </div>
   );
 }
