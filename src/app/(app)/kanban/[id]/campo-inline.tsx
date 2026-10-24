@@ -52,7 +52,12 @@ export function CampoInline({
       return;
     }
     startTransition(async () => {
-      const r = await editarCampoAction(cardId, campo, novo);
+      let r: { erro?: string };
+      try {
+        r = await editarCampoAction(cardId, campo, novo);
+      } catch {
+        r = { erro: "Falha de rede ao salvar. Tente de novo." };
+      }
       if (r.erro) setErro(r.erro);
       else {
         setErro(null);
@@ -176,8 +181,12 @@ export function RevisarSwitch({ cardId, valor }: { cardId: string; valor: boolea
           disabled={pendente}
           onCheckedChange={(v) =>
             startTransition(async () => {
-              const r = await editarCampoAction(cardId, "revisar", v ? "true" : "false");
-              setErro(r.erro ?? null);
+              try {
+                const r = await editarCampoAction(cardId, "revisar", v ? "true" : "false");
+                setErro(r.erro ?? null);
+              } catch {
+                setErro("Falha de rede ao salvar. Tente de novo.");
+              }
             })
           }
         />

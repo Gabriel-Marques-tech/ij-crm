@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import {
   DndContext,
   DragOverlay,
@@ -24,6 +25,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { criarCardAction, moverCardAction } from "./actions";
 import { CardVisual } from "./card-visual";
+import { desfazerMovimento } from "./otimista";
 import type { CardCliente, FaseCliente } from "./tipos";
 
 type Props = { pipelineId: string; fases: FaseCliente[]; cards: CardCliente[]; agoraMs: number };
@@ -44,6 +46,7 @@ export function QuadroKanban({ pipelineId, fases, cards: cardsServidor, agoraMs 
   const [pedido, setPedido] = useState<(PedidoTerminal & { cardId: string; faseId: string }) | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [, startTransition] = useTransition();
+  const router = useRouter();
 
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
@@ -74,14 +77,12 @@ export function QuadroKanban({ pipelineId, fases, cards: cardsServidor, agoraMs 
         r = { erro: "Falha de rede ao mover o card." };
       }
       if (r.erro) {
-        // Rollback só deste card, na posição original.
-        setCards((cs) => {
-          const sem = cs.filter((c) => c.id !== cardId);
-          const i = cardsServidor.findIndex((c) => c.id === cardId);
-          sem.splice(Math.max(0, Math.min(i, sem.length)), 0, original);
-          return sem;
-        });
+        // Reconcilia com o estado ATUAL (outros movimentos podem ter acontecido
+        // nesse meio-tempo): desfaz só este movimento, e só se o card ainda está
+        // onde o otimista o pôs. Depois busca a verdade no servidor.
+        setCards((cs) => desfazerMovimento(cs, cardId, paraFaseId, original));
         setErro(r.erro);
+        router.refresh();
       }
     });
   }
@@ -210,9 +211,12 @@ function Coluna({
             <ChevronsLeftRight />
           </Button>
         ) : null}
-        <Button variant="ghost" size="icon-xs" aria-label={`Novo card em ${fase.nome}`} title="Novo card" onClick={() => setCriando(true)}>
-          <Plus />
-        </Button>
+        {/* Terminal não recebe card novo: ganho/perdido só por movimento (gancho GAB-32). */}
+        {!fase.isTerminal ? (
+          <Button variant="ghost" size="icon-xs" aria-label={`Novo card em ${fase.nome}`} title="Novo card" onClick={() => setCriando(true)}>
+            <Plus />
+          </Button>
+        ) : null}
       </header>
       {fase.limiteDiasAlerta !== null ? <p className="-mt-1 px-3 pb-2 font-mono text-[10px] text-fg-faint">alerta ≥ {fase.limiteDiasAlerta}d</p> : null}
 
@@ -286,7 +290,12 @@ function NovoCard({ pipelineId, faseId, onFim }: { pipelineId: string; faseId: s
     if (!titulo.trim()) return onFim();
     setErro(null);
     startTransition(async () => {
-      const r = await criarCardAction(pipelineId, faseId, titulo);
+      let r: { erro?: string };
+      try {
+        r = await criarCardAction(pipelineId, faseId, titulo);
+      } catch {
+        r = { erro: "Falha de rede ao criar o card. Tente de novo." };
+      }
       if (r.erro) setErro(r.erro);
       else {
         setTitulo("");

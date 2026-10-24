@@ -13,7 +13,12 @@ export function NotaForm({ cardId }: { cardId: string }) {
     e.preventDefault();
     if (!texto.trim()) return;
     startTransition(async () => {
-      const r = await adicionarNotaAction(cardId, texto);
+      let r: { erro?: string };
+      try {
+        r = await adicionarNotaAction(cardId, texto);
+      } catch {
+        r = { erro: "Falha de rede ao salvar a nota. O texto continua aqui; tente de novo." };
+      }
       if (r.erro) setErro(r.erro);
       else {
         setErro(null);

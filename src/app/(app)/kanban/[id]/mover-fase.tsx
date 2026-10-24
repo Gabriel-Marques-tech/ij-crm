@@ -14,8 +14,12 @@ export function MoverFase({ cardId, titulo, faseAtualId, fases }: { cardId: stri
   function mover(faseId: string) {
     setErro(null);
     startTransition(async () => {
-      const r = await moverCardAction(cardId, faseId);
-      if (r.erro) setErro(r.erro);
+      try {
+        const r = await moverCardAction(cardId, faseId);
+        if (r.erro) setErro(r.erro);
+      } catch {
+        setErro("Falha de rede ao mover o card. Tente de novo.");
+      }
     });
   }
 
