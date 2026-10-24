@@ -110,6 +110,16 @@ em fase terminal; todo movimento grava `TransicaoFase` (origem `UI`) + Timeline
 hoje no-op — GAB-32 preenche (ganho → projeto, valor fechado, motivo de perda) sem tomar outros
 locks além dos de `pipelinesExtrasDoTerminal`.
 
+## Erros e debug
+
+Exceção inesperada numa server action não vira tela de erro: a action devolve
+`erro: "INESPERADO"` com uma `ref` curta (8 hex), mostrada ao usuário ("Erro no servidor
+(ref: abc123de)"). Peça a ref e procure no log do servidor: `grep 'ref=abc123de'` (ou
+`docker compose logs app | grep ref=abc123de`). A linha traz contexto, tipo e 3 frames do stack;
+erro do Prisma só loga `code` + `target`/`modelName` (a mensagem ecoa dados da query).
+"Sem conexão com o servidor" = a chamada nem chegou (rede/servidor fora). Helper:
+`src/lib/erros/registrar.ts` (`comTratamento` / `comTratamentoForm`).
+
 ## Testes
 
 `pnpm test` roda unitários e de integração. Os de integração (`*.int.test.ts`)
