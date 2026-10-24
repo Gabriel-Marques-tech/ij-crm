@@ -1,8 +1,8 @@
 /**
  * Camada de envio para a Evolution API v2 (`POST /message/sendText/{instancia}`).
  * Padrões herdados do LocPay (design doc §7): safe mode por `NOTIFICATIONS_ENABLED`,
- * timeout de 60s, JID de grupo. O bot nunca inicia conversa — só quem já tem
- * uma mensagem para citar chama isto.
+ * timeout de 60s cobrindo request E leitura do corpo, JID de grupo. O bot nunca
+ * inicia conversa — só quem já tem uma mensagem para citar chama isto.
  */
 import { db } from "@/lib/db";
 import { configEvolution, notificacoesAtivas } from "@/lib/config/env";
@@ -15,6 +15,12 @@ export type Citacao = {
   eventoId: string;
   /** JID do remetente original (obrigatório em grupo para a citação renderizar). */
   participant?: string;
+  /**
+   * Texto da mensagem citada. Vai em `quoted.message.conversation` para a
+   * Evolution não precisar guardar mensagens no banco dela
+   * (`DATABASE_SAVE_DATA_NEW_MESSAGE=false` no compose — design doc §2).
+   */
+  texto?: string;
 };
 
 export type EnvioWhatsApp = {
@@ -37,6 +43,19 @@ export class ErroEnvioWhatsApp extends Error {
   }
 }
 
+/** Lê o JSON respeitando o mesmo sinal de abort da requisição (corpo que nunca chega também é timeout). */
+function lerJson(resposta: Response, sinal: AbortSignal): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    const abortar = () => reject(new DOMException("leitura do corpo abortada", "AbortError"));
+    if (sinal.aborted) return abortar();
+    sinal.addEventListener("abort", abortar, { once: true });
+    resposta
+      .json()
+      .then(resolve, () => resolve(null))
+      .finally(() => sinal.removeEventListener("abort", abortar));
+  });
+}
+
 export async function enviarWhatsApp({ para, texto, citar, oportunidadeId = null }: EnvioWhatsApp): Promise<ResultadoEnvio> {
   if (!notificacoesAtivas()) {
     console.info(`[SAFE MODE] WhatsApp NÃO enviado para ${mascararJid(para)}`);
@@ -46,33 +65,36 @@ export async function enviarWhatsApp({ para, texto, citar, oportunidadeId = null
   const { apiUrl, apiKey, instancia } = configEvolution();
   const corpo: Record<string, unknown> = { number: para, text: texto };
   if (citar) {
-    // Só a key: a Evolution busca o conteúdo citado no banco dela
-    // (exige DATABASE_SAVE_DATA_NEW_MESSAGE=true, ligado no compose).
-    corpo.quoted = { key: { id: citar.eventoId, remoteJid: para, fromMe: false, participant: citar.participant } };
+    corpo.quoted = {
+      key: { id: citar.eventoId, remoteJid: para, fromMe: false, participant: citar.participant },
+      ...(citar.texto ? { message: { conversation: citar.texto } } : {}),
+    };
   }
 
   const controlador = new AbortController();
   const timer = setTimeout(() => controlador.abort(), TIMEOUT_ENVIO_MS);
-  let resposta: Response;
+  let json: unknown;
+  let status: number;
   try {
-    resposta = await fetch(`${apiUrl}/message/sendText/${encodeURIComponent(instancia)}`, {
+    const resposta = await fetch(`${apiUrl}/message/sendText/${encodeURIComponent(instancia)}`, {
       method: "POST",
       headers: { "content-type": "application/json", apikey: apiKey },
       body: JSON.stringify(corpo),
       signal: controlador.signal,
     });
+    status = resposta.status;
+    if (!resposta.ok) throw new ErroEnvioWhatsApp(`Evolution sendText respondeu HTTP ${status}`, status);
+    json = await lerJson(resposta, controlador.signal);
   } catch (e) {
-    const motivo = e instanceof Error && e.name === "AbortError" ? `timeout após ${TIMEOUT_ENVIO_MS}ms` : "falha de rede";
+    if (e instanceof ErroEnvioWhatsApp) throw e;
+    const motivo = controlador.signal.aborted ? `timeout após ${TIMEOUT_ENVIO_MS}ms` : "falha de rede";
     throw new ErroEnvioWhatsApp(`Evolution sendText: ${motivo}`);
   } finally {
     clearTimeout(timer);
   }
 
-  if (!resposta.ok) throw new ErroEnvioWhatsApp(`Evolution sendText respondeu HTTP ${resposta.status}`, resposta.status);
-
-  const json = (await resposta.json().catch(() => null)) as { key?: { id?: unknown } } | null;
-  const eventoId = typeof json?.key?.id === "string" ? json.key.id : null;
-  if (!eventoId) throw new ErroEnvioWhatsApp("Evolution sendText sem key.id na resposta", resposta.status);
+  const eventoId = (json as { key?: { id?: unknown } } | null)?.key?.id;
+  if (typeof eventoId !== "string" || !eventoId) throw new ErroEnvioWhatsApp("Evolution sendText sem key.id na resposta", status);
 
   await db.mensagemEnviada.create({ data: { eventoId, grupoJid: para, texto, oportunidadeId } });
   console.info(`[whatsapp] enviado para ${mascararJid(para)} (evento ${eventoId})`);
