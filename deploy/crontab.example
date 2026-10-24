@@ -1,0 +1,20 @@
+# Crontab do HOST de produção (GAB-30). Instalar como o usuário que roda o
+# docker (precisa estar no grupo `docker`), com o repo em /opt/ij-crm:
+#
+#   sudo mkdir -p /var/backups/ij-crm /var/log/ij-crm
+#   sudo chown "$USER" /var/backups/ij-crm /var/log/ij-crm
+#   crontab deploy/crontab.example     # ATENÇÃO: substitui o crontab atual do usuário
+#   crontab -l                         # conferir
+#
+# Os scripts leem segredos e domínio de /opt/ij-crm/.env — nada de segredo aqui.
+# Horários em UTC se o host estiver em UTC (padrão de VPS); 06:15 UTC = 03:15 BRT.
+
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# Backup diário dos bancos (pg_dump -Fc), retenção de 14 dias em /var/backups/ij-crm.
+15 6 * * * /opt/ij-crm/scripts/backup.sh >> /var/log/ij-crm/backup.log 2>&1
+
+# Reprocessar mensagens pendentes/FALHA a cada 10 min (rota do GAB-41; até ela
+# existir, o app responde 404 e a linha só registra erro no log).
+*/10 * * * * /opt/ij-crm/scripts/cron-reprocessar.sh >> /var/log/ij-crm/cron.log 2>&1
