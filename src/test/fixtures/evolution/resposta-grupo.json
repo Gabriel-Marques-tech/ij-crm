@@ -1,0 +1,42 @@
+{
+  "event": "messages.upsert",
+  "instance": "ij-crm",
+  "data": {
+    "key": {
+      "remoteJid": "120363000000000001@g.us",
+      "fromMe": false,
+      "id": "3EB0A1B2C3D4E5F60002",
+      "participant": "5511999998888@s.whatsapp.net"
+    },
+    "pushName": "João Vendedor",
+    "status": "DELIVERY_ACK",
+    "message": {
+      "extendedTextMessage": {
+        "text": "é da Economia Sensata #CRM",
+        "contextInfo": {
+          "stanzaId": "3EB0A1B2C3D4E5F60001",
+          "participant": "5511999998888@s.whatsapp.net",
+          "quotedMessage": {
+            "conversation": "#crm falei com o Gustavo da Economia Sensata, mando proposta sexta"
+          }
+        }
+      }
+    },
+    "contextInfo": {
+      "stanzaId": "3EB0A1B2C3D4E5F60001",
+      "participant": "5511999998888@s.whatsapp.net",
+      "quotedMessage": {
+        "conversation": "#crm falei com o Gustavo da Economia Sensata, mando proposta sexta"
+      }
+    },
+    "messageType": "extendedTextMessage",
+    "messageTimestamp": 1761307260,
+    "instanceId": "7c1f8a3e-0000-4000-8000-000000000001",
+    "source": "android"
+  },
+  "destination": "http://app:3000/api/webhooks/evolution",
+  "date_time": "2026-10-24T12:01:00.000Z",
+  "sender": "5511900000000@s.whatsapp.net",
+  "server_url": "http://localhost:8080",
+  "apikey": "CHAVE-DA-INSTANCIA"
+}
