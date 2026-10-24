@@ -23,6 +23,23 @@ pnpm db:seed               # pipelines e fases do Pipefy
 pnpm dev
 ```
 
+## Primeiro acesso
+
+```bash
+ADMIN_NOME="Seu Nome" ADMIN_EMAIL=voce@ij.com ADMIN_SENHA='min 8 chars' pnpm admin:criar
+```
+
+Entre em `/login`. Em **Gestão → Usuários** gere convites: o link é mostrado uma vez,
+vale 7 dias, e quem abre define a própria senha. Papéis: `VENDEDOR` (opera),
+`GESTOR` (+ usuários, fases, import), `ADMIN` (+ config técnica). Sessões vivem no
+banco (`sessao`): desativar alguém derruba o acesso na hora.
+
+## Testes
+
+`pnpm test` roda unitários e de integração. Os de integração (`*.int.test.ts`)
+usam o Postgres do compose no schema `ijcrm_test`, migrado automaticamente —
+suba o `db` antes (`docker compose up -d db`).
+
 ## Comandos
 
 | comando | faz |
@@ -43,4 +60,7 @@ Vitest. Um container de app, um Postgres, Evolution API no mesmo compose (GAB-28
 - Tema escuro único; tokens em `src/app/globals.css`, nunca hex solto em componente.
 - Domínio em português (`Oportunidade`, `Fase`, `Contato`); tabelas `snake_case` via `@map`.
 - `NOTIFICATIONS_ENABLED` **nunca** `true` fora de produção — envios só são logados.
+- **Toda página que lê dados e toda server action chama `exigirUsuario()` /
+  `exigirPapel()`** (`src/lib/auth/atual.ts`). O guard do layout `(app)` não
+  re-executa em navegação client-side; o `proxy.ts` só checa presença do cookie.
 - Commits em Conventional Commits; branch + PR; PR revisado antes de merge.
