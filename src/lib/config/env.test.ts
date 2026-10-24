@@ -1,7 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { ConfigAusente, configEvolution, grupoJid, notificacoesAtivas, segredoWebhook } from "./env";
+import {
+  chaveApiEvolution,
+  ConfigAusente,
+  ConfigFraca,
+  configEvolution,
+  diagnosticarSegredo,
+  grupoJid,
+  notificacoesAtivas,
+  segredoWebhook,
+} from "./env";
 
 const envOriginal = { ...process.env };
+const FORTE = "a".repeat(32);
 
 beforeEach(() => {
   for (const k of Object.keys(process.env)) if (k.startsWith("EVOLUTION_") || k === "GRUPO_JID" || k === "NOTIFICATIONS_ENABLED") delete process.env[k];
@@ -11,13 +21,47 @@ afterEach(() => {
   process.env = { ...envOriginal };
 });
 
+describe("diagnosticarSegredo", () => {
+  it.each([
+    [undefined, "AUSENTE"],
+    ["", "AUSENTE"],
+    ["   ", "AUSENTE"],
+    ["troque-me-openssl-rand-hex-32-xxxxxxxxxx", "PLACEHOLDER"],
+    ["troque-me", "PLACEHOLDER"],
+    ["curto-demais", "CURTO"],
+    ["a".repeat(31), "CURTO"],
+  ] as const)("%j → %s", (valor, motivo) => {
+    if (valor === undefined) delete process.env.EVOLUTION_WEBHOOK_SECRET;
+    else process.env.EVOLUTION_WEBHOOK_SECRET = valor;
+    expect(diagnosticarSegredo("EVOLUTION_WEBHOOK_SECRET")).toEqual({ ok: false, motivo });
+  });
+
+  it("32+ chars sem placeholder → ok", () => {
+    process.env.EVOLUTION_WEBHOOK_SECRET = FORTE;
+    expect(diagnosticarSegredo("EVOLUTION_WEBHOOK_SECRET")).toEqual({ ok: true, valor: FORTE });
+  });
+});
+
 describe("env", () => {
-  it("segredoWebhook e grupoJid: vazio/ausente → undefined (quem chama falha fechado)", () => {
+  it("segredoWebhook: ausente, placeholder ou curto → undefined (quem chama falha fechado)", () => {
     expect(segredoWebhook()).toBeUndefined();
-    process.env.EVOLUTION_WEBHOOK_SECRET = "   ";
+    process.env.EVOLUTION_WEBHOOK_SECRET = "troque-me-openssl-rand-hex-32-xxxxxxxxxx";
     expect(segredoWebhook()).toBeUndefined();
     process.env.EVOLUTION_WEBHOOK_SECRET = "s3gr3do";
-    expect(segredoWebhook()).toBe("s3gr3do");
+    expect(segredoWebhook()).toBeUndefined();
+    process.env.EVOLUTION_WEBHOOK_SECRET = FORTE;
+    expect(segredoWebhook()).toBe(FORTE);
+  });
+
+  it("chaveApiEvolution segue a mesma regra", () => {
+    expect(chaveApiEvolution()).toBeUndefined();
+    process.env.EVOLUTION_API_KEY = "curta";
+    expect(chaveApiEvolution()).toBeUndefined();
+    process.env.EVOLUTION_API_KEY = FORTE;
+    expect(chaveApiEvolution()).toBe(FORTE);
+  });
+
+  it("grupoJid: vazio → undefined", () => {
     expect(grupoJid()).toBeUndefined();
     process.env.GRUPO_JID = "120363000000000001@g.us";
     expect(grupoJid()).toBe("120363000000000001@g.us");
@@ -28,13 +72,23 @@ describe("env", () => {
     process.env.EVOLUTION_INSTANCE = "ij-crm";
     expect(() => configEvolution()).toThrow(ConfigAusente);
     expect(() => configEvolution()).toThrow(/EVOLUTION_API_KEY/);
-    process.env.EVOLUTION_API_KEY = "k";
-    expect(configEvolution()).toEqual({ apiUrl: "http://localhost:8080", apiKey: "k", instancia: "ij-crm" });
+    process.env.EVOLUTION_API_KEY = FORTE;
+    expect(configEvolution()).toEqual({ apiUrl: "http://localhost:8080", apiKey: FORTE, instancia: "ij-crm" });
+  });
+
+  it("configEvolution lança ConfigFraca para chave placeholder ou curta", () => {
+    process.env.EVOLUTION_API_URL = "http://localhost:8080";
+    process.env.EVOLUTION_INSTANCE = "ij-crm";
+    process.env.EVOLUTION_API_KEY = "troque-me-openssl-rand-hex-32-xxxxxxxxxx";
+    expect(() => configEvolution()).toThrow(ConfigFraca);
+    expect(() => configEvolution()).toThrow(/PLACEHOLDER/);
+    process.env.EVOLUTION_API_KEY = "curta";
+    expect(() => configEvolution()).toThrow(/CURTO/);
   });
 
   it("configEvolution remove barra final da URL", () => {
     process.env.EVOLUTION_API_URL = "http://localhost:8080/";
-    process.env.EVOLUTION_API_KEY = "k";
+    process.env.EVOLUTION_API_KEY = FORTE;
     process.env.EVOLUTION_INSTANCE = "ij-crm";
     expect(configEvolution().apiUrl).toBe("http://localhost:8080");
   });
