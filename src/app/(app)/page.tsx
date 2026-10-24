@@ -10,16 +10,28 @@ const hoje = new Intl.DateTimeFormat("pt-BR", {
   timeZone: "America/Sao_Paulo",
 });
 
-// Data do dia muda a cada request: rota dinâmica, sem prerender (Next 16).
+const horaSP = new Intl.DateTimeFormat("en-US", { hour: "numeric", hour12: false, timeZone: "America/Sao_Paulo" });
+
+export function saudacao(agora: Date): string {
+  const h = Number(horaSP.format(agora));
+  if (h < 5) return "Boa madrugada.";
+  if (h < 12) return "Bom dia.";
+  if (h < 18) return "Boa tarde.";
+  return "Boa noite.";
+}
+
+// Data/hora mudam a cada request: rota dinâmica, sem prerender. `instant = false`
+// é a saída que o próprio `next build` (16.x) indica para rotas bloqueantes.
 export const instant = false;
 
 export default async function HomePage() {
   await connection();
+  const agora = new Date();
   return (
     <>
       <PageHeader
-        eyebrow={hoje.format(new Date())}
-        title="Boa tarde."
+        eyebrow={hoje.format(agora)}
+        title={saudacao(agora)}
         description="Sua semana aparece aqui quando o Kanban e as próximas ações existirem (GAB-29, GAB-33)."
       />
 

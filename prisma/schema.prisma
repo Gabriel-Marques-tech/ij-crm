@@ -2,12 +2,15 @@
 // Nomes de domínio em português; tabelas/colunas em snake_case via @map.
 
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  // pg_trgm/unaccent: busca de CANDIDATOS por nome (§4.3). Autolink nunca usa isso.
+  extensions = [pg_trgm, unaccent]
 }
 
 // ---------------------------------------------------------------- enums
@@ -72,12 +75,12 @@ model Usuario {
   id                String    @id @default(cuid())
   nome              String
   email             String    @unique
-  senhaHash         String    @default("") @map("senha_hash")
+  senhaHash         String?   @map("senha_hash") // null = ainda sem senha (convite pendente)
   papel             Papel     @default(VENDEDOR)
   telefoneWhatsapp  String?   @unique @map("telefone_whatsapp")
   whatsappLid       String?   @unique @map("whatsapp_lid")
   ativo             Boolean   @default(true)
-  conviteToken      String?   @unique @map("convite_token")
+  conviteTokenHash  String?   @unique @map("convite_token_hash") // sha256 do token; nunca o token em claro
   conviteExpiraEm   DateTime? @map("convite_expira_em")
   criadoEm          DateTime  @default(now()) @map("criado_em")
   atualizadoEm      DateTime  @updatedAt @map("atualizado_em")
@@ -112,6 +115,7 @@ model Empresa {
   oportunidades Oportunidade[]
 
   @@index([nome])
+  @@index([nome(ops: raw("gin_trgm_ops"))], type: Gin, map: "empresa_nome_trgm_idx")
   @@map("empresa")
 }
 
@@ -133,6 +137,7 @@ model Contato {
   oportunidades Oportunidade[]
 
   @@index([nome])
+  @@index([nome(ops: raw("gin_trgm_ops"))], type: Gin, map: "contato_nome_trgm_idx")
   @@index([empresaId])
   @@map("contato")
 }
@@ -212,7 +217,7 @@ model Oportunidade {
   proximaAcaoEm         DateTime?  @map("proxima_acao_em")
   revisar               Boolean    @default(false)
   faseDesde             DateTime   @default(now()) @map("fase_desde")
-  criadoVia             CriadoVia  @default(UI) @map("criado_via")
+  criadoVia             CriadoVia  @map("criado_via")
   origemOportunidadeId  String?    @map("origem_oportunidade_id")
   reabertaDeId          String?    @map("reaberta_de_id")
   pipefyId              String?    @unique @map("pipefy_id")
@@ -238,9 +243,13 @@ model Oportunidade {
   @@index([empresaId])
   @@index([contatoId])
   @@index([proximaAcaoEm])
+  @@index([origemOportunidadeId])
+  @@index([reabertaDeId])
   @@map("oportunidade")
 }
 
+// TransicaoFase e Timeline são append-only. onDelete: Cascade existe SÓ para a
+// "deleção definitiva" (admin, GAB-36); soft-delete nunca toca nestas tabelas.
 model TransicaoFase {
   id             String          @id @default(cuid())
   oportunidadeId String          @map("oportunidade_id")
@@ -251,11 +260,12 @@ model TransicaoFase {
   em             DateTime        @default(now())
 
   oportunidade   Oportunidade    @relation(fields: [oportunidadeId], references: [id], onDelete: Cascade)
-  deFase         Fase?           @relation("transicaoDe", fields: [deFaseId], references: [id])
+  deFase         Fase?           @relation("transicaoDe", fields: [deFaseId], references: [id], onDelete: Restrict)
   paraFase       Fase            @relation("transicaoPara", fields: [paraFaseId], references: [id])
   usuario        Usuario?        @relation(fields: [usuarioId], references: [id])
 
   @@index([oportunidadeId, em])
+  @@index([usuarioId])
   @@map("transicao_fase")
 }
 
@@ -273,6 +283,7 @@ model Timeline {
   mensagemBruta   MensagemBruta? @relation(fields: [mensagemBrutaId], references: [id])
 
   @@index([oportunidadeId, em])
+  @@index([mensagemBrutaId])
   @@map("timeline")
 }
 
@@ -281,7 +292,7 @@ model Timeline {
 model InboxEvento {
   eventoId   String   @id @map("evento_id")
   recebidoEm DateTime @default(now()) @map("recebido_em")
-  status     String   @default("PROCESSADO")
+  status     String   // PROCESSADO | FALHA — setado explicitamente pelo ingest, nunca por default
 
   @@map("inbox_evento")
 }
@@ -310,6 +321,7 @@ model MensagemBruta {
 
   @@index([status])
   @@index([remetenteUsuarioId, recebidaEm])
+  @@index([respondendoEventoId])
   @@map("mensagem_bruta")
 }
 

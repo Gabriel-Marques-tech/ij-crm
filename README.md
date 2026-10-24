@@ -7,14 +7,15 @@ pelo grupo de WhatsApp (Evolution API + LLM). Design completo em
 ## Setup (3 comandos)
 
 ```bash
-cp .env.example .env
-docker compose up          # Postgres + app com migrations e seed
-open http://localhost:3000
+cp .env.example .env       # e troque os segredos "troque-me-..." (openssl rand -hex 32)
+docker compose up          # Postgres + app com migrations e seed (1ª vez demora: instala deps)
+xdg-open http://localhost:3000   # ou abra no navegador
 ```
 
 ## Rodando nativo (mais rápido pra desenvolver)
 
 ```bash
+cp .env.example .env
 docker compose up -d db
 pnpm install
 pnpm prisma:migrate        # aplica migrations (cria se mudou o schema)
