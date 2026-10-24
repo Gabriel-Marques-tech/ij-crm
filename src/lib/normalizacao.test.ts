@@ -10,6 +10,10 @@ describe("normalizarEmail", () => {
     expect(normalizarEmail("joao")).toBeNull();
     expect(normalizarEmail("   ")).toBeNull();
   });
+
+  it("rejeita formas quebradas: '@', 'a@', '@b', sem domínio, com espaço", () => {
+    for (const e of ["@", "a@", "@b", "a@b", "a b@c.com", "a@c .com"]) expect(normalizarEmail(e)).toBeNull();
+  });
 });
 
 describe("normalizarTelefoneBr", () => {
@@ -31,6 +35,11 @@ describe("normalizarTelefoneBr", () => {
     expect(normalizarTelefoneBr("99999-8888")).toBeNull();
     expect(normalizarTelefoneBr("00 99999-8888")).toBeNull();
     expect(normalizarTelefoneBr("")).toBeNull();
+  });
+
+  it("rejeita DDI que não seja +55", () => {
+    expect(normalizarTelefoneBr("+1 555 123 4567")).toBeNull();
+    expect(normalizarTelefoneBr("+351 912 345 678")).toBeNull();
   });
 
   it("é idempotente", () => {

@@ -1,9 +1,10 @@
 "use server";
 
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { COOKIE_SESSAO, opcoesCookieSessao } from "./atual";
+import { limitadorLogin } from "./limitador";
 import { SESSAO_DURACAO_DIAS, criarSessao, encerrarSessao } from "./sessao";
 import { aceitarConvite, autenticar } from "./usuarios";
 
@@ -21,8 +22,16 @@ const loginSchema = z.object({ email: z.string().min(1), senha: z.string().min(1
 export async function loginAction(_prev: EstadoForm, form: FormData): Promise<EstadoForm> {
   const parsed = loginSchema.safeParse({ email: form.get("email"), senha: form.get("senha") });
   if (!parsed.success) return { erro: "Informe email e senha." };
+  const h = await headers();
+  const ip = h.get("x-forwarded-for")?.split(",")[0]?.trim() || h.get("x-real-ip") || "local";
+  const chave = `${parsed.data.email.trim().toLowerCase()}|${ip}`;
+  if (limitadorLogin.bloqueado(chave)) return { erro: "Muitas tentativas. Aguarde 15 minutos." };
   const r = await autenticar(parsed.data.email, parsed.data.senha);
-  if (!r.ok) return { erro: "Email ou senha incorretos." };
+  if (!r.ok) {
+    limitadorLogin.registrarFalha(chave);
+    return { erro: "Email ou senha incorretos." };
+  }
+  limitadorLogin.registrarSucesso(chave);
   await abrirSessao(r.usuarioId);
   redirect("/");
 }

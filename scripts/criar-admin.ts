@@ -1,7 +1,8 @@
 /**
  * Cria (ou promove) o primeiro admin. Uso:
  *   ADMIN_NOME="Gabriel" ADMIN_EMAIL=g@ij.com ADMIN_SENHA='...' pnpm tsx scripts/criar-admin.ts
- * Idempotente: se o email já existe, vira ADMIN ativo e a senha é redefinida.
+ * Se o email já existe, recusa — a menos que ADMIN_FORCAR=1 (aí redefine senha,
+ * promove a ADMIN e reativa). Evita resetar a conta de alguém por engano.
  */
 import { PrismaClient } from "@prisma/client";
 import { gerarHashSenha, senhaAtendeRegras } from "../src/lib/auth/senha";
@@ -16,6 +17,10 @@ async function main() {
   if (!nome || !email) throw new Error("Defina ADMIN_NOME e ADMIN_EMAIL.");
   if (!senhaAtendeRegras(senha)) throw new Error("ADMIN_SENHA precisa ter pelo menos 8 caracteres.");
 
+  const existente = await prisma.usuario.findUnique({ where: { email }, select: { id: true } });
+  if (existente && process.env.ADMIN_FORCAR !== "1") {
+    throw new Error(`${email} já existe. Para redefinir senha/promover, rode com ADMIN_FORCAR=1.`);
+  }
   const senhaHash = await gerarHashSenha(senha);
   const u = await prisma.usuario.upsert({
     where: { email },

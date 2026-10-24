@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { dbTeste, limparBanco } from "@/test/db";
 import { gerarHashSenha } from "./senha";
-import { aceitarConvite, atualizarUsuario, autenticar, criarConvite } from "./usuarios";
+import { aceitarConvite, atualizarUsuario, autenticar, criarConvite, reemitirConvite } from "./usuarios";
 import { criarSessao, encerrarSessao, obterUsuarioDaSessao } from "./sessao";
 
 const db = dbTeste();
@@ -95,6 +95,16 @@ describe("aceitarConvite", () => {
     expect(await aceitarConvite(c.token, "senha-forte-1")).toEqual({ ok: false, erro: "CONVITE_INVALIDO" });
   });
 
+  it("reemitir depois de aceito é rejeitado (não reabre conta ativa)", async () => {
+    const a = await admin();
+    const c = await criarConvite({ nome: "João", email: "joao@ij.test", papel: "VENDEDOR" }, a);
+    if (!c.ok) throw new Error("setup");
+    await aceitarConvite(c.token, "senha-forte-1");
+    expect(await reemitirConvite(c.usuarioId, a)).toEqual({ ok: false, erro: "CONVITE_INVALIDO" });
+    const u = await db.usuario.findUniqueOrThrow({ where: { id: c.usuarioId } });
+    expect(u.conviteTokenHash).toBeNull();
+  });
+
   it("token desconhecido é rejeitado", async () => {
     expect(await aceitarConvite("a".repeat(64), "senha-forte-1")).toEqual({ ok: false, erro: "CONVITE_INVALIDO" });
   });
@@ -147,6 +157,14 @@ describe("sessão", () => {
     const viva = await criarSessao(a.id);
     await db.usuario.update({ where: { id: a.id }, data: { ativo: false } });
     expect(await obterUsuarioDaSessao(viva)).toBeNull();
+  });
+
+  it("banco guarda só o hash do cookie, nunca o valor em claro", async () => {
+    const a = await admin();
+    const id = await criarSessao(a.id);
+    expect(await db.sessao.findUnique({ where: { id } })).toBeNull();
+    expect(await db.sessao.count({ where: { usuarioId: a.id } })).toBe(1);
+    expect(await obterUsuarioDaSessao(id)).not.toBeNull();
   });
 
   it("sessão desconhecida não resolve", async () => {

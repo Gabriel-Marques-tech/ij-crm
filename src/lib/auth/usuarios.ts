@@ -21,6 +21,8 @@ export type Resultado<T = object> = ({ ok: true } & T) | { ok: false; erro: Erro
 
 type Ator = Pick<Usuario, "id" | "papel">;
 
+class ErroConcorrencia extends Error {}
+
 function resolverTelefone(entrada: string | null | undefined): Resultado<{ telefone: string | null }> {
   if (entrada === undefined || entrada === null || entrada.trim() === "") return { ok: true, telefone: null };
   const t = normalizarTelefoneBr(entrada);
@@ -78,10 +80,12 @@ export async function reemitirConvite(usuarioId: string, por: Ator): Promise<Res
   if (!podeAtribuirPapel(por.papel, u.papel)) return { ok: false, erro: "PAPEL_NAO_PERMITIDO" };
   if (u.senhaHash !== null) return { ok: false, erro: "CONVITE_INVALIDO" };
   const convite = gerarConvite();
-  await db.usuario.update({
-    where: { id: usuarioId },
+  // `senhaHash: null` no where: se um aceite correu no meio, não reabre a conta.
+  const r = await db.usuario.updateMany({
+    where: { id: usuarioId, senhaHash: null },
     data: { conviteTokenHash: convite.hash, conviteExpiraEm: convite.expiraEm },
   });
+  if (r.count === 0) return { ok: false, erro: "CONVITE_INVALIDO" };
   return { ok: true, token: convite.token, expiraEm: convite.expiraEm };
 }
 
@@ -139,8 +143,10 @@ export async function atualizarUsuario(
 
   try {
     await db.$transaction(async (tx) => {
-      await tx.usuario.update({
-        where: { id: usuarioId },
+      // `papel: alvo.papel` no where: se o alvo foi promovido entre a leitura e
+      // a escrita, a atualização não acontece (gestor nunca edita admin).
+      const r = await tx.usuario.updateMany({
+        where: { id: usuarioId, papel: alvo.papel },
         data: {
           ...(dados.nome !== undefined ? { nome: dados.nome.trim() } : {}),
           ...(tel ? { telefoneWhatsapp: tel.telefone } : {}),
@@ -148,9 +154,11 @@ export async function atualizarUsuario(
           ...(dados.ativo !== undefined ? { ativo: dados.ativo } : {}),
         },
       });
+      if (r.count === 0) throw new ErroConcorrencia();
       if (dados.ativo === false) await tx.sessao.deleteMany({ where: { usuarioId } });
     });
   } catch (e) {
+    if (e instanceof ErroConcorrencia) return { ok: false, erro: "PAPEL_NAO_PERMITIDO" };
     if (ehViolacaoDeUnique(e, "telefone_whatsapp")) return { ok: false, erro: "TELEFONE_EM_USO" };
     throw e;
   }

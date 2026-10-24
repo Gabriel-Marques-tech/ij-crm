@@ -4,12 +4,21 @@
  */
 import { PrismaClient } from "@prisma/client";
 
+export const SCHEMA_TESTE = "ijcrm_test";
+
+/** Garante que TRUNCATE/migrate dos testes nunca apontam para outro schema. */
 export function urlDeTeste(): string {
-  if (process.env.DATABASE_URL_TEST) return process.env.DATABASE_URL_TEST;
-  const base = process.env.DATABASE_URL ?? "postgresql://ijcrm:ijcrm@localhost:5432/ijcrm";
-  const u = new URL(base);
-  u.searchParams.set("schema", "ijcrm_test");
-  return u.toString();
+  let url: URL;
+  if (process.env.DATABASE_URL_TEST) {
+    url = new URL(process.env.DATABASE_URL_TEST);
+  } else {
+    url = new URL(process.env.DATABASE_URL ?? "postgresql://ijcrm:ijcrm@localhost:5432/ijcrm");
+    url.searchParams.set("schema", SCHEMA_TESTE);
+  }
+  if (url.searchParams.get("schema") !== SCHEMA_TESTE) {
+    throw new Error(`URL de teste precisa usar schema=${SCHEMA_TESTE} (recebido: ${url.searchParams.get("schema")})`);
+  }
+  return url.toString();
 }
 
 let cliente: PrismaClient | undefined;
@@ -21,6 +30,7 @@ export function dbTeste(): PrismaClient {
 
 /** TRUNCATE em cascata nas tabelas de domínio (ordem não importa). */
 export async function limparBanco(tabelas: string[]) {
+  urlDeTeste(); // revalida o schema antes de qualquer destruição
   const db = dbTeste();
   const lista = tabelas.map((t) => `"${t}"`).join(", ");
   await db.$executeRawUnsafe(`TRUNCATE TABLE ${lista} RESTART IDENTITY CASCADE`);

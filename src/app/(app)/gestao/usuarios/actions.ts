@@ -30,7 +30,12 @@ const conviteSchema = z.object({
 });
 
 function linkConvite(token: string): string {
-  const base = (process.env.APP_URL ?? "http://localhost:3000").replace(/\/+$/, "");
+  const base = process.env.APP_URL?.replace(/\/+$/, "");
+  if (!base) {
+    // Fail-closed em produção (§4.6): link errado = convite inutilizável em silêncio.
+    if (process.env.NODE_ENV === "production") throw new Error("APP_URL não configurada");
+    return `http://localhost:3000/convite/${token}`;
+  }
   return `${base}/convite/${token}`;
 }
 
