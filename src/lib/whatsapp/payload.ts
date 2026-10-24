@@ -15,6 +15,12 @@ const contextInfoSchema = z
   })
   .optional();
 
+/** Conteúdo textual depois de tirar os envelopes (efêmera, view-once, edição). */
+const conteudoSchema = z.object({
+  conversation: z.string().optional(),
+  extendedTextMessage: z.object({ text: z.string().optional(), contextInfo: contextInfoSchema }).optional(),
+});
+
 const payloadSchema = z.object({
   event: z.string(),
   instance: z.string().optional(),
@@ -26,12 +32,7 @@ const payloadSchema = z.object({
       participant: z.string().optional(),
       participantAlt: z.string().optional(),
     }),
-    message: z
-      .object({
-        conversation: z.string().optional(),
-        extendedTextMessage: z.object({ text: z.string().optional(), contextInfo: contextInfoSchema }).optional(),
-      })
-      .optional(),
+    message: z.record(z.string(), z.unknown()).optional(),
     contextInfo: contextInfoSchema,
     messageType: z.string().optional(),
     messageTimestamp: z.coerce.number().optional(),
@@ -56,12 +57,20 @@ export type MensagemRecebida = {
 
 export type MotivoIgnorar = "PAYLOAD_INVALIDO" | "EVENTO_DIFERENTE" | "FROM_ME" | "OUTRO_CHAT" | "SEM_TEXTO";
 
-export type Interpretacao = { tipo: "IGNORAR"; motivo: MotivoIgnorar } | { tipo: "PROCESSAR"; mensagem: MensagemRecebida };
+export type Interpretacao =
+  | { tipo: "IGNORAR"; motivo: Exclude<MotivoIgnorar, "PAYLOAD_INVALIDO"> }
+  /** `caminhos` = paths do zod (só nomes de campo, nunca valores) para o log. */
+  | { tipo: "IGNORAR"; motivo: "PAYLOAD_INVALIDO"; caminhos: string[] }
+  | { tipo: "PROCESSAR"; mensagem: MensagemRecebida };
 
 export const EVENTO_MENSAGEM = "messages.upsert";
 
-/** `#crm` isolado (início/fim ou cercado por não-alfanumérico), sem distinguir caixa. */
-const TAG_CRM = /(?<![\p{L}\p{N}_#])#crm(?![\p{L}\p{N}_])/iu;
+/**
+ * `#crm` como palavra: antes vem início do texto, espaço ou formatação do
+ * WhatsApp (`_`, `*`, `~`); depois vem fim, espaço, formatação ou pontuação.
+ * Não casa dentro de URL (`/#crm`, `?x#crm`) nem colado em palavra (`foo#crm`).
+ */
+const TAG_CRM = /(?:^|[\s_*~])#crm(?=$|[\s_*~.,;:!?)\]}"'’”])/iu;
 
 export function temTagCrm(texto: string): boolean {
   return TAG_CRM.test(texto);
@@ -90,26 +99,58 @@ export function identificarParticipante(participant: string | undefined, partici
   return { telefone, lid };
 }
 
-function extrairTexto(message: PayloadEvolution["data"]["message"]): string | null {
-  const t = message?.conversation ?? message?.extendedTextMessage?.text ?? null;
-  const limpo = t?.trim();
-  return limpo ? limpo : null;
+type Conteudo = Record<string, unknown>;
+
+/** Envelopes do Baileys cujo `.message` carrega o conteúdo real. */
+const ENVELOPES = [
+  "ephemeralMessage",
+  "viewOnceMessage",
+  "viewOnceMessageV2",
+  "viewOnceMessageV2Extension",
+  "editedMessage",
+  // Documento com legenda: o interno é `documentMessage` → sem texto na v1 (mídia).
+  "documentWithCaptionMessage",
+] as const;
+
+/**
+ * Tira envelopes até chegar no conteúdo. Edição chega como
+ * `editedMessage.message.protocolMessage.editedMessage` — a edição vira uma
+ * mensagem nova (key.id próprio); a original já persistida não é alterada na v1.
+ */
+export function desembrulharConteudo(m: Conteudo | undefined, profundidade = 0): Conteudo | undefined {
+  if (!m || profundidade > 6) return m;
+  for (const envelope of ENVELOPES) {
+    const interno = (m[envelope] as { message?: Conteudo } | undefined)?.message;
+    if (interno && typeof interno === "object") return desembrulharConteudo(interno, profundidade + 1);
+  }
+  const editado = (m.protocolMessage as { editedMessage?: Conteudo } | undefined)?.editedMessage;
+  if (editado && typeof editado === "object") return desembrulharConteudo(editado, profundidade + 1);
+  return m;
+}
+
+function caminhosDe(erro: z.ZodError): string[] {
+  return [...new Set(erro.issues.map((i) => i.path.join(".") || "(raiz)"))];
 }
 
 export function interpretarPayload(json: unknown, grupoJid: string): Interpretacao {
   const r = payloadSchema.safeParse(json);
-  if (!r.success) return { tipo: "IGNORAR", motivo: "PAYLOAD_INVALIDO" };
+  if (!r.success) return { tipo: "IGNORAR", motivo: "PAYLOAD_INVALIDO", caminhos: caminhosDe(r.error) };
   const { event, data } = r.data;
 
   if (event !== EVENTO_MENSAGEM) return { tipo: "IGNORAR", motivo: "EVENTO_DIFERENTE" };
   if (data.key.fromMe) return { tipo: "IGNORAR", motivo: "FROM_ME" };
   if (data.key.remoteJid !== grupoJid) return { tipo: "IGNORAR", motivo: "OUTRO_CHAT" };
 
-  // v1 só lê texto. Áudio/imagem ficam para depois (design doc §2, não-objetivos).
-  const texto = extrairTexto(data.message);
+  const conteudo = conteudoSchema.safeParse(desembrulharConteudo(data.message) ?? {});
+  if (!conteudo.success) {
+    return { tipo: "IGNORAR", motivo: "PAYLOAD_INVALIDO", caminhos: caminhosDe(conteudo.error).map((c) => `data.message.${c}`) };
+  }
+
+  // v1 só lê texto. Áudio/imagem/documento ficam para depois (design doc §2, não-objetivos).
+  const texto = (conteudo.data.conversation ?? conteudo.data.extendedTextMessage?.text ?? "").trim();
   if (!texto) return { tipo: "IGNORAR", motivo: "SEM_TEXTO" };
 
-  const contexto = data.message?.extendedTextMessage?.contextInfo ?? data.contextInfo;
+  const contexto = conteudo.data.extendedTextMessage?.contextInfo ?? data.contextInfo;
   const ts = data.messageTimestamp;
   return {
     tipo: "PROCESSAR",

@@ -1,0 +1,28 @@
+{
+  "event": "messages.upsert",
+  "instance": "ij-crm",
+  "data": {
+    "key": {
+      "remoteJid": "120363000000000001@g.us",
+      "fromMe": false,
+      "id": "3EB0A1B2C3D4E5F60007",
+      "participant": "123456789012345@lid",
+      "participantAlt": "5511999998888@s.whatsapp.net",
+      "addressingMode": "lid"
+    },
+    "pushName": "João Vendedor",
+    "status": "DELIVERY_ACK",
+    "message": {
+      "conversation": "#crm Gustavo pediu a proposta revisada"
+    },
+    "messageType": "conversation",
+    "messageTimestamp": 1761307560,
+    "instanceId": "7c1f8a3e-0000-4000-8000-000000000001",
+    "source": "android"
+  },
+  "destination": "http://app:3000/api/webhooks/evolution",
+  "date_time": "2026-10-24T12:06:00.000Z",
+  "sender": "5511900000000@s.whatsapp.net",
+  "server_url": "http://localhost:8080",
+  "apikey": "CHAVE-DA-INSTANCIA"
+}

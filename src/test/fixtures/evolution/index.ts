@@ -1,7 +1,10 @@
+import editada from "./editada.json";
+import efemera from "./efemera.json";
 import fromMe from "./from-me.json";
 import imagem from "./imagem.json";
 import outroChat from "./outro-chat.json";
 import outroEvento from "./outro-evento.json";
+import participantAlt from "./participant-alt.json";
 import participanteLid from "./participante-lid.json";
 import respostaGrupo from "./resposta-grupo.json";
 import textoGrupo from "./texto-grupo.json";
@@ -13,6 +16,9 @@ const FIXTURES = {
   "texto-grupo": textoGrupo,
   "resposta-grupo": respostaGrupo,
   "participante-lid": participanteLid,
+  "participant-alt": participantAlt,
+  efemera,
+  editada,
   "from-me": fromMe,
   imagem,
   "outro-evento": outroEvento,
