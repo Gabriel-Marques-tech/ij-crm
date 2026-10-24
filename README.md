@@ -98,6 +98,16 @@ Nesta fatia (GAB-28) o bot só reage a mensagens com `#crm` de usuários ativos 
 `remetente_desconhecido`) e descartado sem persistir conteúdo. Classificação e LLM entram no
 GAB-34/GAB-39.
 
+## Kanban
+
+`/kanban` (Vendas; `?quadro=projetos` para Projetos) e detalhe em `/kanban/[id]`. Serviço em
+`src/lib/oportunidades/`: criar/mover tomam o lock do pipeline (`travarPipeline`) e recusam fase
+arquivada ou de outro quadro; todo movimento grava `TransicaoFase` (origem `UI`) + Timeline
+`MOVIMENTACAO`, e cada campo editado vira `CAMPO_ALTERADO { campo, antes, depois }`. Cor de
+"dias na fase" (`aging.ts`): sem limite → neutro; `< 70%` do limite → verde; até o limite → âmbar;
+`≥ limite` → vermelho. Entrada em fase terminal passa por `aoEntrarEmTerminal` (`terminal.ts`),
+hoje no-op — GAB-32 preenche (ganho → projeto, valor fechado, motivo de perda).
+
 ## Testes
 
 `pnpm test` roda unitários e de integração. Os de integração (`*.int.test.ts`)
