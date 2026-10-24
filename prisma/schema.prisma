@@ -10,7 +10,7 @@ datasource db {
   provider   = "postgresql"
   url        = env("DATABASE_URL")
   // pg_trgm/unaccent: busca de CANDIDATOS por nome (§4.3). Autolink nunca usa isso.
-  extensions = [pg_trgm, unaccent]
+  extensions = [pg_trgm(schema: "public"), unaccent(schema: "public")]
 }
 
 // ---------------------------------------------------------------- enums
@@ -89,8 +89,23 @@ model Usuario {
   transicoes        TransicaoFase[]
   timeline          Timeline[]
   mensagensBrutas   MensagemBruta[]
+  sessoes           Sessao[]
 
   @@map("usuario")
+}
+
+// Sessão no banco (não JWT): desativar usuário derruba o acesso na hora.
+model Sessao {
+  id        String   @id // random 32 bytes hex — é o valor do cookie
+  usuarioId String   @map("usuario_id")
+  expiraEm  DateTime @map("expira_em")
+  criadoEm  DateTime @default(now()) @map("criado_em")
+
+  usuario   Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  @@index([usuarioId])
+  @@index([expiraEm])
+  @@map("sessao")
 }
 
 // ---------------------------------------------------------------- empresas / contatos
@@ -181,6 +196,9 @@ model Fase {
   tipoTerminal      TipoTerminal? @map("tipo_terminal")
   cor               String?
   limiteDiasAlerta  Int?          @map("limite_dias_alerta")
+  // Fase com histórico (transicao_fase.de_fase_id é RESTRICT) não pode ser
+  // apagada: é arquivada. Some do Kanban e da criação de cards, mantém o histórico.
+  arquivadaEm       DateTime?     @map("arquivada_em")
   criadoEm          DateTime      @default(now()) @map("criado_em")
   atualizadoEm      DateTime      @updatedAt @map("atualizado_em")
 

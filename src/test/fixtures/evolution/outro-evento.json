@@ -1,0 +1,19 @@
+{
+  "event": "messages.update",
+  "instance": "ij-crm",
+  "data": {
+    "key": {
+      "remoteJid": "120363000000000001@g.us",
+      "fromMe": false,
+      "id": "3EB0A1B2C3D4E5F60001",
+      "participant": "5511999998888@s.whatsapp.net"
+    },
+    "status": "READ",
+    "messageId": "cm0000000000000000000000"
+  },
+  "destination": "http://app:3000/api/webhooks/evolution",
+  "date_time": "2026-10-24T12:05:00.000Z",
+  "sender": "5511900000000@s.whatsapp.net",
+  "server_url": "http://localhost:8080",
+  "apikey": "CHAVE-DA-INSTANCIA"
+}

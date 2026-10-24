@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { NAV_ITEMS, isActive } from "./nav-config";
+import { NAV_ITEMS, isActive, itensParaPapel } from "./nav-config";
+
+describe("itensParaPapel", () => {
+  it("vendedor não vê Gestão; gestor e admin veem", () => {
+    expect(itensParaPapel("VENDEDOR").map((i) => i.href)).not.toContain("/gestao");
+    expect(itensParaPapel("GESTOR").map((i) => i.href)).toContain("/gestao");
+    expect(itensParaPapel("ADMIN").map((i) => i.href)).toContain("/gestao");
+  });
+});
 
 describe("isActive", () => {
   it("raiz só casa exato", () => {

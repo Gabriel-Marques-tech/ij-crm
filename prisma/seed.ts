@@ -1,6 +1,5 @@
+import { pathToFileURL } from "node:url";
 import { PrismaClient, TipoTerminal } from "@prisma/client";
-
-const prisma = new PrismaClient();
 
 type FaseSeed = {
   chave: string;
@@ -11,7 +10,7 @@ type FaseSeed = {
 };
 
 // Fases do Pipefy, na ordem (design doc §4.2).
-const PIPELINES: { chave: string; nome: string; ordem: number; fases: FaseSeed[] }[] = [
+export const PIPELINES: { chave: string; nome: string; ordem: number; fases: FaseSeed[] }[] = [
   {
     chave: "vendas",
     nome: "Vendas",
@@ -41,37 +40,52 @@ const PIPELINES: { chave: string; nome: string; ordem: number; fases: FaseSeed[]
   },
 ];
 
-async function main() {
+/**
+ * Idempotente. Pipelines: upsert (nome/ordem). Fases: criadas SÓ junto com o
+ * pipeline, na primeira instalação. Se o pipeline já existia, as fases são do
+ * gestor (Gestão → Fases): re-seed não reordena, não renomeia, não desarquiva
+ * e não ressuscita fase excluída.
+ */
+export async function semear(prisma: PrismaClient, opts: { log?: (msg: string) => void } = {}) {
+  const log = opts.log ?? console.log;
   for (const p of PIPELINES) {
-    const pipeline = await prisma.pipeline.upsert({
-      where: { chave: p.chave },
-      update: { nome: p.nome, ordem: p.ordem },
-      create: { chave: p.chave, nome: p.nome, ordem: p.ordem },
-    });
-    for (const [ordem, f] of p.fases.entries()) {
-      await prisma.fase.upsert({
-        where: { pipelineId_chave: { pipelineId: pipeline.id, chave: f.chave } },
-        // Só atualiza o que é "de sistema"; nome/cor/limite ficam com o gestor após o 1º seed.
-        update: { ordem, isTerminal: !!f.tipoTerminal, tipoTerminal: f.tipoTerminal ?? null },
-        create: {
-          pipelineId: pipeline.id,
-          chave: f.chave,
-          nome: f.nome,
-          ordem,
-          isTerminal: !!f.tipoTerminal,
-          tipoTerminal: f.tipoTerminal ?? null,
-          cor: f.cor ?? null,
-          limiteDiasAlerta: f.limiteDiasAlerta ?? null,
-        },
-      });
+    const existente = await prisma.pipeline.findUnique({ where: { chave: p.chave }, select: { id: true } });
+    if (existente) {
+      await prisma.pipeline.update({ where: { id: existente.id }, data: { nome: p.nome, ordem: p.ordem } });
+      log(`seed: pipeline ${p.chave} já existe — fases não tocadas`);
+      continue;
     }
-    console.log(`seed: pipeline ${p.chave} (${p.fases.length} fases)`);
+    await prisma.pipeline.create({
+      data: {
+        chave: p.chave,
+        nome: p.nome,
+        ordem: p.ordem,
+        fases: {
+          create: p.fases.map((f, ordem) => ({
+            chave: f.chave,
+            nome: f.nome,
+            ordem,
+            isTerminal: !!f.tipoTerminal,
+            tipoTerminal: f.tipoTerminal ?? null,
+            cor: f.cor ?? null,
+            limiteDiasAlerta: f.limiteDiasAlerta ?? null,
+          })),
+        },
+      },
+    });
+    log(`seed: pipeline ${p.chave} criado (${p.fases.length} fases)`);
   }
 }
 
-main()
-  .catch((e) => {
-    console.error(e);
-    process.exit(1);
-  })
-  .finally(() => prisma.$disconnect());
+// Só roda quando executado diretamente (`prisma db seed` / `tsx prisma/seed.ts`), não ao ser importado em teste.
+const executadoDiretamente = !!process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (executadoDiretamente) {
+  const prisma = new PrismaClient();
+  semear(prisma)
+    .catch((e) => {
+      console.error(e);
+      process.exit(1);
+    })
+    .finally(() => prisma.$disconnect());
+}

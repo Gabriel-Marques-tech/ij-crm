@@ -49,7 +49,7 @@ ALTER TABLE "fase"
 
 -- Busca por nome (contato/empresa) para listar CANDIDATOS à LLM (§4.3 passo 6).
 -- Nunca usada para autolink: match automático é só por identificador exato.
-CREATE EXTENSION IF NOT EXISTS pg_trgm;
-CREATE EXTENSION IF NOT EXISTS unaccent;
-CREATE INDEX "contato_nome_trgm_idx" ON "contato" USING gin ("nome" gin_trgm_ops);
-CREATE INDEX "empresa_nome_trgm_idx" ON "empresa" USING gin ("nome" gin_trgm_ops);
+CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public;
+CREATE EXTENSION IF NOT EXISTS unaccent WITH SCHEMA public;
+CREATE INDEX "contato_nome_trgm_idx" ON "contato" USING gin ("nome" public.gin_trgm_ops);
+CREATE INDEX "empresa_nome_trgm_idx" ON "empresa" USING gin ("nome" public.gin_trgm_ops);
