@@ -1,0 +1,172 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* ============================================================
+   ij-crm — tokens de design (design doc §4.5.1)
+   Tema escuro único na v1. Base: tokens [data-theme='dark'] do
+   ics-select; primária trocada pelo coral da Inteli Júnior.
+   Nunca use hex solto em componente: só estes tokens.
+   ============================================================ */
+
+@theme inline {
+  /* shadcn */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  /* semântica ij-crm (herdada do ics-select) */
+  --color-surface: var(--surface);
+  --color-surface-strong: var(--surface-strong);
+  --color-surface-hover: var(--surface-hover);
+  --color-fg-soft: var(--fg-soft);
+  --color-fg-mute: var(--fg-mute);
+  --color-fg-faint: var(--fg-faint);
+  --color-border-strong: var(--border-strong);
+  --color-primary-soft: var(--primary-soft);
+  --color-coral-accent: var(--coral-accent);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, monospace;
+  --font-heading: var(--font-sans);
+
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+
+  --tracking-eyebrow: 0.08em;
+}
+
+:root {
+  color-scheme: dark;
+  --radius: 0.625rem;
+
+  /* superfícies (ics-select dark) */
+  --background: hsl(240 8% 7%);
+  --foreground: hsl(60 12% 95%);
+  --surface: hsl(240 9% 13%);
+  --surface-strong: hsl(240 9% 17%);
+  --surface-hover: hsl(240 9% 16%);
+  --card: var(--surface);
+  --card-foreground: var(--foreground);
+  --popover: var(--surface-strong);
+  --popover-foreground: var(--foreground);
+
+  /* tinta */
+  --fg-soft: hsl(240 6% 81%);
+  --fg-mute: hsl(234 6% 65%);
+  --fg-faint: hsl(230 5% 49%);
+  --muted: hsl(240 10% 10%);
+  --muted-foreground: var(--fg-mute);
+
+  /* bordas */
+  --border: hsl(234 9% 21%);
+  --border-strong: hsl(234 7% 30%);
+  --input: var(--border);
+
+  /* primária: coral Inteli Júnior #ff4d3a */
+  --primary: hsl(6 100% 61%);
+  --primary-foreground: hsl(228 33% 6%);
+  --primary-soft: hsl(6 60% 20%);
+  --coral-accent: hsl(17 100% 67%); /* #ff8655 — só em detalhes */
+  --ring: hsl(6 100% 67%); /* #ff7058 */
+
+  --secondary: var(--surface-strong);
+  --secondary-foreground: var(--foreground);
+  --accent: var(--surface-hover);
+  --accent-foreground: var(--foreground);
+
+  /* funcionais — só em dot / borda, nunca fundo cheio */
+  --success: hsl(160 70% 48%);
+  --success-soft: hsl(160 60% 18%);
+  --warn: hsl(32 95% 58%);
+  --warn-soft: hsl(32 60% 20%);
+  --danger: hsl(0 85% 62%);
+  --danger-soft: hsl(0 60% 22%);
+  --destructive: var(--danger);
+
+  /* charts (paleta do site da IJ) */
+  --chart-1: hsl(6 100% 61%);
+  --chart-2: hsl(17 100% 67%);
+  --chart-3: hsl(40 100% 67%);
+  --chart-4: hsl(194 87% 62%);
+  --chart-5: hsl(258 89% 66%);
+
+  /* rail lateral */
+  --sidebar: var(--muted);
+  --sidebar-foreground: var(--fg-soft);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: var(--surface);
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    @apply font-sans;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "kern", "liga", "calt", "cv11";
+  }
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+}
+
+@utility eyebrow {
+  @apply font-mono text-[11px] uppercase tracking-eyebrow text-fg-mute;
+}
+
+@utility tabular {
+  font-variant-numeric: tabular-nums;
+}
