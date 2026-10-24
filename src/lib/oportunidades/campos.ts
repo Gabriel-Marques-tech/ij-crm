@@ -103,7 +103,8 @@ export function interpretarCampo(campo: CampoEditavel, bruto: string): Resultado
     case "origem": {
       const t = bruto.trim();
       if (t === "") return { ok: true, valor: null };
-      return t in Origem ? { ok: true, valor: t } : { ok: false, erro: "Origem inválida." };
+      // `in` aceitaria chaves do protótipo ("toString", "__proto__"): compara com os valores.
+      return (Object.values(Origem) as string[]).includes(t) ? { ok: true, valor: t } : { ok: false, erro: "Origem inválida." };
     }
     case "dor":
       return textoOpcional(bruto, 5000, "Dor");

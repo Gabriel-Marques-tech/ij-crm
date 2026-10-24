@@ -36,6 +36,14 @@ describe("interpretarCampo", () => {
     expect(interpretarCampo("origem", "TIKTOK").ok).toBe(false);
   });
 
+  it("enums e UF não aceitam chaves do protótipo de Object", () => {
+    for (const k of ["toString", "constructor", "__proto__", "hasOwnProperty", "valueOf"]) {
+      expect(interpretarCampo("origem", k).ok).toBe(false);
+      expect(interpretarCampo("estado", k).ok).toBe(false);
+      expect(interpretarCampo("revisar", k).ok).toBe(false);
+    }
+  });
+
   it("orçamento aceita formato BR e ponto decimal; guarda string com 2 casas", () => {
     expect(interpretarCampo("orcamentoPrevisto", "R$ 12.500,50")).toEqual({ ok: true, valor: "12500.50" });
     expect(interpretarCampo("orcamentoPrevisto", "12500.5")).toEqual({ ok: true, valor: "12500.50" });
