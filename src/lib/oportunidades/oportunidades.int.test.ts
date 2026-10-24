@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { dbTeste, limparBanco } from "@/test/db";
 import { invalidarCachePipelines } from "@/lib/fases/cache";
+import { travarPipelines } from "@/lib/fases/fases";
 import { adicionarNota, criarCard, editarCard, listarQuadro, moverCard, obterCard } from "./oportunidades";
 
 const db = dbTeste();
@@ -64,10 +65,18 @@ describe("criarCard", () => {
     expect(tl).toMatchObject([{ tipo: "CRIACAO", usuarioId: vendedora.id, payload: { faseId: op.faseId, via: "UI" } }]);
   });
 
-  it("aceita coluna terminal também (card em qualquer fase)", async () => {
+  it("recusa criar em fase terminal (ganho/perdido só por movimento, que passa pelo gancho)", async () => {
     const { vendas, vendedora } = await semear();
-    const r = await criarCard({ pipelineId: vendas.id, faseId: fase(vendas, "perdido").id, titulo: "Já perdido" }, vendedora);
-    expect(r.ok).toBe(true);
+    expect(await criarCard({ pipelineId: vendas.id, faseId: fase(vendas, "perdido").id, titulo: "Já perdido" }, vendedora)).toEqual({
+      ok: false,
+      erro: "FASE_TERMINAL",
+    });
+    expect(await criarCard({ pipelineId: vendas.id, faseId: fase(vendas, "contrato_assinado").id, titulo: "Já ganho" }, vendedora)).toEqual({
+      ok: false,
+      erro: "FASE_TERMINAL",
+    });
+    expect(await db.oportunidade.count()).toBe(0);
+    expect(await db.transicaoFase.count()).toBe(0);
   });
 
   it("recusa título vazio, fase de outro quadro e fase arquivada", async () => {
@@ -135,6 +144,25 @@ describe("moverCard", () => {
     const op = await db.oportunidade.findUniqueOrThrow({ where: { id: c.id } });
     expect(op.faseId).toBe(fase(vendas, "em_negociacao").id);
     expect(await db.transicaoFase.count()).toBe(1); // só a de criação
+  });
+
+  it("ganho em vendas também trava projetos (quadro que o gancho do GAB-32 escreve)", async () => {
+    const { vendas, projetos, vendedora } = await semear();
+    const c = await criarCard({ pipelineId: vendas.id, faseId: fase(vendas, "em_negociacao").id, titulo: "Acme" }, vendedora);
+    if (!c.ok) throw new Error(c.erro);
+    let liberouEm = 0;
+    const segurando = db.$transaction(async (tx) => {
+      await travarPipelines(tx, [projetos.id]);
+      await tx.$executeRaw`SELECT pg_sleep(0.4)`;
+      liberouEm = Date.now();
+    });
+    await new Promise((r) => setTimeout(r, 100));
+    const r = await moverCard(c.id, fase(vendas, "contrato_assinado").id, vendedora);
+    const terminouEm = Date.now();
+    await segurando;
+    expect(r).toEqual({ ok: true, mudou: true, terminal: "GANHO" });
+    expect(liberouEm).toBeGreaterThan(0);
+    expect(terminouEm).toBeGreaterThanOrEqual(liberouEm);
   });
 
   it("movimentos concorrentes do mesmo card serializam: um histórico por movimento real", async () => {

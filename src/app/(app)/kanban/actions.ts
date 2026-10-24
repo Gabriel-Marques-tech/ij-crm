@@ -12,6 +12,8 @@ const MENSAGEM: Record<ErroOportunidade, string> = {
   FASE_NAO_ENCONTRADA: "Fase não encontrada. Recarregue a página.",
   FASE_ARQUIVADA: "Essa fase foi arquivada. Recarregue a página.",
   FASE_DE_OUTRO_PIPELINE: "Essa fase é de outro quadro.",
+  FASE_TERMINAL: "Não dá para criar card direto numa fase de ganho/perdido. Crie numa fase aberta e mova.",
+  CONFLITO_CONCORRENTE: "A fase mudou enquanto você movia. Tente de novo.",
   TITULO_INVALIDO: "Informe um título (até 200 caracteres).",
   RESPONSAVEL_INVALIDO: "Responsável inválido ou inativo.",
   NOTA_INVALIDA: "A nota precisa ter entre 1 e 5000 caracteres.",
