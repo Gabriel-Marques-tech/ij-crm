@@ -34,6 +34,30 @@ describe("criarCacheMemoria", () => {
     expect(await cache.obter(carregar)).toBe(2);
   });
 
+  it("expira sozinho depois do TTL (rede de segurança para escritas fora do processo)", async () => {
+    let t = 1_000_000;
+    const carregar = vi.fn(async () => ({ em: t }));
+    const cache = criarCacheMemoria<{ em: number }>({ ttlMs: 30_000, agora: () => t });
+    expect((await cache.obter(carregar)).em).toBe(1_000_000);
+    t += 29_000;
+    expect((await cache.obter(carregar)).em).toBe(1_000_000);
+    t += 2_000;
+    expect((await cache.obter(carregar)).em).toBe(1_031_000);
+    expect(carregar).toHaveBeenCalledTimes(2);
+  });
+
+  it("TTL conta a partir do fim da carga, não do início", async () => {
+    let t = 0;
+    let soltar!: (v: number) => void;
+    const cache = criarCacheMemoria<number>({ ttlMs: 10, agora: () => t });
+    const p = cache.obter(() => new Promise<number>((r) => (soltar = r)));
+    t = 50; // carga demorou mais que o TTL
+    soltar(1);
+    expect(await p).toBe(1);
+    t = 55; // 5ms depois de terminar: ainda válido
+    expect(await cache.obter(async () => 2)).toBe(1);
+  });
+
   it("invalidar durante uma carga em voo descarta o resultado dela", async () => {
     let soltar!: (v: number) => void;
     const lenta = new Promise<number>((r) => (soltar = r));
