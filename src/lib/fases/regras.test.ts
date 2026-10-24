@@ -1,5 +1,30 @@
-import { describe, expect, it } from "vitest";
-import { chaveDeNome, chaveUnica, validarCor, validarRemocao, validarReordenacao, validarTerminais } from "./regras";
+import { describe, expect, it, vi } from "vitest";
+import { chaveDeNome, chaveUnica, inserirComChaveUnica, validarCor, validarRemocao, validarReordenacao, validarTerminais } from "./regras";
+
+describe("inserirComChaveUnica", () => {
+  const p2002 = Object.assign(new Error("unique"), { code: "P2002", meta: { target: ["pipeline_id", "chave"] } });
+
+  it("usa a chave livre de primeira", async () => {
+    const inserir = vi.fn(async (chave: string) => chave);
+    expect(await inserirComChaveUnica("perdido", ["ganho"], inserir)).toBe("perdido");
+    expect(inserir).toHaveBeenCalledTimes(1);
+  });
+
+  it("em P2002 na chave (corrida com escrita externa) tenta UMA vez com sufixo", async () => {
+    const inserir = vi.fn(async (chave: string) => {
+      if (chave === "perdido") throw p2002;
+      return chave;
+    });
+    expect(await inserirComChaveUnica("perdido", [], inserir)).toBe("perdido_2");
+    expect(inserir).toHaveBeenCalledTimes(2);
+  });
+
+  it("segunda falha ou erro que não é P2002 de chave propaga", async () => {
+    await expect(inserirComChaveUnica("x", [], async () => { throw p2002; })).rejects.toBe(p2002);
+    const outro = Object.assign(new Error("fk"), { code: "P2003" });
+    await expect(inserirComChaveUnica("x", [], async () => { throw outro; })).rejects.toBe(outro);
+  });
+});
 
 describe("chaveDeNome", () => {
   it("vira snake_case ASCII sem acentos", () => {
@@ -77,6 +102,10 @@ describe("validarRemocao", () => {
   it("com cards exige destino; com destino válido migra e arquiva", () => {
     expect(validarRemocao({ fase, qtdCards: 2, qtdTransicoes: 0, destino: null })).toEqual({ ok: false, erro: "DESTINO_OBRIGATORIO" });
     expect(validarRemocao({ fase, qtdCards: 2, qtdTransicoes: 0, destino })).toEqual({ ok: true, acao: "ARQUIVAR" });
+  });
+
+  it("cards soft-deletados não contam como cards nem exigem destino, mas seguram a FK → ARQUIVAR", () => {
+    expect(validarRemocao({ fase, qtdCards: 0, qtdTransicoes: 0, qtdCardsDeletados: 1, destino: null })).toEqual({ ok: true, acao: "ARQUIVAR" });
   });
 
   it("destino inválido: a própria fase, outro pipeline ou fase arquivada", () => {

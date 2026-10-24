@@ -77,6 +77,21 @@ describe("listarPipelines", () => {
     expect(comArquivadas[0].fases.map((f) => f.chave)).toEqual(["primeiro_contato", "em_negociacao", "contrato_assinado", "perdido"]);
   });
 
+  it("devolve cópias: mexer no resultado não contamina a próxima leitura", async () => {
+    await semearPipelines();
+    const a = await listarPipelines();
+    a[0].nome = "Hackeado";
+    a[0].fases.pop();
+    a[0].fases[0].nome = "Outro";
+    const b = await listarPipelines();
+    expect(b[0].nome).toBe("Vendas");
+    expect(b[0].fases).toHaveLength(4);
+    expect(b[0].fases[0].nome).toBe("Primeiro Contato");
+    const g = await listarPipelinesParaGestao();
+    g[0].fases.splice(0);
+    expect((await listarPipelinesParaGestao())[0].fases).toHaveLength(4);
+  });
+
   it("é servido do cache: escrita direta no banco só aparece depois de invalidar", async () => {
     const { projetos } = await semearPipelines();
     expect((await listarPipelines())[1].fases).toHaveLength(2);
@@ -114,6 +129,18 @@ describe("criarFase", () => {
     const f = await db.fase.findUniqueOrThrow({ where: { id: r.faseId } });
     expect(f.nome).toBe("Perdemos");
     expect(f.chave).toBe("perdido_2");
+  });
+
+  it("criações concorrentes no mesmo quadro recebem ordens distintas (lock do pipeline)", async () => {
+    const { projetos } = await semearPipelines();
+    const rs = await Promise.all([
+      criarFase(projetos.id, { nome: "Alfa" }),
+      criarFase(projetos.id, { nome: "Beta" }),
+      criarFase(projetos.id, { nome: "Gama" }),
+    ]);
+    expect(rs.every((r) => r.ok)).toBe(true);
+    const ordens = (await db.fase.findMany({ where: { pipelineId: projetos.id }, select: { ordem: true } })).map((f) => f.ordem).sort();
+    expect(ordens).toEqual([0, 1, 2, 3, 4]);
   });
 
   it("terminal grava is_terminal + tipo juntos (CHECK do banco)", async () => {
@@ -223,9 +250,48 @@ describe("removerFase", () => {
     expect(transicoes).toHaveLength(2);
     expect(transicoes.every((t) => t.paraFaseId === destino.id && t.origem === "SISTEMA" && t.usuarioId === g.id)).toBe(true);
 
+    const timeline = await db.timeline.findMany({ where: { oportunidadeId: { in: [c1.id, c2.id] } }, orderBy: { oportunidadeId: "asc" } });
+    expect(timeline).toHaveLength(2);
+    for (const t of timeline) {
+      expect(t.tipo).toBe("MOVIMENTACAO");
+      expect(t.usuarioId).toBe(g.id);
+      expect(t.payload).toEqual({ deFaseId: origem.id, paraFaseId: destino.id, motivo: "fase_arquivada" });
+    }
+
     const f = await db.fase.findUniqueOrThrow({ where: { id: origem.id } });
     expect(f.arquivadaEm).not.toBeNull();
     expect((await listarPipelines())[0].fases.map((x) => x.chave)).not.toContain("em_negociacao");
+  });
+
+  it("cards soft-deletados: não contam, não migram, não ganham histórico; mas seguram a FK → arquiva", async () => {
+    const { vendas } = await semearPipelines();
+    const g = await gestor();
+    const origem = faseDe(vendas, "em_negociacao");
+    const destino = faseDe(vendas, "primeiro_contato");
+    const vivo = await card(vendas.id, origem.id, g.id, "vivo");
+    const morto = await db.oportunidade.create({
+      data: { pipelineId: vendas.id, faseId: origem.id, titulo: "morto", responsavelId: g.id, criadoVia: "UI", deletadoEm: new Date() },
+    });
+
+    const uso = (await listarPipelinesParaGestao())[0].fases.find((f) => f.id === origem.id)!.uso;
+    expect(uso.cards).toBe(1);
+
+    expect(await removerFase(origem.id, { destinoFaseId: destino.id }, g)).toEqual({ ok: true, acao: "ARQUIVAR" });
+    expect((await db.oportunidade.findUniqueOrThrow({ where: { id: vivo.id } })).faseId).toBe(destino.id);
+    expect((await db.oportunidade.findUniqueOrThrow({ where: { id: morto.id } })).faseId).toBe(origem.id);
+    expect(await db.transicaoFase.count({ where: { oportunidadeId: morto.id } })).toBe(0);
+    expect(await db.timeline.count({ where: { oportunidadeId: morto.id } })).toBe(0);
+  });
+
+  it("só card soft-deletado na fase: sem destino, sem migração, arquiva em vez de excluir (FK)", async () => {
+    const { vendas } = await semearPipelines();
+    const g = await gestor();
+    const origem = faseDe(vendas, "em_negociacao");
+    await db.oportunidade.create({
+      data: { pipelineId: vendas.id, faseId: origem.id, titulo: "morto", responsavelId: g.id, criadoVia: "UI", deletadoEm: new Date() },
+    });
+    expect(await removerFase(origem.id, {}, g)).toEqual({ ok: true, acao: "ARQUIVAR" });
+    expect((await db.fase.findUniqueOrThrow({ where: { id: origem.id } })).arquivadaEm).not.toBeNull();
   });
 
   it("sem cards mas com histórico → arquiva (não tenta apagar)", async () => {
