@@ -36,17 +36,21 @@ banco (`sessao`): desativar alguém derruba o acesso na hora.
 
 ## WhatsApp (Evolution API)
 
-O compose sobe a Evolution API v2 (`evolution` + `evolution-db` + `evolution-redis`) em
-`127.0.0.1:8080`. Ela precisa de `EVOLUTION_API_KEY` no `.env` (é a chave global da
-instância). Depois de `docker compose up -d evolution`:
+A Evolution API v2 (`evolution` + `evolution-db` + `evolution-redis`, em `127.0.0.1:8080`)
+fica no perfil `whatsapp` do compose — sem ele, `docker compose up -d db` segue funcionando.
+Antes, gere os dois segredos no `.env` (`openssl rand -hex 32`): `EVOLUTION_API_KEY` e
+`EVOLUTION_WEBHOOK_SECRET`. **O app rejeita segredo com menos de 32 caracteres ou que comece
+com `troque-me`** — com segredo fraco o webhook responde 401 e nada é enviado.
 
 ```bash
+docker compose --profile whatsapp up -d          # ou: up -d evolution
 source .env   # para usar $EVOLUTION_API_KEY e $EVOLUTION_WEBHOOK_SECRET abaixo
 
-# 1. Criar a instância (nome = EVOLUTION_INSTANCE)
+# 1. Criar a instância (nome = EVOLUTION_INSTANCE). `token` = EVOLUTION_API_KEY de propósito:
+#    é o valor que a Evolution põe no campo `apikey` do corpo de cada webhook (fallback de auth).
 curl -s -X POST http://localhost:8080/instance/create \
   -H "apikey: $EVOLUTION_API_KEY" -H 'content-type: application/json' \
-  -d '{"instanceName":"ij-crm","integration":"WHATSAPP-BAILEYS","qrcode":true}'
+  -d "{\"instanceName\":\"ij-crm\",\"token\":\"$EVOLUTION_API_KEY\",\"integration\":\"WHATSAPP-BAILEYS\",\"qrcode\":true}"
 
 # 2. Ler o QR (base64 em `.base64`; ou abra http://localhost:8080/manager e use a apikey)
 curl -s http://localhost:8080/instance/connect/ij-crm -H "apikey: $EVOLUTION_API_KEY" | jq -r .base64
@@ -71,11 +75,23 @@ curl -s 'http://localhost:8080/group/fetchAllGroups/ij-crm?getParticipants=false
 | `pnpm dev` nativo no host | `http://host.docker.internal:3000/api/webhooks/evolution` |
 | Evolution em outra máquina/VPS apontando para o seu `pnpm dev` | túnel: `cloudflared tunnel --url http://localhost:3000` → `https://<aleatorio>.trycloudflare.com/api/webhooks/evolution` |
 
-Segurança do webhook: a Evolution **não** manda a apikey como header — ela vai no corpo.
-Por isso o segredo vai em `webhook.headers` (`x-webhook-secret`; o header `apikey` também é
-aceito). `EVOLUTION_WEBHOOK_SECRET` vazio ⇒ tudo recebe 401; `GRUPO_JID` vazio ⇒ 503.
+Segurança do webhook — duas formas, comparação em tempo constante:
+
+1. **Preferida:** header `x-webhook-secret` (ou `apikey`) igual a `EVOLUTION_WEBHOOK_SECRET`.
+   A Evolution **não** manda a apikey como header; o header vem de `webhook.headers` (passo 3).
+2. **Fallback** (até validar o item 1 numa instância real): campo `apikey` do **corpo** igual a
+   `EVOLUTION_API_KEY`. Só funciona porque a instância foi criada com `token = EVOLUTION_API_KEY`
+   e o compose mantém `AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES=true`.
+
+Segredo ausente/fraco ⇒ aquela forma não existe; sem nenhuma ⇒ 401 para tudo. `GRUPO_JID`
+vazio ⇒ 503. Re-tentativas: o compose configura a Evolution v2.3.7 para 5 tentativas com
+backoff exponencial (5s → 120s) em 5xx/timeout e **nenhuma** em 400/401/403/404/422 — o app
+devolve 4xx só para erro definitivo e 500 quando vale re-tentar (o dedup é atômico).
 Em dev, `NOTIFICATIONS_ENABLED` fica ausente: a confirmação "📥 recebido" só aparece no
 log como `[SAFE MODE] WhatsApp NÃO enviado para 12****01@g.us`.
+
+A Evolution não guarda mensagens, contatos nem chats no banco dela (`DATABASE_SAVE_DATA_*=false`
+— design §2); a confirmação cita a mensagem original mandando `quoted.key` **e** `quoted.message`.
 
 Nesta fatia (GAB-28) o bot só reage a mensagens com `#crm` de usuários ativos com
 `telefoneWhatsapp`/`whatsappLid` cadastrado; o resto é contado (`contador_descartadas`,
