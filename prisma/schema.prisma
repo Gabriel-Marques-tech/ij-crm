@@ -1,0 +1,356 @@
+// ij-crm — schema núcleo (design doc §4.2)
+// Nomes de domínio em português; tabelas/colunas em snake_case via @map.
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  // pg_trgm/unaccent: busca de CANDIDATOS por nome (§4.3). Autolink nunca usa isso.
+  extensions = [pg_trgm, unaccent]
+}
+
+// ---------------------------------------------------------------- enums
+
+enum Papel {
+  ADMIN
+  GESTOR
+  VENDEDOR
+}
+
+enum TipoContatoPonto {
+  TELEFONE
+  EMAIL
+}
+
+enum TipoTerminal {
+  GANHO
+  PERDIDO
+}
+
+enum Origem {
+  COLD_CALL
+  RD
+  INDICACAO
+  EVENTO
+  OUTRO
+}
+
+enum CriadoVia {
+  WHATSAPP
+  UI
+  IMPORT
+}
+
+enum OrigemTransicao {
+  WHATSAPP
+  UI
+  IMPORT
+  SISTEMA
+}
+
+enum TipoTimeline {
+  CRIACAO
+  MOVIMENTACAO
+  CAMPO_ALTERADO
+  NOTA
+  MENSAGEM_WHATSAPP
+  IMPORT
+}
+
+enum StatusMensagem {
+  RECEBIDA
+  CLASSIFICADA_IRRELEVANTE
+  PROCESSADA
+  FALHA
+  PENDENTE_REVISAO
+}
+
+// ---------------------------------------------------------------- usuários
+
+model Usuario {
+  id                String    @id @default(cuid())
+  nome              String
+  email             String    @unique
+  senhaHash         String?   @map("senha_hash") // null = ainda sem senha (convite pendente)
+  papel             Papel     @default(VENDEDOR)
+  telefoneWhatsapp  String?   @unique @map("telefone_whatsapp")
+  whatsappLid       String?   @unique @map("whatsapp_lid")
+  ativo             Boolean   @default(true)
+  conviteTokenHash  String?   @unique @map("convite_token_hash") // sha256 do token; nunca o token em claro
+  conviteExpiraEm   DateTime? @map("convite_expira_em")
+  criadoEm          DateTime  @default(now()) @map("criado_em")
+  atualizadoEm      DateTime  @updatedAt @map("atualizado_em")
+
+  oportunidades     Oportunidade[]   @relation("responsavel")
+  transicoes        TransicaoFase[]
+  timeline          Timeline[]
+  mensagensBrutas   MensagemBruta[]
+
+  @@map("usuario")
+}
+
+// ---------------------------------------------------------------- empresas / contatos
+
+model Empresa {
+  id            String    @id @default(cuid())
+  nome          String
+  cnpj          String?   @unique
+  dominioEmail  String?   @map("dominio_email")
+  cidade        String?
+  estado        String?
+  site          String?
+  observacoes   String?
+  mergedIntoId  String?   @map("merged_into_id")
+  deletadoEm    DateTime? @map("deletado_em")
+  criadoEm      DateTime  @default(now()) @map("criado_em")
+  atualizadoEm  DateTime  @updatedAt @map("atualizado_em")
+
+  mergedInto    Empresa?  @relation("empresaMerge", fields: [mergedIntoId], references: [id])
+  mergedFrom    Empresa[] @relation("empresaMerge")
+  contatos      Contato[]
+  oportunidades Oportunidade[]
+
+  @@index([nome])
+  @@index([nome(ops: raw("gin_trgm_ops"))], type: Gin, map: "empresa_nome_trgm_idx")
+  @@map("empresa")
+}
+
+model Contato {
+  id            String    @id @default(cuid())
+  nome          String
+  empresaId     String?   @map("empresa_id")
+  cargo         String?
+  observacoes   String?
+  mergedIntoId  String?   @map("merged_into_id")
+  deletadoEm    DateTime? @map("deletado_em")
+  criadoEm      DateTime  @default(now()) @map("criado_em")
+  atualizadoEm  DateTime  @updatedAt @map("atualizado_em")
+
+  empresa       Empresa?  @relation(fields: [empresaId], references: [id])
+  mergedInto    Contato?  @relation("contatoMerge", fields: [mergedIntoId], references: [id])
+  mergedFrom    Contato[] @relation("contatoMerge")
+  pontos        ContatoPonto[]
+  oportunidades Oportunidade[]
+
+  @@index([nome])
+  @@index([nome(ops: raw("gin_trgm_ops"))], type: Gin, map: "contato_nome_trgm_idx")
+  @@index([empresaId])
+  @@map("contato")
+}
+
+model ContatoPonto {
+  id               String           @id @default(cuid())
+  contatoId        String           @map("contato_id")
+  tipo             TipoContatoPonto
+  valorNormalizado String           @map("valor_normalizado")
+  valorOriginal    String           @map("valor_original")
+  criadoEm         DateTime         @default(now()) @map("criado_em")
+
+  contato          Contato          @relation(fields: [contatoId], references: [id], onDelete: Cascade)
+
+  @@unique([tipo, valorNormalizado])
+  @@index([contatoId])
+  @@map("contato_ponto")
+}
+
+// ---------------------------------------------------------------- pipeline / fases
+
+model Pipeline {
+  id     String @id @default(cuid())
+  chave  String @unique
+  nome   String
+  ordem  Int    @default(0)
+
+  fases         Fase[]
+  oportunidades Oportunidade[]
+
+  @@map("pipeline")
+}
+
+model Fase {
+  id                String        @id @default(cuid())
+  pipelineId        String        @map("pipeline_id")
+  chave             String
+  nome              String
+  ordem             Int
+  isTerminal        Boolean       @default(false) @map("is_terminal")
+  tipoTerminal      TipoTerminal? @map("tipo_terminal")
+  cor               String?
+  limiteDiasAlerta  Int?          @map("limite_dias_alerta")
+  criadoEm          DateTime      @default(now()) @map("criado_em")
+  atualizadoEm      DateTime      @updatedAt @map("atualizado_em")
+
+  pipeline          Pipeline      @relation(fields: [pipelineId], references: [id])
+  oportunidades     Oportunidade[]
+  transicoesDe      TransicaoFase[] @relation("transicaoDe")
+  transicoesPara    TransicaoFase[] @relation("transicaoPara")
+
+  @@unique([pipelineId, chave])
+  @@index([pipelineId, ordem])
+  @@map("fase")
+}
+
+// ---------------------------------------------------------------- oportunidades
+
+model Oportunidade {
+  id                    String     @id @default(cuid())
+  pipelineId            String     @map("pipeline_id")
+  faseId                String     @map("fase_id")
+  titulo                String
+  empresaId             String?    @map("empresa_id")
+  contatoId             String?    @map("contato_id")
+  responsavelId         String     @map("responsavel_id")
+  origem                Origem?
+  dor                   String?
+  orcamentoPrevisto     Decimal?   @map("orcamento_previsto") @db.Decimal(14, 2)
+  propostaUrl           String?    @map("proposta_url")
+  cidade                String?
+  estado                String?
+  valorFechado          Decimal?   @map("valor_fechado") @db.Decimal(14, 2)
+  dataGanho             DateTime?  @map("data_ganho")
+  motivoPerda           String?    @map("motivo_perda")
+  proximaAcao           String?    @map("proxima_acao")
+  proximaAcaoEm         DateTime?  @map("proxima_acao_em")
+  revisar               Boolean    @default(false)
+  faseDesde             DateTime   @default(now()) @map("fase_desde")
+  criadoVia             CriadoVia  @map("criado_via")
+  origemOportunidadeId  String?    @map("origem_oportunidade_id")
+  reabertaDeId          String?    @map("reaberta_de_id")
+  pipefyId              String?    @unique @map("pipefy_id")
+  deletadoEm            DateTime?  @map("deletado_em")
+  criadoEm              DateTime   @default(now()) @map("criado_em")
+  atualizadoEm          DateTime   @updatedAt @map("atualizado_em")
+
+  pipeline              Pipeline   @relation(fields: [pipelineId], references: [id])
+  fase                  Fase       @relation(fields: [faseId], references: [id])
+  empresa               Empresa?   @relation(fields: [empresaId], references: [id])
+  contato               Contato?   @relation(fields: [contatoId], references: [id])
+  responsavel           Usuario    @relation("responsavel", fields: [responsavelId], references: [id])
+  origemOportunidade    Oportunidade?  @relation("projetoDeVenda", fields: [origemOportunidadeId], references: [id])
+  projetos              Oportunidade[] @relation("projetoDeVenda")
+  reabertaDe            Oportunidade?  @relation("reabertura", fields: [reabertaDeId], references: [id])
+  reaberturas           Oportunidade[] @relation("reabertura")
+  transicoes            TransicaoFase[]
+  timeline              Timeline[]
+  mensagensEnviadas     MensagemEnviada[]
+
+  @@index([pipelineId, faseId])
+  @@index([responsavelId])
+  @@index([empresaId])
+  @@index([contatoId])
+  @@index([proximaAcaoEm])
+  @@index([origemOportunidadeId])
+  @@index([reabertaDeId])
+  @@map("oportunidade")
+}
+
+// TransicaoFase e Timeline são append-only. onDelete: Cascade existe SÓ para a
+// "deleção definitiva" (admin, GAB-36); soft-delete nunca toca nestas tabelas.
+model TransicaoFase {
+  id             String          @id @default(cuid())
+  oportunidadeId String          @map("oportunidade_id")
+  deFaseId       String?         @map("de_fase_id")
+  paraFaseId     String          @map("para_fase_id")
+  usuarioId      String?         @map("usuario_id")
+  origem         OrigemTransicao
+  em             DateTime        @default(now())
+
+  oportunidade   Oportunidade    @relation(fields: [oportunidadeId], references: [id], onDelete: Cascade)
+  deFase         Fase?           @relation("transicaoDe", fields: [deFaseId], references: [id], onDelete: Restrict)
+  paraFase       Fase            @relation("transicaoPara", fields: [paraFaseId], references: [id])
+  usuario        Usuario?        @relation(fields: [usuarioId], references: [id])
+
+  @@index([oportunidadeId, em])
+  @@index([usuarioId])
+  @@map("transicao_fase")
+}
+
+model Timeline {
+  id              String        @id @default(cuid())
+  oportunidadeId  String        @map("oportunidade_id")
+  tipo            TipoTimeline
+  payload         Json          @default("{}")
+  usuarioId       String?       @map("usuario_id")
+  mensagemBrutaId String?       @map("mensagem_bruta_id")
+  em              DateTime      @default(now())
+
+  oportunidade    Oportunidade  @relation(fields: [oportunidadeId], references: [id], onDelete: Cascade)
+  usuario         Usuario?      @relation(fields: [usuarioId], references: [id])
+  mensagemBruta   MensagemBruta? @relation(fields: [mensagemBrutaId], references: [id])
+
+  @@index([oportunidadeId, em])
+  @@index([mensagemBrutaId])
+  @@map("timeline")
+}
+
+// ---------------------------------------------------------------- whatsapp
+
+model InboxEvento {
+  eventoId   String   @id @map("evento_id")
+  recebidoEm DateTime @default(now()) @map("recebido_em")
+  status     String   // PROCESSADO | FALHA — setado explicitamente pelo ingest, nunca por default
+
+  @@map("inbox_evento")
+}
+
+model MensagemBruta {
+  id                  String         @id @default(cuid())
+  eventoId            String         @unique @map("evento_id")
+  remetenteTelefone   String?        @map("remetente_telefone")
+  remetenteLid        String?        @map("remetente_lid")
+  remetenteUsuarioId  String?        @map("remetente_usuario_id")
+  grupoJid            String         @map("grupo_jid")
+  texto               String
+  mediaType           String?        @map("media_type")
+  mediaUrl            String?        @map("media_url")
+  respondendoEventoId String?        @map("respondendo_evento_id")
+  recebidaEm          DateTime       @map("recebida_em")
+  status              StatusMensagem @default(RECEBIDA)
+  tentativas          Int            @default(0)
+  resultadoLlm        Json?          @map("resultado_llm")
+  erro                String?
+  criadoEm            DateTime       @default(now()) @map("criado_em")
+  atualizadoEm        DateTime       @updatedAt @map("atualizado_em")
+
+  remetenteUsuario    Usuario?       @relation(fields: [remetenteUsuarioId], references: [id])
+  timeline            Timeline[]
+
+  @@index([status])
+  @@index([remetenteUsuarioId, recebidaEm])
+  @@index([respondendoEventoId])
+  @@map("mensagem_bruta")
+}
+
+model MensagemEnviada {
+  eventoId       String       @id @map("evento_id")
+  oportunidadeId String?      @map("oportunidade_id")
+  grupoJid       String       @map("grupo_jid")
+  texto          String
+  em             DateTime     @default(now())
+
+  oportunidade   Oportunidade? @relation(fields: [oportunidadeId], references: [id])
+
+  @@index([oportunidadeId])
+  @@map("mensagem_enviada")
+}
+
+model ContadorDescartadas {
+  dia   DateTime @id @db.Date
+  total Int      @default(0)
+
+  @@map("contador_descartadas")
+}
+
+model RemetenteDesconhecido {
+  id         String   @id @default(cuid())
+  telefone   String?  @unique
+  lid        String?  @unique
+  total      Int      @default(1)
+  ultimaVez  DateTime @default(now()) @map("ultima_vez")
+
+  @@map("remetente_desconhecido")
+}

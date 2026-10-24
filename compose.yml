@@ -1,0 +1,47 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ijcrm
+      POSTGRES_PASSWORD: ijcrm
+      POSTGRES_DB: ijcrm
+    # Só loopback: credenciais de dev são públicas, nada de expor na LAN.
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ijcrm -d ijcrm"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: dev
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://ijcrm:ijcrm@db:5432/ijcrm?schema=public
+    # Só loopback até a auth (GAB-26) existir; em prod o Caddy publica (GAB-30).
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      # :z = label SELinux (Fedora); sem isso o container recebe EACCES no bind mount.
+      - .:/app:z
+      - app_node_modules:/app/node_modules
+      - app_next:/app/.next
+    depends_on:
+      db:
+        condition: service_healthy
+    # Roda a cada `up`: idempotente, mas o install pode levar alguns minutos na 1ª vez.
+    command: sh -c "pnpm install --frozen-lockfile && pnpm prisma migrate deploy && pnpm prisma db seed && pnpm dev"
+
+volumes:
+  db_data:
+  app_node_modules:
+  app_next:
