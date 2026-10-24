@@ -6,17 +6,21 @@
 # com erro (fica registrado no log do cron, sem efeito colateral).
 # O segredo vai pelo stdin do curl (`-H @-`), não pela linha de comando: não
 # aparece em `ps` nem fica escrito no crontab.
+# Log: só horário + status HTTP. O corpo da resposta é descartado (nunca vai
+# para o log, mesmo que a rota devolva algo além de contagens).
 set -euo pipefail
 # shellcheck source=scripts/_comum.sh
 source "$(dirname "${BASH_SOURCE[0]}")/_comum.sh"
 
+carregar_ambiente
 segredo="$(ler_env CRON_SECRET)"
-[[ ${#segredo} -ge 32 && "$segredo" != troque-me* ]] \
-  || falhar "CRON_SECRET ausente ou fraco em $ARQUIVO_ENV (≥32 chars, sem 'troque-me'): openssl rand -hex 32"
+segredo_forte "$segredo" \
+  || falhar "CRON_SECRET ausente ou fraco (≥32 chars, sem 'troque-me'): openssl rand -hex 32"
 
-if resposta="$(printf 'x-cron-secret: %s\n' "$segredo" \
-  | CURL_MAX_TIME=300 curl_app /api/cron/reprocessar -X POST -H @-)"; then
-  log "reprocessar ok: $resposta"
+status="$(printf 'x-cron-secret: %s\n' "$segredo" \
+  | CURL_MAX_TIME=300 curl_app /api/cron/reprocessar -X POST -H @- -o /dev/null -w '%{http_code}' || true)"
+if [[ "$status" =~ ^2[0-9][0-9]$ ]]; then
+  log "reprocessar HTTP $status"
 else
-  falhar "reprocessar falhou (curl saiu com $?)"
+  falhar "reprocessar HTTP ${status:-sem resposta}"
 fi
