@@ -98,6 +98,11 @@ Nesta fatia (GAB-28) o bot só reage a mensagens com `#crm` de usuários ativos 
 `remetente_desconhecido`) e descartado sem persistir conteúdo. Classificação e LLM entram no
 GAB-34/GAB-39.
 
+## Produção
+
+Deploy, rollback, backup/restore, QR da Evolution e troca do número do bot:
+[`docs/runbook.md`](docs/runbook.md) (`compose.prod.yml` + `scripts/deploy.sh`).
+
 ## Testes
 
 `pnpm test` roda unitários e de integração. Os de integração (`*.int.test.ts`)
