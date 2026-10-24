@@ -51,8 +51,9 @@ async function main() {
     for (const [ordem, f] of p.fases.entries()) {
       await prisma.fase.upsert({
         where: { pipelineId_chave: { pipelineId: pipeline.id, chave: f.chave } },
-        // Só atualiza o que é "de sistema"; nome/cor/limite ficam com o gestor após o 1º seed.
-        update: { ordem, isTerminal: !!f.tipoTerminal, tipoTerminal: f.tipoTerminal ?? null },
+        // Só cria. Depois do 1º seed a fase é do gestor (Gestão → Fases: ordem,
+        // nome, cor, limite, terminal, arquivamento); re-seed não pode desfazer isso.
+        update: {},
         create: {
           pipelineId: pipeline.id,
           chave: f.chave,

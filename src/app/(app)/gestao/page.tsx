@@ -4,7 +4,7 @@ import { PageHeader } from "@/components/shell/page-header";
 
 const AREAS = [
   { href: "/gestao/usuarios", icon: Users, titulo: "Usuários", desc: "Convites, papéis, telefone do WhatsApp." },
-  { href: "/gestao/fases", icon: Layers, titulo: "Fases", desc: "Quadros e fases do funil. (GAB-27)", futuro: true },
+  { href: "/gestao/fases", icon: Layers, titulo: "Fases", desc: "Quadros e fases do funil: ordem, cor, limite de dias, terminais." },
   { href: "/gestao/whatsapp", icon: MessageSquare, titulo: "WhatsApp", desc: "Mensagens falhas e pendentes. (GAB-41)", futuro: true },
   { href: "/gestao/importar", icon: Upload, titulo: "Importar", desc: "Pipefy → CRM. (GAB-37)", futuro: true },
 ];
