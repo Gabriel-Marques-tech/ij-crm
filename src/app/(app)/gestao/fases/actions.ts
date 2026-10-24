@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { exigirPapel } from "@/lib/auth/atual";
 import { criarFase, desarquivarFase, editarFase, moverFase, removerFase, type ErroFase } from "@/lib/fases/fases";
+import { comTratamentoForm } from "@/lib/erros/registrar";
 
 const MENSAGEM: Record<ErroFase, string> = {
   PIPELINE_NAO_ENCONTRADO: "Quadro não encontrado.",
@@ -45,55 +46,65 @@ function lerCampos(form: FormData) {
 }
 
 export async function criarFaseAction(_prev: EstadoFase, form: FormData): Promise<EstadoFase> {
-  await exigirPapel("GESTOR");
-  const pipelineId = z.string().min(1).safeParse(form.get("pipelineId"));
-  if (!pipelineId.success) return { erro: "Dados inválidos." };
-  const campos = lerCampos(form);
-  if (!campos.success) return { erro: campos.error.issues[0]?.message ?? "Dados inválidos." };
-  const r = await criarFase(pipelineId.data, { ...campos.data, cor: campos.data.cor || null });
-  if (!r.ok) return { erro: MENSAGEM[r.erro] };
-  revalidatePath(ROTA);
-  return { ok: true };
+  return comTratamentoForm("gestao.fases.criarFase", async (): Promise<EstadoFase> => {
+    await exigirPapel("GESTOR");
+    const pipelineId = z.string().min(1).safeParse(form.get("pipelineId"));
+    if (!pipelineId.success) return { erro: "Dados inválidos." };
+    const campos = lerCampos(form);
+    if (!campos.success) return { erro: campos.error.issues[0]?.message ?? "Dados inválidos." };
+    const r = await criarFase(pipelineId.data, { ...campos.data, cor: campos.data.cor || null });
+    if (!r.ok) return { erro: MENSAGEM[r.erro] };
+    revalidatePath(ROTA);
+    return { ok: true };
+  });
 }
 
 export async function editarFaseAction(_prev: EstadoFase, form: FormData): Promise<EstadoFase> {
-  await exigirPapel("GESTOR");
-  const faseId = z.string().min(1).safeParse(form.get("faseId"));
-  if (!faseId.success) return { erro: "Dados inválidos." };
-  const campos = lerCampos(form);
-  if (!campos.success) return { erro: campos.error.issues[0]?.message ?? "Dados inválidos." };
-  const r = await editarFase(faseId.data, { ...campos.data, cor: campos.data.cor || null });
-  if (!r.ok) return { erro: MENSAGEM[r.erro] };
-  revalidatePath(ROTA);
-  return { ok: true };
+  return comTratamentoForm("gestao.fases.editarFase", async (): Promise<EstadoFase> => {
+    await exigirPapel("GESTOR");
+    const faseId = z.string().min(1).safeParse(form.get("faseId"));
+    if (!faseId.success) return { erro: "Dados inválidos." };
+    const campos = lerCampos(form);
+    if (!campos.success) return { erro: campos.error.issues[0]?.message ?? "Dados inválidos." };
+    const r = await editarFase(faseId.data, { ...campos.data, cor: campos.data.cor || null });
+    if (!r.ok) return { erro: MENSAGEM[r.erro] };
+    revalidatePath(ROTA);
+    return { ok: true };
+  });
 }
 
 export async function moverFaseAction(faseId: string, direcao: "SUBIR" | "DESCER"): Promise<EstadoFase> {
-  await exigirPapel("GESTOR");
-  const r = await moverFase(faseId, direcao);
-  if (!r.ok) return { erro: MENSAGEM[r.erro] };
-  revalidatePath(ROTA);
-  return { ok: true };
+  return comTratamentoForm("gestao.fases.moverFase", async (): Promise<EstadoFase> => {
+    await exigirPapel("GESTOR");
+    const r = await moverFase(faseId, direcao);
+    if (!r.ok) return { erro: MENSAGEM[r.erro] };
+    revalidatePath(ROTA);
+    return { ok: true };
+  });
 }
 
 export type EstadoRemocao = { erro?: string; acao?: "EXCLUIR" | "ARQUIVAR" } | undefined;
 
 export async function removerFaseAction(_prev: EstadoRemocao, form: FormData): Promise<EstadoRemocao> {
-  const ator = await exigirPapel("GESTOR");
-  const parsed = z
-    .object({ faseId: z.string().min(1), destinoFaseId: z.string().trim().optional() })
-    .safeParse({ faseId: form.get("faseId"), destinoFaseId: form.get("destinoFaseId") ?? undefined });
-  if (!parsed.success) return { erro: "Dados inválidos." };
-  const r = await removerFase(parsed.data.faseId, { destinoFaseId: parsed.data.destinoFaseId || null }, ator);
-  if (!r.ok) return { erro: MENSAGEM[r.erro] };
-  revalidatePath(ROTA);
-  return { acao: r.acao };
+  return comTratamentoForm("gestao.fases.removerFase", async (): Promise<EstadoRemocao> => {
+    const ator = await exigirPapel("GESTOR");
+    const parsed = z
+      .object({ faseId: z.string().min(1), destinoFaseId: z.string().trim().optional() })
+      .safeParse({ faseId: form.get("faseId"), destinoFaseId: form.get("destinoFaseId") ?? undefined });
+    if (!parsed.success) return { erro: "Dados inválidos." };
+    const r = await removerFase(parsed.data.faseId, { destinoFaseId: parsed.data.destinoFaseId || null }, ator);
+    if (!r.ok) return { erro: MENSAGEM[r.erro] };
+    revalidatePath(ROTA);
+    return { acao: r.acao };
+  });
 }
 
 export async function desarquivarFaseAction(faseId: string): Promise<EstadoFase> {
-  await exigirPapel("GESTOR");
-  const r = await desarquivarFase(faseId);
-  if (!r.ok) return { erro: MENSAGEM[r.erro] };
-  revalidatePath(ROTA);
-  return { ok: true };
+  return comTratamentoForm("gestao.fases.desarquivarFase", async (): Promise<EstadoFase> => {
+    await exigirPapel("GESTOR");
+    const r = await desarquivarFase(faseId);
+    if (!r.ok) return { erro: MENSAGEM[r.erro] };
+    revalidatePath(ROTA);
+    return { ok: true };
+  });
 }
