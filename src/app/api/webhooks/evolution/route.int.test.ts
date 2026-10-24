@@ -17,11 +17,12 @@ vi.mock("next/server", () => ({
 import { POST } from "./route";
 
 const SEGREDO = "segredo-de-teste-com-tamanho-razoavel";
+const CHAVE_EVOLUTION = "chave-evolution-de-teste-0123456789abcdef";
 const TABELAS = ["inbox_evento", "mensagem_bruta", "mensagem_enviada", "remetente_desconhecido", "contador_descartadas", "sessao", "usuario"];
 const dbT = dbTeste();
 const envOriginal = { ...process.env };
 
-function requisicao(corpo: unknown, headers: Record<string, string> = { apikey: SEGREDO }) {
+function requisicao(corpo: unknown, headers: Record<string, string> = { "x-webhook-secret": SEGREDO }) {
   return new Request("http://localhost:3000/api/webhooks/evolution", {
     method: "POST",
     headers: { "content-type": "application/json", ...headers },
@@ -40,9 +41,15 @@ async function aguardarDepois() {
   await Promise.all(tarefasDepois.splice(0));
 }
 
-async function vendedor(extra: { telefoneWhatsapp?: string; whatsappLid?: string; ativo?: boolean } = {}) {
+async function vendedor(extra: { nome?: string; telefoneWhatsapp?: string | null; whatsappLid?: string; ativo?: boolean } = {}) {
   return dbT.usuario.create({
-    data: { nome: "João", email: `joao-${Math.random().toString(36).slice(2)}@ij.test`, papel: "VENDEDOR", telefoneWhatsapp: "+5511999998888", ...extra },
+    data: {
+      nome: "João",
+      email: `joao-${Math.random().toString(36).slice(2)}@ij.test`,
+      papel: "VENDEDOR",
+      telefoneWhatsapp: "+5511999998888",
+      ...extra,
+    },
   });
 }
 
@@ -57,12 +64,18 @@ async function contagens() {
   return { inbox, brutas, enviadas, desconhecidos, descartadas: descartadas.reduce((s, c) => s + c.total, 0) };
 }
 
+const ZERO = { inbox: 0, brutas: 0, enviadas: 0, desconhecidos: 0, descartadas: 0 };
+
+function logs(spy: unknown): string {
+  return (spy as { mock: { calls: unknown[][] } }).mock.calls.map((c) => c.map(String).join(" ")).join("\n");
+}
+
 beforeEach(async () => {
   await limparBanco(TABELAS);
   process.env.EVOLUTION_WEBHOOK_SECRET = SEGREDO;
   process.env.GRUPO_JID = GRUPO_FIXTURE;
   process.env.EVOLUTION_API_URL = "http://evolution.test:8080";
-  process.env.EVOLUTION_API_KEY = "chave-evolution";
+  process.env.EVOLUTION_API_KEY = CHAVE_EVOLUTION;
   process.env.EVOLUTION_INSTANCE = "ij-crm";
   delete process.env.NOTIFICATIONS_ENABLED;
   vi.spyOn(console, "info").mockImplementation(() => {});
@@ -76,42 +89,82 @@ afterEach(async () => {
   process.env = { ...envOriginal };
 });
 
-describe("POST /api/webhooks/evolution — segredo", () => {
-  it("segredo errado → 401 e nada persistido", async () => {
+describe("POST /api/webhooks/evolution — autenticação", () => {
+  it("segredo errado no header e apikey errada no corpo → 401 e nada persistido", async () => {
     await vendedor();
-    const r = await postar("texto-grupo", { apikey: "errado" });
+    const r = await postar("texto-grupo", { "x-webhook-secret": "errado" });
     expect(r.status).toBe(401);
-    expect(await contagens()).toMatchObject({ inbox: 0, brutas: 0 });
+    expect(await contagens()).toEqual(ZERO);
   });
 
-  it("sem header → 401", async () => {
+  it("sem header e apikey do corpo ≠ EVOLUTION_API_KEY → 401", async () => {
     expect((await postar("texto-grupo", {})).status).toBe(401);
   });
 
-  it("EVOLUTION_WEBHOOK_SECRET vazio → 401 mesmo com header igual (falha fechada)", async () => {
-    process.env.EVOLUTION_WEBHOOK_SECRET = "";
-    expect((await postar("texto-grupo", { apikey: "" })).status).toBe(401);
-    delete process.env.EVOLUTION_WEBHOOK_SECRET;
-    expect((await postar("texto-grupo", { apikey: SEGREDO })).status).toBe(401);
-  });
-
-  it("aceita também x-webhook-secret", async () => {
+  it("header `apikey` também vale como segredo do webhook", async () => {
     await vendedor();
-    const r = await postar("texto-grupo", { "x-webhook-secret": SEGREDO });
+    const r = await postar("texto-grupo", { apikey: SEGREDO });
     expect(r.status).toBe(200);
     expect(r.json).toMatchObject({ ok: true });
   });
 
-  it("GRUPO_JID ausente → 503", async () => {
-    delete process.env.GRUPO_JID;
-    expect((await postar("texto-grupo")).status).toBe(503);
+  it("fallback: apikey do CORPO == EVOLUTION_API_KEY autentica sem header", async () => {
+    await vendedor();
+    const p = fixtureEvolution("texto-grupo");
+    p.apikey = CHAVE_EVOLUTION;
+    const r = await postar(p, {});
+    expect(r.status).toBe(200);
+    expect(r.json).toMatchObject({ ok: true, persistida: true });
   });
 
-  it("corpo que não é JSON → 400 (Evolution não re-tenta 4xx)", async () => {
+  it("fallback do corpo não vale com EVOLUTION_API_KEY fraca", async () => {
+    await vendedor();
+    process.env.EVOLUTION_API_KEY = "troque-me-openssl-rand-hex-32-xxxxxxxxxx";
+    const p = fixtureEvolution("texto-grupo");
+    p.apikey = "troque-me-openssl-rand-hex-32-xxxxxxxxxx";
+    expect((await postar(p, {})).status).toBe(401);
+    process.env.EVOLUTION_API_KEY = "curta";
+    p.apikey = "curta";
+    expect((await postar(p, {})).status).toBe(401);
+    expect(await contagens()).toEqual(ZERO);
+  });
+
+  it("EVOLUTION_WEBHOOK_SECRET vazio/ausente → header nunca autentica (falha fechada)", async () => {
+    delete process.env.EVOLUTION_API_KEY; // sem fallback também
+    process.env.EVOLUTION_WEBHOOK_SECRET = "";
+    expect((await postar("texto-grupo", { "x-webhook-secret": "" })).status).toBe(401);
+    delete process.env.EVOLUTION_WEBHOOK_SECRET;
+    expect((await postar("texto-grupo", { "x-webhook-secret": SEGREDO })).status).toBe(401);
+    expect(logs(console.error)).toContain("EVOLUTION_WEBHOOK_SECRET AUSENTE");
+  });
+
+  it.each(["troque-me-openssl-rand-hex-32-xxxxxxxxxx", "a".repeat(31)])(
+    "EVOLUTION_WEBHOOK_SECRET fraco (%j) → 401 mesmo com header igual",
+    async (fraco) => {
+      delete process.env.EVOLUTION_API_KEY;
+      process.env.EVOLUTION_WEBHOOK_SECRET = fraco;
+      const r = await postar("texto-grupo", { "x-webhook-secret": fraco });
+      expect(r.status).toBe(401);
+      expect(await contagens()).toEqual(ZERO);
+    },
+  );
+
+  it("GRUPO_JID ausente → 503 (depois da autenticação)", async () => {
+    delete process.env.GRUPO_JID;
+    expect((await postar("texto-grupo")).status).toBe(503);
+    expect((await postar("texto-grupo", { "x-webhook-secret": "errado" })).status).toBe(401);
+  });
+
+  it("corpo que não é JSON: 400 com header válido, 401 sem", async () => {
+    expect((await POST(requisicao("isto não é json"))).status).toBe(400);
+    expect((await POST(requisicao("isto não é json", {}))).status).toBe(401);
+  });
+
+  it("objeto vazio autenticado é payload inválido, ignorado com 200 e log só de campos", async () => {
     const r = await postar({} as Record<string, unknown>);
-    expect(r.status).toBe(200); // objeto vazio é payload inválido, ignorado
-    const res = await POST(requisicao("isto não é json"));
-    expect(res.status).toBe(400);
+    expect(r.status).toBe(200);
+    expect(r.json).toMatchObject({ ok: true, ignorado: true, motivo: "PAYLOAD_INVALIDO" });
+    expect(logs(console.warn)).toMatch(/payload inválido; campos: .*event/);
   });
 });
 
@@ -121,7 +174,9 @@ describe("POST /api/webhooks/evolution — filtros (200 sem efeito)", () => {
     const r = await postar(nome);
     expect(r.status).toBe(200);
     expect(r.json).toMatchObject({ ok: true, ignorado: true });
-    expect(await contagens()).toEqual({ inbox: 0, brutas: 0, enviadas: 0, desconhecidos: 0, descartadas: 0 });
+    expect(await contagens()).toEqual(ZERO);
+    // O log do descarte não carrega texto da mensagem.
+    expect(logs(console.info)).not.toContain("#crm");
   });
 });
 
@@ -159,12 +214,49 @@ describe("POST /api/webhooks/evolution — ingestão", () => {
     expect(bruta.texto).toBe("é da Economia Sensata #CRM");
   });
 
+  it.each(["efemera", "editada"] as const)("%s → persiste o texto desembrulhado", async (nome) => {
+    await vendedor();
+    const r = await postar(nome);
+    expect(r.json).toMatchObject({ persistida: true });
+    expect(await contagens()).toMatchObject({ inbox: 1, brutas: 1 });
+  });
+
   it("remetente @lid casado por Usuario.whatsappLid", async () => {
-    const u = await vendedor({ telefoneWhatsapp: undefined, whatsappLid: "123456789012345@lid" });
+    const u = await vendedor({ telefoneWhatsapp: null, whatsappLid: "123456789012345@lid" });
     const r = await postar("participante-lid");
     expect(r.json).toMatchObject({ persistida: true });
     const bruta = await dbT.mensagemBruta.findUniqueOrThrow({ where: { eventoId: "3EB0A1B2C3D4E5F60003" } });
     expect(bruta).toMatchObject({ remetenteUsuarioId: u.id, remetenteLid: "123456789012345@lid", remetenteTelefone: null });
+  });
+
+  it("participantAlt: usuário só com telefone é reconhecido; LID e telefone ficam gravados", async () => {
+    const u = await vendedor();
+    const r = await postar("participant-alt");
+    expect(r.json).toMatchObject({ persistida: true });
+    const bruta = await dbT.mensagemBruta.findUniqueOrThrow({ where: { eventoId: "3EB0A1B2C3D4E5F60007" } });
+    expect(bruta).toMatchObject({ remetenteUsuarioId: u.id, remetenteLid: "123456789012345@lid", remetenteTelefone: "+5511999998888" });
+  });
+
+  it("LID tem prioridade sobre telefone quando só o LID casa com outro usuário? não: LID e telefone em usuários diferentes → desconhecido + warn", async () => {
+    await vendedor({ nome: "Por LID", telefoneWhatsapp: null, whatsappLid: "123456789012345@lid" });
+    await vendedor({ nome: "Por telefone" });
+    const r = await postar("participant-alt");
+    expect(r.json).toMatchObject({ remetenteDesconhecido: true });
+    expect(await contagens()).toMatchObject({ inbox: 1, brutas: 0, desconhecidos: 1 });
+    // Chave do desconhecido é o LID quando presente.
+    expect(await dbT.remetenteDesconhecido.findUnique({ where: { lid: "123456789012345@lid" } })).toMatchObject({ total: 1 });
+    const aviso = logs(console.warn);
+    expect(aviso).toContain("remetente ambíguo");
+    expect(aviso).not.toContain("123456789012345");
+    expect(aviso).not.toContain("5511999998888");
+  });
+
+  it("LID e telefone apontando para o MESMO usuário → ok", async () => {
+    const u = await vendedor({ whatsappLid: "123456789012345@lid" });
+    const r = await postar("participant-alt");
+    expect(r.json).toMatchObject({ persistida: true });
+    const bruta = await dbT.mensagemBruta.findFirstOrThrow();
+    expect(bruta.remetenteUsuarioId).toBe(u.id);
   });
 
   it("mesmo key.id duas vezes → segunda responde duplicado e só existe uma MensagemBruta", async () => {
@@ -177,14 +269,29 @@ describe("POST /api/webhooks/evolution — ingestão", () => {
     expect(await contagens()).toMatchObject({ inbox: 1, brutas: 1 });
   });
 
+  it("violação de unicidade FORA do inbox não vira duplicado: 500 e inbox desfeito", async () => {
+    await vendedor();
+    // mensagem_bruta já tem esse evento_id (sem linha de inbox): o create da
+    // bruta falha com P2002 — isso é erro de verdade, não "já processado".
+    await dbT.mensagemBruta.create({
+      data: { eventoId: "3EB0A1B2C3D4E5F60001", grupoJid: GRUPO_FIXTURE, texto: "órfã", recebidaEm: new Date() },
+    });
+    const r = await postar("texto-grupo");
+    expect(r.status).toBe(500);
+    expect(r.json).toEqual({ erro: "falha_processamento" });
+    expect(await contagens()).toMatchObject({ inbox: 0, brutas: 1 });
+    const erro = logs(console.error);
+    expect(erro).toContain("PrismaClientKnownRequestError P2002");
+    expect(erro).not.toContain("Gustavo");
+  });
+
   it("sem tag → nada persistido, InboxEvento marcado e ContadorDescartadas do dia +1", async () => {
     await vendedor();
     const p = fixtureEvolution("texto-grupo");
     (p.data as { message: { conversation: string } }).message.conversation = "bom dia pessoal, alguém viu meu carregador?";
     const r = await postar(p);
     expect(r.json).toMatchObject({ ok: true, descartada: true });
-    const c = await contagens();
-    expect(c).toMatchObject({ inbox: 1, brutas: 0, enviadas: 0, desconhecidos: 0, descartadas: 1 });
+    expect(await contagens()).toMatchObject({ inbox: 1, brutas: 0, enviadas: 0, desconhecidos: 0, descartadas: 1 });
 
     // Segunda mensagem sem tag no mesmo dia soma no mesmo registro.
     (p.data as { key: { id: string } }).key.id = "3EB0A1B2C3D4E5F6ZZZZ";
@@ -194,12 +301,19 @@ describe("POST /api/webhooks/evolution — ingestão", () => {
     expect(linhas[0].total).toBe(2);
   });
 
-  it("remetente desconhecido → RemetenteDesconhecido (total acumula), nenhum conteúdo persistido", async () => {
+  it("sem tag de número DESCONHECIDO → só o contador; nem a identidade é registrada", async () => {
+    const p = fixtureEvolution("texto-grupo");
+    (p.data as { message: { conversation: string } }).message.conversation = "oi, quem é o responsável pelo grupo?";
+    const r = await postar(p);
+    expect(r.json).toMatchObject({ descartada: true });
+    expect(await contagens()).toMatchObject({ inbox: 1, brutas: 0, desconhecidos: 0, descartadas: 1 });
+  });
+
+  it("remetente desconhecido com #crm → RemetenteDesconhecido (total acumula), nenhum conteúdo persistido", async () => {
     const r = await postar("texto-grupo");
     expect(r.json).toMatchObject({ ok: true, remetenteDesconhecido: true });
     await postar("resposta-grupo");
-    const c = await contagens();
-    expect(c).toMatchObject({ inbox: 2, brutas: 0, enviadas: 0, desconhecidos: 1, descartadas: 0 });
+    expect(await contagens()).toMatchObject({ inbox: 2, brutas: 0, enviadas: 0, desconhecidos: 1, descartadas: 0 });
     const d = await dbT.remetenteDesconhecido.findFirstOrThrow();
     expect(d).toMatchObject({ telefone: "+5511999998888", lid: null, total: 2 });
 
@@ -208,21 +322,21 @@ describe("POST /api/webhooks/evolution — ingestão", () => {
     expect(await dbT.remetenteDesconhecido.findUnique({ where: { lid: "123456789012345@lid" } })).toMatchObject({ total: 1 });
   });
 
-  it("usuário inativo conta como desconhecido", async () => {
+  it("usuário inativo conta como desconhecido (se a mensagem tinha tag)", async () => {
     await vendedor({ ativo: false });
     const r = await postar("texto-grupo");
     expect(r.json).toMatchObject({ remetenteDesconhecido: true });
     expect(await contagens()).toMatchObject({ brutas: 0, desconhecidos: 1 });
   });
 
-  it("falha no processamento → 500 e NENHUMA linha de InboxEvento sobra (dedup atômico)", async () => {
+  it("falha no processamento → 500, log sem a mensagem do erro, e NENHUMA linha de InboxEvento sobra", async () => {
     await vendedor();
     const original = db.$transaction.bind(db);
     vi.spyOn(db, "$transaction").mockImplementationOnce(((fn: (tx: unknown) => Promise<unknown>) =>
       original(async (tx) => {
         const quebrado = new Proxy(tx as object, {
           get(alvo, prop, receptor) {
-            if (prop === "mensagemBruta") return { create: async () => { throw new Error("falha injetada"); } };
+            if (prop === "mensagemBruta") return { create: async () => { throw new Error("falha injetada com texto sensível"); } };
             return Reflect.get(alvo, prop, receptor);
           },
         });
@@ -231,7 +345,10 @@ describe("POST /api/webhooks/evolution — ingestão", () => {
 
     const r = await postar("texto-grupo");
     expect(r.status).toBe(500);
-    expect(await contagens()).toEqual({ inbox: 0, brutas: 0, enviadas: 0, desconhecidos: 0, descartadas: 0 });
+    expect(await contagens()).toEqual(ZERO);
+    const erro = logs(console.error);
+    expect(erro).toContain("falha ao processar evento 3EB0A1B2C3D4E5F60001: Error");
+    expect(erro).not.toContain("texto sensível");
 
     // Re-tentativa da Evolution processa normalmente.
     const r2 = await postar("texto-grupo");
@@ -241,7 +358,7 @@ describe("POST /api/webhooks/evolution — ingestão", () => {
 });
 
 describe("POST /api/webhooks/evolution — confirmação com NOTIFICATIONS_ENABLED=true", () => {
-  it("chama sendText citando a mensagem, depois da resposta, e persiste MensagemEnviada", async () => {
+  it("chama sendText citando a mensagem (key + texto), depois da resposta, e persiste MensagemEnviada", async () => {
     process.env.NOTIFICATIONS_ENABLED = "true";
     await vendedor();
     const fetchSpy = vi
@@ -257,7 +374,7 @@ describe("POST /api/webhooks/evolution — confirmação com NOTIFICATIONS_ENABL
     const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("http://evolution.test:8080/message/sendText/ij-crm");
     expect(init.method).toBe("POST");
-    expect(new Headers(init.headers).get("apikey")).toBe("chave-evolution");
+    expect(new Headers(init.headers).get("apikey")).toBe(CHAVE_EVOLUTION);
     expect(new Headers(init.headers).get("content-type")).toBe("application/json");
     expect(init.signal).toBeInstanceOf(AbortSignal);
     expect(JSON.parse(init.body as string)).toEqual({
@@ -265,6 +382,7 @@ describe("POST /api/webhooks/evolution — confirmação com NOTIFICATIONS_ENABL
       text: "📥 recebido",
       quoted: {
         key: { id: "3EB0A1B2C3D4E5F60002", remoteJid: GRUPO_FIXTURE, fromMe: false, participant: "5511999998888@s.whatsapp.net" },
+        message: { conversation: "é da Economia Sensata #CRM" },
       },
     });
 
@@ -280,6 +398,6 @@ describe("POST /api/webhooks/evolution — confirmação com NOTIFICATIONS_ENABL
     expect(r.status).toBe(200);
     await aguardarDepois();
     expect(await contagens()).toMatchObject({ brutas: 1, enviadas: 0 });
-    expect(console.error).toHaveBeenCalled();
+    expect(logs(console.error)).toContain("confirmação do evento 3EB0A1B2C3D4E5F60001 não enviada: ErroEnvioWhatsApp");
   });
 });
