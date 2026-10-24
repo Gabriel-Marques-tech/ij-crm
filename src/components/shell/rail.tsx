@@ -39,7 +39,7 @@ export function Rail() {
               )}
             >
               <Icon className="h-5 w-5" strokeWidth={active ? 2.25 : 1.75} />
-              <span className="leading-none">{item.label}</span>
+              <span className="text-center leading-tight">{item.label}</span>
             </Link>
           );
         })}

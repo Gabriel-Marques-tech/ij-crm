@@ -29,7 +29,7 @@ services:
     ports:
       - "3000:3000"
     volumes:
-      - .:/app
+      - .:/app:z
       - app_node_modules:/app/node_modules
       - app_next:/app/.next
     depends_on:
