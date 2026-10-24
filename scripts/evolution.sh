@@ -16,6 +16,7 @@
 set -euo pipefail
 # shellcheck source=scripts/_comum.sh
 source "$(dirname "${BASH_SOURCE[0]}")/_comum.sh"
+umask 077 # arquivos com segredo/QR: só o dono lê
 
 carregar_ambiente
 chave="$(ler_env EVOLUTION_API_KEY)"
