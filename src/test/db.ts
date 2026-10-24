@@ -15,8 +15,10 @@ export function urlDeTeste(): string {
     url = new URL(process.env.DATABASE_URL ?? "postgresql://ijcrm:ijcrm@localhost:5432/ijcrm");
     url.searchParams.set("schema", SCHEMA_TESTE);
   }
-  if (url.searchParams.get("schema") !== SCHEMA_TESTE) {
-    throw new Error(`URL de teste precisa usar schema=${SCHEMA_TESTE} (recebido: ${url.searchParams.get("schema")})`);
+  // Aceita ijcrm_test ou ijcrm_test_<sufixo>: worktrees paralelos usam schemas próprios.
+  const schema = url.searchParams.get("schema") ?? "";
+  if (schema !== SCHEMA_TESTE && !schema.startsWith(`${SCHEMA_TESTE}_`)) {
+    throw new Error(`URL de teste precisa usar schema=${SCHEMA_TESTE} ou ${SCHEMA_TESTE}_<sufixo> (recebido: ${schema})`);
   }
   return url.toString();
 }
