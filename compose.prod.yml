@@ -1,0 +1,225 @@
+# Produção (GAB-30) — VPS Linux, docker compose puro (design §4.1).
+#
+#   cp .env.prod.example .env    # e preencha (ver comentários lá)
+#   scripts/deploy.sh            # build → backup → migrations (one-shot) → up -d → health
+#
+# Migrations NÃO rodam no boot do app: são o serviço one-shot `migrate`
+# (perfil `ops`), chamado pelo deploy.sh antes de subir a imagem nova.
+# Só o Caddy publica portas (80/443). App e Evolution ficam na rede `edge`
+# (alcançados pelo Caddy e com saída para a internet: Anthropic, WhatsApp);
+# bancos e Redis só na rede `interno`, sem saída nenhuma.
+# Runbook: docs/runbook.md.
+
+# Nome fixo: não colide com o projeto de dev (`ij-crm`, mesmo diretório).
+# COMPOSE_PROJECT_NAME ou `-p` sobrescrevem (teste local usa outro nome).
+name: ij-crm-prod
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+x-app-image: &app-build
+  context: .
+  dockerfile: Dockerfile
+
+services:
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    logging: *logging
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+      - "${HTTPS_PORT:-443}:443/udp"
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:?defina APP_DOMAIN no .env}
+      EVOLUTION_DOMAIN: ${EVOLUTION_DOMAIN:?defina EVOLUTION_DOMAIN no .env}
+      ACME_EMAIL: ${ACME_EMAIL:?defina ACME_EMAIL no .env}
+    volumes:
+      # :z = label SELinux (hosts Fedora/RHEL); inofensivo em Debian/Ubuntu.
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro,z
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [edge]
+    depends_on:
+      app:
+        condition: service_healthy
+    healthcheck:
+      # API admin do Caddy (só loopback dentro do container).
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:2019/config/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  app:
+    image: ${APP_IMAGE:-ij-crm/app}:${APP_TAG:-latest}
+    build:
+      <<: *app-build
+      target: runtime
+    restart: unless-stopped
+    logging: *logging
+    environment: &app-env
+      NODE_ENV: production
+      DATABASE_URL: postgresql://ijcrm:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}@db:5432/ijcrm?schema=public
+      APP_URL: https://${APP_DOMAIN}
+      EVOLUTION_API_URL: http://evolution:8080
+      EVOLUTION_API_KEY: ${EVOLUTION_API_KEY:?defina EVOLUTION_API_KEY no .env}
+      EVOLUTION_INSTANCE: ${EVOLUTION_INSTANCE:-ij-crm}
+      EVOLUTION_WEBHOOK_SECRET: ${EVOLUTION_WEBHOOK_SECRET:?defina EVOLUTION_WEBHOOK_SECRET no .env}
+      GRUPO_JID: ${GRUPO_JID:-}
+      # Safe mode: só "true" libera envio real. Só o .env de PRODUÇÃO define true.
+      NOTIFICATIONS_ENABLED: ${NOTIFICATIONS_ENABLED:-false}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      LLM_EXTRACAO_MODELO: ${LLM_EXTRACAO_MODELO:-claude-sonnet-5-5}
+      LLM_CLASSIFICACAO_MODELO: ${LLM_CLASSIFICACAO_MODELO:-claude-haiku-5-5}
+      CRON_SECRET: ${CRON_SECRET:?defina CRON_SECRET no .env}
+    networks: [edge, interno]
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+
+  # One-shot: `docker compose -f compose.prod.yml run --rm migrate` (deploy.sh faz isso).
+  # Também serve para seed e admin: `... run --rm migrate ./node_modules/.bin/prisma db seed`.
+  migrate:
+    image: ${OPS_IMAGE:-ij-crm/ops}:${APP_TAG:-latest}
+    build:
+      <<: *app-build
+      target: ops
+    profiles: ["ops"]
+    logging: *logging
+    environment: *app-env
+    networks: [interno]
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["./node_modules/.bin/prisma", "migrate", "deploy"]
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      POSTGRES_USER: ijcrm
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
+      POSTGRES_DB: ijcrm
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    networks: [interno]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ijcrm -d ijcrm"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ---- WhatsApp: Evolution API v2 (mesma config de privacidade do compose.yml de dev) ----
+  evolution:
+    image: evoapicloud/evolution-api:v2.3.7
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      # URL pública (atrás do Caddy): usada pela Evolution para montar links do manager.
+      SERVER_URL: https://${EVOLUTION_DOMAIN}
+      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY:?defina EVOLUTION_API_KEY no .env}
+      AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES: "true"
+      DATABASE_PROVIDER: postgresql
+      DATABASE_CONNECTION_URI: postgresql://evolution:${EVOLUTION_DB_PASSWORD:?defina EVOLUTION_DB_PASSWORD no .env}@evolution-db:5432/evolution?schema=public
+      DATABASE_CONNECTION_CLIENT_NAME: ij-crm
+      DATABASE_SAVE_DATA_INSTANCE: "true"
+      # Design §2: conteúdo que não é venda não fica em lugar nenhum — nem no banco da Evolution.
+      DATABASE_SAVE_DATA_NEW_MESSAGE: "false"
+      DATABASE_SAVE_MESSAGE_UPDATE: "false"
+      DATABASE_SAVE_DATA_CONTACTS: "false"
+      DATABASE_SAVE_DATA_CHATS: "false"
+      DATABASE_SAVE_DATA_LABELS: "false"
+      DATABASE_SAVE_DATA_HISTORIC: "false"
+      DATABASE_SAVE_IS_ON_WHATSAPP: "false"
+      CACHE_REDIS_ENABLED: "true"
+      CACHE_REDIS_URI: redis://evolution-redis:6379/1
+      CACHE_REDIS_PREFIX_KEY: evolution
+      CACHE_REDIS_SAVE_INSTANCES: "false"
+      CACHE_LOCAL_ENABLED: "false"
+      # Webhook é configurado POR INSTÂNCIA (runbook); o global fica desligado.
+      WEBHOOK_GLOBAL_ENABLED: "false"
+      WEBHOOK_EVENTS_MESSAGES_UPSERT: "true"
+      # Re-tentativas: 5xx/timeout re-tentam; 4xx não (app devolve 4xx só para erro definitivo).
+      WEBHOOK_REQUEST_TIMEOUT_MS: "30000"
+      WEBHOOK_RETRY_MAX_ATTEMPTS: "5"
+      WEBHOOK_RETRY_INITIAL_DELAY_SECONDS: "5"
+      WEBHOOK_RETRY_USE_EXPONENTIAL_BACKOFF: "true"
+      WEBHOOK_RETRY_MAX_DELAY_SECONDS: "120"
+      WEBHOOK_RETRY_JITTER_FACTOR: "0.2"
+      WEBHOOK_RETRY_NON_RETRYABLE_STATUS_CODES: "400,401,403,404,422"
+      CONFIG_SESSION_PHONE_CLIENT: IJ CRM
+      CONFIG_SESSION_PHONE_NAME: Chrome
+      DEL_INSTANCE: "false"
+      QRCODE_LIMIT: "30"
+      LANGUAGE: pt-BR
+      LOG_LEVEL: ERROR,WARN,INFO
+      LOG_BAILEYS: error
+    volumes:
+      - evolution_instances:/evolution/instances
+    networks: [edge, interno]
+    depends_on:
+      evolution-db:
+        condition: service_healthy
+      evolution-redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/"]
+      interval: 15s
+      timeout: 5s
+      start_period: 60s
+      retries: 5
+
+  evolution-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      POSTGRES_USER: evolution
+      POSTGRES_PASSWORD: ${EVOLUTION_DB_PASSWORD:?defina EVOLUTION_DB_PASSWORD no .env}
+      POSTGRES_DB: evolution
+    volumes:
+      - evolution_db_data:/var/lib/postgresql/data
+    networks: [interno]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U evolution -d evolution"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  evolution-redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    logging: *logging
+    command: redis-server --appendonly yes
+    volumes:
+      - evolution_redis_data:/data
+    networks: [interno]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+networks:
+  edge:
+  interno:
+    # Sem rota para fora: bancos/Redis não falam com a internet.
+    internal: true
+
+volumes:
+  db_data:
+  caddy_data:
+  caddy_config:
+  evolution_instances:
+  evolution_db_data:
+  evolution_redis_data:

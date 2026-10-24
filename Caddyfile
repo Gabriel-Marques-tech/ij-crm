@@ -1,0 +1,43 @@
+# Reverse proxy de produção (GAB-30). Domínios e email vêm do .env via compose.
+# HTTPS automático: Let's Encrypt para domínios públicos; para `localhost` /
+# `*.localhost` o Caddy usa a CA interna dele (teste local, ver runbook).
+{
+	email {$ACME_EMAIL}
+}
+
+(seguranca) {
+	header {
+		# `defer`: aplica depois da resposta do upstream, sobrescrevendo o que vier dele.
+		defer
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Content-Security-Policy "frame-ancestors 'none'"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		-Server
+		-X-Powered-By
+	}
+}
+
+{$APP_DOMAIN} {
+	import seguranca
+	encode zstd gzip
+
+	# /api/cron/* só é chamado pelo cron do HOST (scripts/cron-reprocessar.sh, via
+	# 127.0.0.1 → chega aqui com IP da bridge do Docker). De fora: 404. O segredo
+	# no header continua sendo a proteção principal; isto é defesa em profundidade.
+	@cron_externo {
+		path /api/cron/*
+		not remote_ip private_ranges
+	}
+	respond @cron_externo 404
+
+	reverse_proxy app:3000
+}
+
+{$EVOLUTION_DOMAIN} {
+	import seguranca
+	# API da Evolution exige o header `apikey`; o /manager pede a mesma chave no login.
+	reverse_proxy evolution:8080
+}
