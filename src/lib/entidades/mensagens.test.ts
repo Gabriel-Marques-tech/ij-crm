@@ -18,6 +18,10 @@ describe("mensagens de duplicado", () => {
   });
 
   it("CNPJ repetido cita a empresa", () => {
-    expect(mensagemFalhaEmpresa({ ok: false, erro: "CNPJ_DUPLICADO", empresa: { id: "e1", nome: "Acme" } }).erro).toBe("Esse CNPJ já é de Acme.");
+    expect(mensagemFalhaEmpresa({ ok: false, erro: "CNPJ_DUPLICADO", empresa: { id: "e1", nome: "Acme", deletado: false } })).toEqual({
+      erro: "Esse CNPJ já é de Acme.",
+      duplicado: { tipo: "empresa", id: "e1", nome: "Acme", deletado: false },
+    });
+    expect(mensagemFalhaEmpresa({ ok: false, erro: "CNPJ_DUPLICADO", empresa: { id: "e1", nome: "Acme", deletado: true } }).erro).toBe("Esse CNPJ já é de Acme (empresa excluída).");
   });
 });

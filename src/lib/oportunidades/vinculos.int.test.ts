@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { dbTeste, limparBanco } from "@/test/db";
-import { vincularAoCard } from "./vinculos";
+import { obterVinculosDoCard, vincularAoCard } from "./vinculos";
 
 const db = dbTeste();
 
@@ -57,5 +57,28 @@ describe("vincularAoCard", () => {
     await db.oportunidade.update({ where: { id: card.id }, data: { deletadoEm: new Date() } });
     expect(await vincularAoCard(card.id, "contato", destino.id, u)).toEqual({ ok: false, erro: "CARD_NAO_ENCONTRADO" });
     expect(await db.timeline.count()).toBe(0);
+  });
+});
+
+describe("obterVinculosDoCard", () => {
+  it("empresa mesclada aponta o destino; contato excluído vem marcado; nada aparece como ativo", async () => {
+    const { card } = await semear();
+    const destino = await db.empresa.create({ data: { nome: "Beta" } });
+    const mesclada = await db.empresa.create({ data: { nome: "Beta dup", mergedIntoId: destino.id } });
+    const morto = await db.contato.create({ data: { nome: "Morto", deletadoEm: new Date() } });
+    await db.oportunidade.update({ where: { id: card.id }, data: { empresaId: mesclada.id, contatoId: morto.id } });
+    expect(await obterVinculosDoCard(card.id)).toEqual({
+      empresa: { estado: "MESCLADO", id: mesclada.id, nome: "Beta dup", destino: { id: destino.id, nome: "Beta" } },
+      contato: { estado: "EXCLUIDO", id: morto.id, nome: "Morto" },
+    });
+  });
+
+  it("vivos → ATIVO; sem vínculo → null; card soft-deletado → null", async () => {
+    const { card } = await semear();
+    const acme = await db.empresa.create({ data: { nome: "Acme" } });
+    await db.oportunidade.update({ where: { id: card.id }, data: { empresaId: acme.id } });
+    expect(await obterVinculosDoCard(card.id)).toEqual({ empresa: { estado: "ATIVO", id: acme.id, nome: "Acme" }, contato: null });
+    await db.oportunidade.update({ where: { id: card.id }, data: { deletadoEm: new Date() } });
+    expect(await obterVinculosDoCard(card.id)).toBeNull();
   });
 });

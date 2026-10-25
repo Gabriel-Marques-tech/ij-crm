@@ -61,7 +61,7 @@ describe("normalizarTelefoneBr — nono dígito", () => {
 
   it("com e sem o 9 chegam ao mesmo valor", () => {
     const variantes = ["11 99999-8888", "11 9999-8888", "+5511999998888", "5511999998888", "551199998888", "+55 (11) 9999-8888"];
-    expect(new Set(variantes.map(normalizarTelefoneBr))).toEqual(new Set(["+5511999998888"]));
+    expect(new Set(variantes.map((v) => normalizarTelefoneBr(v)))).toEqual(new Set(["+5511999998888"]));
   });
 
   it("fixo (começa com 2–5) nunca ganha o 9", () => {

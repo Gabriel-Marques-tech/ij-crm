@@ -11,6 +11,7 @@
  */
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
+import { SELECAO_REF, descreverVinculo, type Vinculo } from "@/lib/entidades/vinculo";
 
 export type CampoVinculo = "empresa" | "contato";
 
@@ -42,6 +43,21 @@ async function alvoVivo(tx: Tx, campo: CampoVinculo, id: string): Promise<{ id: 
       : await tx.contato.findFirst({ where: { id, ...VIVO }, select: { id: true, nome: true } });
   if (!achado) throw new ErroDeRegra(campo === "empresa" ? "EMPRESA_NAO_ENCONTRADA" : "CONTATO_NAO_ENCONTRADO");
   return achado;
+}
+
+/**
+ * Empresa e contato do card como devem ser EXIBIDOS: vínculo para registro
+ * excluído/mesclado aparece como tal (com o destino do merge), nunca como
+ * ativo. null = card não encontrado.
+ */
+export async function obterVinculosDoCard(cardId: string): Promise<{ empresa: Vinculo | null; contato: Vinculo | null } | null> {
+  const card = await db.oportunidade.findFirst({
+    where: { id: cardId, deletadoEm: null },
+    select: { empresa: { select: SELECAO_REF }, contato: { select: SELECAO_REF } },
+  });
+  if (!card) return null;
+  const [empresa, contato] = await Promise.all([descreverVinculo("empresa", card.empresa), descreverVinculo("contato", card.contato)]);
+  return { empresa, contato };
 }
 
 /** Vincula (`alvoId`) ou desvincula (`null`) a empresa/contato do card. */

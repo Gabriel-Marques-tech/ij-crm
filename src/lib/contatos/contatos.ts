@@ -16,10 +16,13 @@ import { Prisma, type TipoContatoPonto } from "@prisma/client";
 import { db } from "@/lib/db";
 import { normalizarPonto, type PontoNormalizado } from "@/lib/normalizacao";
 import { interpretarCampoContato, validarNome, type CampoContato } from "@/lib/entidades/campos";
-import { ordenarPorPrefixo } from "@/lib/entidades/busca";
+import { prefixoPrimeiro, termoDeBusca } from "@/lib/entidades/busca";
+import { SELECAO_REF, descreverVinculos } from "@/lib/entidades/vinculo";
+import { resolverContatos } from "./match";
 
 type Cliente = Prisma.TransactionClient;
 
+/** Dono de um ponto = fim da cadeia de merge. `deletado` → a UI não oferece link nem vínculo. */
 export type DonoPonto = { id: string; nome: string; deletado: boolean };
 
 export type FalhaContato =
@@ -40,7 +43,11 @@ const VIVO = { deletadoEm: null, mergedIntoId: null } as const;
 
 export const PONTO_MAX = 200;
 
-/** Normaliza a lista do formulário; repetição (mesmo valor normalizado) conta uma vez. */
+/**
+ * Normaliza a lista do formulário; repetição (mesmo valor normalizado) conta
+ * uma vez. Sai ordenada por (tipo, valor): dois inserts concorrentes tocam o
+ * índice único na mesma ordem e não se travam em deadlock (40P01).
+ */
 function normalizarLista(entradas: string[]): (PontoNormalizado & { valorOriginal: string })[] {
   const vistos = new Map<string, PontoNormalizado & { valorOriginal: string }>();
   for (const bruto of entradas) {
@@ -51,28 +58,32 @@ function normalizarLista(entradas: string[]): (PontoNormalizado & { valorOrigina
     const chave = `${p.tipo}:${p.valorNormalizado}`;
     if (!vistos.has(chave)) vistos.set(chave, { ...p, valorOriginal: original });
   }
-  return [...vistos.values()];
+  return [...vistos.values()].sort((a, b) => (a.tipo === b.tipo ? (a.valorNormalizado < b.valorNormalizado ? -1 : 1) : a.tipo < b.tipo ? -1 : 1));
 }
 
-async function donoDoPonto(cliente: Cliente, p: PontoNormalizado): Promise<DonoPonto | null> {
+/** Ponto já gravado: id, contato que o guarda e o dono resolvido (cadeia de merge). */
+async function pontoExistente(cliente: Cliente, p: PontoNormalizado): Promise<{ id: string; contatoId: string; dono: DonoPonto } | null> {
   const existente = await cliente.contatoPonto.findUnique({
     where: { tipo_valorNormalizado: { tipo: p.tipo, valorNormalizado: p.valorNormalizado } },
-    select: { contato: { select: { id: true, nome: true, deletadoEm: true } } },
+    select: { id: true, contatoId: true, contato: { select: { nome: true } } },
   });
-  return existente ? { id: existente.contato.id, nome: existente.contato.nome, deletado: existente.contato.deletadoEm !== null } : null;
+  if (!existente) return null;
+  const r = (await resolverContatos([existente.contatoId], cliente)).get(existente.contatoId);
+  // Cadeia quebrada (ciclo) conta como excluído: sem link, sem "vincular?".
+  const dono = r ? { id: r.id, nome: r.nome, deletado: r.deletado } : { id: existente.contatoId, nome: existente.contato.nome, deletado: true };
+  return { id: existente.id, contatoId: existente.contatoId, dono };
 }
 
-function ehUnicoViolado(e: unknown): boolean {
-  return e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002";
+function duplicado(p: PontoNormalizado, dono: DonoPonto): FalhaContato {
+  return { ok: false, erro: "PONTO_DUPLICADO", ponto: { tipo: p.tipo, valorNormalizado: p.valorNormalizado }, contato: dono };
 }
 
-/** Corrida perdida no unique: descobre quem ficou com o ponto. */
-async function falhaDeCorrida(pontos: PontoNormalizado[], excetoContatoId?: string): Promise<FalhaContato | null> {
-  for (const p of pontos) {
-    const dono = await donoDoPonto(db, p);
-    if (dono && dono.id !== excetoContatoId) return { ok: false, erro: "PONTO_DUPLICADO", ponto: { tipo: p.tipo, valorNormalizado: p.valorNormalizado }, contato: dono };
-  }
-  return null;
+/** P2002 no unique de `contato_ponto (tipo, valor_normalizado)` — e só nele. */
+function ehPontoDuplicadoNoBanco(e: unknown): boolean {
+  if (!(e instanceof Prisma.PrismaClientKnownRequestError) || e.code !== "P2002") return false;
+  const alvo = (e.meta as { target?: unknown; modelName?: unknown } | undefined)?.target;
+  const texto = Array.isArray(alvo) ? alvo.join(",") : String(alvo ?? "");
+  return /valor_?normalizado/i.test(texto);
 }
 
 async function empresaViva(cliente: Cliente, empresaId: string): Promise<boolean> {
@@ -92,8 +103,8 @@ export async function criarContato(dados: { nome: string; empresaId?: string | n
     const id = await db.$transaction(async (tx) => {
       if (dados.empresaId && !(await empresaViva(tx, dados.empresaId))) throw new Falha({ ok: false, erro: "EMPRESA_NAO_ENCONTRADA" });
       for (const p of pontos) {
-        const dono = await donoDoPonto(tx, p);
-        if (dono) throw new Falha({ ok: false, erro: "PONTO_DUPLICADO", ponto: { tipo: p.tipo, valorNormalizado: p.valorNormalizado }, contato: dono });
+        const existente = await pontoExistente(tx, p);
+        if (existente) throw new Falha(duplicado(p, existente.dono));
       }
       const c = await tx.contato.create({
         data: { nome, empresaId: dados.empresaId || null, cargo: cargo.valor, pontos: { create: pontos } },
@@ -104,9 +115,12 @@ export async function criarContato(dados: { nome: string; empresaId?: string | n
     return { ok: true, id };
   } catch (e) {
     if (e instanceof Falha) return e.falha;
-    if (ehUnicoViolado(e)) {
-      const f = await falhaDeCorrida(pontos);
-      if (f) return f;
+    if (ehPontoDuplicadoNoBanco(e)) {
+      // Corrida perdida: descobre quem ficou com o ponto.
+      for (const p of pontos) {
+        const existente = await pontoExistente(db, p);
+        if (existente) return duplicado(p, existente.dono);
+      }
     }
     throw e;
   }
@@ -124,23 +138,19 @@ export async function adicionarPonto(contatoId: string, bruto: string, tipo?: Ti
     return await db.$transaction(async (tx) => {
       const c = await tx.contato.findFirst({ where: { id: contatoId, ...VIVO }, select: { id: true } });
       if (!c) throw new Falha({ ok: false, erro: "CONTATO_NAO_ENCONTRADO" });
-      const existente = await tx.contatoPonto.findUnique({
-        where: { tipo_valorNormalizado: { tipo: p.tipo, valorNormalizado: p.valorNormalizado } },
-        select: { id: true, contatoId: true },
-      });
+      const existente = await pontoExistente(tx, p);
       if (existente?.contatoId === contatoId) return { ok: true as const, pontoId: existente.id, jaExistia: true };
-      if (existente) {
-        const dono = (await donoDoPonto(tx, p))!;
-        throw new Falha({ ok: false, erro: "PONTO_DUPLICADO", ponto: p, contato: dono });
-      }
+      if (existente) throw new Falha(duplicado(p, existente.dono));
       const novo = await tx.contatoPonto.create({ data: { contatoId, ...p, valorOriginal: original }, select: { id: true } });
       return { ok: true as const, pontoId: novo.id, jaExistia: false };
     });
   } catch (e) {
     if (e instanceof Falha) return e.falha;
-    if (ehUnicoViolado(e)) {
-      const f = await falhaDeCorrida([p], contatoId);
-      if (f) return f;
+    if (ehPontoDuplicadoNoBanco(e)) {
+      const existente = await pontoExistente(db, p);
+      // Duplo envio do mesmo formulário: o outro insert foi deste contato.
+      if (existente?.contatoId === contatoId) return { ok: true, pontoId: existente.id, jaExistia: true };
+      if (existente) return duplicado(p, existente.dono);
     }
     throw e;
   }
@@ -170,12 +180,14 @@ export async function definirEmpresaDoContato(id: string, empresaId: string | nu
 const LISTA_MAX = 200;
 
 /**
- * Lista para `/contatos`. Busca por nome (ILIKE, só para exibir) **ou** por
- * telefone/email: se a busca normaliza como ponto, casa o valor exato.
+ * Lista para `/contatos`. Busca por nome (ILIKE escapado, só para exibir)
+ * **ou** por telefone/email: se a busca normaliza como ponto, casa o valor
+ * exato. A empresa de cada contato vem descrita (`Vinculo`): excluída ou
+ * mesclada nunca aparece como ativa.
  */
 export async function listarContatos(busca?: string) {
-  const q = busca?.trim() ?? "";
-  const ponto = q ? normalizarPonto(q) : null;
+  const q = termoDeBusca(busca);
+  const ponto = busca?.trim() ? normalizarPonto(busca.trim()) : null;
   const filtro: Prisma.ContatoWhereInput = q
     ? {
         OR: [
@@ -184,7 +196,7 @@ export async function listarContatos(busca?: string) {
         ],
       }
     : {};
-  return db.contato.findMany({
+  const lista = await db.contato.findMany({
     where: { ...VIVO, ...filtro },
     orderBy: [{ nome: "asc" }, { id: "asc" }],
     take: LISTA_MAX,
@@ -192,19 +204,21 @@ export async function listarContatos(busca?: string) {
       id: true,
       nome: true,
       cargo: true,
-      empresa: { select: { id: true, nome: true } },
+      empresa: { select: SELECAO_REF },
       pontos: { orderBy: { criadoEm: "asc" }, select: { id: true, tipo: true, valorNormalizado: true } },
       _count: { select: { oportunidades: { where: { deletadoEm: null } } } },
     },
   });
+  const empresas = await descreverVinculos("empresa", lista.map((c) => c.empresa));
+  return lista.map((c) => ({ ...c, empresa: c.empresa ? (empresas.get(c.empresa.id) ?? null) : null }));
 }
 
 export async function obterContato(id: string) {
-  return db.contato.findFirst({
+  const c = await db.contato.findFirst({
     where: { id, ...VIVO },
     include: {
-      empresa: { select: { id: true, nome: true, deletadoEm: true } },
-      pontos: { orderBy: { criadoEm: "asc" } },
+      empresa: { select: SELECAO_REF },
+      pontos: { orderBy: [{ tipo: "asc" }, { criadoEm: "asc" }] },
       oportunidades: {
         where: { deletadoEm: null },
         orderBy: [{ atualizadoEm: "desc" }, { id: "asc" }],
@@ -214,11 +228,15 @@ export async function obterContato(id: string) {
           pipeline: { select: { chave: true, nome: true } },
           fase: { select: { nome: true, tipoTerminal: true } },
           responsavel: { select: { nome: true } },
-          empresa: { select: { id: true, nome: true } },
+          empresa: { select: SELECAO_REF },
         },
       },
     },
   });
+  if (!c) return null;
+  const empresas = await descreverVinculos("empresa", [c.empresa, ...c.oportunidades.map((o) => o.empresa)]);
+  const desc = (r: { id: string } | null) => (r ? (empresas.get(r.id) ?? null) : null);
+  return { ...c, empresa: desc(c.empresa), oportunidades: c.oportunidades.map((o) => ({ ...o, empresa: desc(o.empresa) })) };
 }
 
 export type DetalheContato = NonNullable<Awaited<ReturnType<typeof obterContato>>>;
@@ -227,15 +245,16 @@ export type OpcaoContato = { id: string; nome: string; empresa: string | null };
 
 /** Autocomplete por nome (só exibição; vínculo é explícito): prefixo primeiro, depois "contém". */
 export async function buscarContatosPorNome(busca: string, limite = 8): Promise<OpcaoContato[]> {
-  const q = busca.trim().slice(0, 100);
+  const q = termoDeBusca(busca);
   if (!q) return [];
-  const achados = await db.contato.findMany({
-    where: { ...VIVO, nome: { contains: q, mode: "insensitive" } },
-    orderBy: [{ nome: "asc" }, { id: "asc" }],
-    take: limite * 3,
-    select: { id: true, nome: true, empresa: { select: { nome: true } } },
-  });
-  return ordenarPorPrefixo(achados, q)
-    .slice(0, limite)
-    .map((c) => ({ id: c.id, nome: c.nome, empresa: c.empresa?.nome ?? null }));
+  const achados = await prefixoPrimeiro(limite, (modo, excluir, take) =>
+    db.contato.findMany({
+      where: { ...VIVO, nome: modo === "prefixo" ? { startsWith: q, mode: "insensitive" } : { contains: q, mode: "insensitive" }, id: { notIn: excluir } },
+      orderBy: [{ nome: "asc" }, { id: "asc" }],
+      take,
+      // Só empresa viva aparece como detalhe da opção.
+      select: { id: true, nome: true, empresa: { select: { nome: true, deletadoEm: true, mergedIntoId: true } } },
+    }),
+  );
+  return achados.map((c) => ({ id: c.id, nome: c.nome, empresa: c.empresa && !c.empresa.deletadoEm && !c.empresa.mergedIntoId ? c.empresa.nome : null }));
 }

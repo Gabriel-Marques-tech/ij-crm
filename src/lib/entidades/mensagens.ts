@@ -7,7 +7,7 @@ import type { FalhaContato } from "@/lib/contatos/contatos";
 import type { FalhaEmpresa } from "@/lib/empresas/empresas";
 import type { ErroVinculo } from "@/lib/oportunidades/vinculos";
 
-/** Dono de um identificador que o usuário tentou repetir (para "vincular?" / "ver"). */
+/** Dono de um identificador que o usuário tentou repetir (para "vincular?" / "ver"). `deletado` → a UI não mostra link. */
 export type Duplicado = { tipo: "contato" | "empresa"; id: string; nome: string; deletado?: boolean };
 
 export type EstadoEntidade = { ok?: true; erro?: string; id?: string; duplicado?: Duplicado } | Inesperado;
@@ -43,7 +43,10 @@ export function mensagemFalhaEmpresa(f: FalhaEmpresa): { erro: string; duplicado
     case "CAMPO_INVALIDO":
       return { erro: f.mensagem };
     case "CNPJ_DUPLICADO":
-      return { erro: `Esse CNPJ já é de ${f.empresa.nome}.`, duplicado: { tipo: "empresa", id: f.empresa.id, nome: f.empresa.nome } };
+      return {
+        erro: `Esse CNPJ já é de ${f.empresa.deletado ? `${f.empresa.nome} (empresa excluída)` : f.empresa.nome}.`,
+        duplicado: { tipo: "empresa", id: f.empresa.id, nome: f.empresa.nome, deletado: f.empresa.deletado },
+      };
   }
 }
 

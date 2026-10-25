@@ -134,3 +134,70 @@ describe("leitura", () => {
     expect(await buscarContatosPorNome(" ")).toEqual([]);
   });
 });
+
+describe("review: busca", () => {
+  it("curingas do LIKE são literais: '%' e '_' não listam tudo", async () => {
+    await criarContato({ nome: "Bruno" });
+    await criarContato({ nome: "Desconto 50% Ltda" });
+    await criarContato({ nome: "a_b" });
+    expect((await listarContatos("%")).map((c) => c.nome)).toEqual(["Desconto 50% Ltda"]);
+    expect((await listarContatos("_")).map((c) => c.nome)).toEqual(["a_b"]);
+    expect(await buscarContatosPorNome("%")).toEqual([expect.objectContaining({ nome: "Desconto 50% Ltda" })]);
+    expect(await buscarContatosPorNome("\\")).toEqual([]);
+  });
+
+  it("prefixo primeiro mesmo quando há mais 'contém' que o limite", async () => {
+    for (const n of ["Ana Gus 1", "Ana Gus 2", "Ana Gus 3", "Gus Final"]) await criarContato({ nome: n });
+    expect((await buscarContatosPorNome("gus", 2)).map((c) => c.nome)).toEqual(["Gus Final", "Ana Gus 1"]);
+  });
+
+  it("opção do autocomplete não mostra empresa excluída", async () => {
+    const e = await db.empresa.create({ data: { nome: "Morta", deletadoEm: new Date() } });
+    await db.contato.create({ data: { nome: "Ana", empresaId: e.id } });
+    expect(await buscarContatosPorNome("ana")).toEqual([expect.objectContaining({ nome: "Ana", empresa: null })]);
+  });
+});
+
+describe("review: concorrência e duplicados", () => {
+  it("duplo envio do mesmo ponto no mesmo contato: os dois ok, um registro", async () => {
+    const a = await criarContato({ nome: "Ana" });
+    if (!a.ok) throw new Error("setup");
+    const rs = await Promise.all([adicionarPonto(a.id, "ana@acme.com"), adicionarPonto(a.id, "ANA@acme.com"), adicionarPonto(a.id, "<ana@acme.com>")]);
+    expect(rs.every((r) => r.ok)).toBe(true);
+    expect(await db.contatoPonto.count()).toBe(1);
+  });
+
+  it("criações concorrentes com os mesmos pontos em ordem trocada: uma ganha, a outra recebe PONTO_DUPLICADO (sem deadlock)", async () => {
+    const rs = await Promise.all([
+      criarContato({ nome: "A", pontos: ["a@acme.com", "11 99999-0001", "b@acme.com"] }),
+      criarContato({ nome: "B", pontos: ["b@acme.com", "11 99999-0001", "a@acme.com"] }),
+    ]);
+    expect(rs.filter((r) => r.ok)).toHaveLength(1);
+    expect(rs.find((r) => !r.ok)).toMatchObject({ ok: false, erro: "PONTO_DUPLICADO" });
+    expect(await db.contato.count()).toBe(1);
+  });
+
+  it("dono do ponto resolve a cadeia de merge; excluído vem marcado", async () => {
+    const destino = await db.contato.create({ data: { nome: "Ana (principal)" } });
+    await db.contato.create({ data: { nome: "Ana dup", mergedIntoId: destino.id, pontos: { create: { tipo: "EMAIL", valorNormalizado: "ana@acme.com", valorOriginal: "x" } } } });
+    await db.contato.create({ data: { nome: "Morto", deletadoEm: new Date(), pontos: { create: { tipo: "EMAIL", valorNormalizado: "morto@acme.com", valorOriginal: "x" } } } });
+    expect(await criarContato({ nome: "X", pontos: ["ana@acme.com"] })).toMatchObject({ erro: "PONTO_DUPLICADO", contato: { id: destino.id, nome: "Ana (principal)", deletado: false } });
+    expect(await criarContato({ nome: "X", pontos: ["morto@acme.com"] })).toMatchObject({ erro: "PONTO_DUPLICADO", contato: { nome: "Morto", deletado: true } });
+  });
+});
+
+describe("review: vínculo morto nunca aparece como ativo", () => {
+  it("empresa do contato excluída/mesclada vem descrita (lista e detalhe)", async () => {
+    const destino = await db.empresa.create({ data: { nome: "Beta" } });
+    const mesclada = await db.empresa.create({ data: { nome: "Beta dup", mergedIntoId: destino.id } });
+    const morta = await db.empresa.create({ data: { nome: "Morta", deletadoEm: new Date() } });
+    const a = await db.contato.create({ data: { nome: "Ana", empresaId: mesclada.id } });
+    await db.contato.create({ data: { nome: "Bia", empresaId: morta.id } });
+    const lista = await listarContatos();
+    expect(lista.map((c) => [c.nome, c.empresa])).toEqual([
+      ["Ana", { estado: "MESCLADO", id: mesclada.id, nome: "Beta dup", destino: { id: destino.id, nome: "Beta" } }],
+      ["Bia", { estado: "EXCLUIDO", id: morta.id, nome: "Morta" }],
+    ]);
+    expect((await obterContato(a.id))?.empresa).toMatchObject({ estado: "MESCLADO", destino: { id: destino.id } });
+  });
+});
