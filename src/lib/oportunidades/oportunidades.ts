@@ -18,30 +18,16 @@ import { db } from "@/lib/db";
 import { listarPipelines, travarPipelines } from "@/lib/fases/fases";
 import { diaEmFuso } from "./aging";
 import { validarTitulo, type CampoEditavel, type ValorCampo } from "./campos";
-import { aoEntrarEmTerminal, pipelinesExtrasDoTerminal } from "./terminal";
+import { ErroDeRegra, type ErroOportunidade } from "./erros";
+import { aoEntrarEmTerminal, aoSairDeTerminal, pipelinesExtrasDoTerminal } from "./terminal";
+import type { DadosTerminal } from "./terminal-regras";
 
-export type ErroOportunidade =
-  | "CARD_NAO_ENCONTRADO"
-  | "PIPELINE_NAO_ENCONTRADO"
-  | "FASE_NAO_ENCONTRADA"
-  | "FASE_ARQUIVADA"
-  | "FASE_DE_OUTRO_PIPELINE"
-  | "FASE_TERMINAL"
-  | "CONFLITO_CONCORRENTE"
-  | "TITULO_INVALIDO"
-  | "RESPONSAVEL_INVALIDO"
-  | "NOTA_INVALIDA";
+export type { ErroOportunidade } from "./erros";
 
 export type Resultado<T = object> = ({ ok: true } & T) | { ok: false; erro: ErroOportunidade };
 
 type Tx = Prisma.TransactionClient;
 type Ator = { id: string };
-
-class ErroDeRegra extends Error {
-  constructor(readonly erro: ErroOportunidade) {
-    super(erro);
-  }
-}
 
 function traduzir<T>(e: unknown): Resultado<T> {
   if (e instanceof ErroDeRegra) return { ok: false, erro: e.erro };
@@ -177,13 +163,15 @@ export async function criarCard(
 
 /**
  * Move o card para `paraFaseId` (qualquer direção). Mesma fase → no-op.
- * Destino terminal → chama `aoEntrarEmTerminal` (GAB-32) na mesma transação.
+ * Origem terminal (reabrir) → `aoSairDeTerminal`; destino terminal →
+ * `aoEntrarEmTerminal` (ganho/perdido, GAB-32). Tudo na mesma transação: erro
+ * de regra do gancho (ex.: perdido sem motivo) desfaz o movimento inteiro.
  */
 export async function moverCard(
   id: string,
   paraFaseId: string,
   por: Ator,
-  opts: { dadosTerminal?: Record<string, unknown> } = {},
+  opts: { dadosTerminal?: DadosTerminal } = {},
 ): Promise<Resultado<{ mudou: boolean; terminal: TipoTerminal | null }>> {
   try {
     return await db.$transaction(async (tx) => {
@@ -207,12 +195,21 @@ export async function moverCard(
       const necessarios = await idsDePipelines(tx, pipelinesExtrasDoTerminal(alvo.pipeline.chave, destino.tipoTerminal));
       if (necessarios.some((p) => !extras.includes(p))) throw new ErroDeRegra("CONFLITO_CONCORRENTE");
 
+      const origem = await tx.fase.findUniqueOrThrow({ where: { id: op.faseId } });
+
       const agora = new Date();
+      // Entradas da Timeline depois da MOVIMENTACAO: `em` estritamente crescente.
+      let passo = 0;
+      const instante = () => new Date(agora.getTime() + ++passo);
       await tx.oportunidade.update({ where: { id }, data: { faseId: destino.id, faseDesde: agora } });
       await tx.transicaoFase.create({ data: { oportunidadeId: id, deFaseId: op.faseId, paraFaseId: destino.id, usuarioId: por.id, origem: "UI", em: agora } });
       await tx.timeline.create({
         data: { oportunidadeId: id, tipo: "MOVIMENTACAO", payload: { deFaseId: op.faseId, paraFaseId: destino.id }, usuarioId: por.id, em: agora },
       });
+      // Sai antes de entrar: ganho → perdido limpa o ganho e grava o motivo.
+      if (origem.isTerminal) {
+        await aoSairDeTerminal({ tx, oportunidadeId: id, pipelineChave: alvo.pipeline.chave, origem, porUsuarioId: por.id, em: agora, instante });
+      }
       if (destino.isTerminal) {
         await aoEntrarEmTerminal({
           tx,
@@ -222,6 +219,7 @@ export async function moverCard(
           destino,
           porUsuarioId: por.id,
           em: agora,
+          instante,
           dados: opts.dadosTerminal,
         });
       }
