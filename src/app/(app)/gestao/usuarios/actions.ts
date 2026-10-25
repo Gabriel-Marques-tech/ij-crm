@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { exigirPapel } from "@/lib/auth/atual";
 import { atualizarUsuario, criarConvite, reemitirConvite, type ErroUsuario } from "@/lib/auth/usuarios";
+import { comTratamentoForm } from "@/lib/erros/registrar";
 
 const MENSAGEM: Record<ErroUsuario, string> = {
   PAPEL_NAO_PERMITIDO: "Você não pode atribuir esse papel.",
@@ -40,26 +41,30 @@ function linkConvite(token: string): string {
 }
 
 export async function criarConviteAction(_prev: EstadoConvite, form: FormData): Promise<EstadoConvite> {
-  const ator = await exigirPapel("GESTOR");
-  const parsed = conviteSchema.safeParse({
-    nome: form.get("nome"),
-    email: form.get("email"),
-    papel: form.get("papel"),
-    telefone: form.get("telefone") ?? undefined,
+  return comTratamentoForm("gestao.usuarios.criarConvite", async (): Promise<EstadoConvite> => {
+    const ator = await exigirPapel("GESTOR");
+    const parsed = conviteSchema.safeParse({
+      nome: form.get("nome"),
+      email: form.get("email"),
+      papel: form.get("papel"),
+      telefone: form.get("telefone") ?? undefined,
+    });
+    if (!parsed.success) return { erro: parsed.error.issues[0]?.message ?? "Dados inválidos." };
+    const r = await criarConvite(parsed.data, ator);
+    if (!r.ok) return { erro: MENSAGEM[r.erro] };
+    revalidatePath("/gestao/usuarios");
+    return { link: linkConvite(r.token), expiraEm: r.expiraEm.toISOString() };
   });
-  if (!parsed.success) return { erro: parsed.error.issues[0]?.message ?? "Dados inválidos." };
-  const r = await criarConvite(parsed.data, ator);
-  if (!r.ok) return { erro: MENSAGEM[r.erro] };
-  revalidatePath("/gestao/usuarios");
-  return { link: linkConvite(r.token), expiraEm: r.expiraEm.toISOString() };
 }
 
 export async function reemitirConviteAction(usuarioId: string): Promise<EstadoConvite> {
-  const ator = await exigirPapel("GESTOR");
-  const r = await reemitirConvite(usuarioId, ator);
-  if (!r.ok) return { erro: MENSAGEM[r.erro] };
-  revalidatePath("/gestao/usuarios");
-  return { link: linkConvite(r.token), expiraEm: r.expiraEm.toISOString() };
+  return comTratamentoForm("gestao.usuarios.reemitirConvite", async (): Promise<EstadoConvite> => {
+    const ator = await exigirPapel("GESTOR");
+    const r = await reemitirConvite(usuarioId, ator);
+    if (!r.ok) return { erro: MENSAGEM[r.erro] };
+    revalidatePath("/gestao/usuarios");
+    return { link: linkConvite(r.token), expiraEm: r.expiraEm.toISOString() };
+  });
 }
 
 const edicaoSchema = z.object({
@@ -72,25 +77,29 @@ const edicaoSchema = z.object({
 export type EstadoEdicao = { erro?: string; ok?: true } | undefined;
 
 export async function editarUsuarioAction(_prev: EstadoEdicao, form: FormData): Promise<EstadoEdicao> {
-  const ator = await exigirPapel("GESTOR");
-  const parsed = edicaoSchema.safeParse({
-    usuarioId: form.get("usuarioId"),
-    nome: form.get("nome") ?? undefined,
-    telefone: form.get("telefone") ?? undefined,
-    papel: form.get("papel") ?? undefined,
+  return comTratamentoForm("gestao.usuarios.editarUsuario", async (): Promise<EstadoEdicao> => {
+    const ator = await exigirPapel("GESTOR");
+    const parsed = edicaoSchema.safeParse({
+      usuarioId: form.get("usuarioId"),
+      nome: form.get("nome") ?? undefined,
+      telefone: form.get("telefone") ?? undefined,
+      papel: form.get("papel") ?? undefined,
+    });
+    if (!parsed.success) return { erro: "Dados inválidos." };
+    const { usuarioId, ...dados } = parsed.data;
+    const r = await atualizarUsuario(usuarioId, dados, ator);
+    if (!r.ok) return { erro: MENSAGEM[r.erro] };
+    revalidatePath("/gestao/usuarios");
+    return { ok: true };
   });
-  if (!parsed.success) return { erro: "Dados inválidos." };
-  const { usuarioId, ...dados } = parsed.data;
-  const r = await atualizarUsuario(usuarioId, dados, ator);
-  if (!r.ok) return { erro: MENSAGEM[r.erro] };
-  revalidatePath("/gestao/usuarios");
-  return { ok: true };
 }
 
 export async function alternarAtivoAction(usuarioId: string, ativo: boolean): Promise<EstadoEdicao> {
-  const ator = await exigirPapel("GESTOR");
-  const r = await atualizarUsuario(usuarioId, { ativo }, ator);
-  if (!r.ok) return { erro: MENSAGEM[r.erro] };
-  revalidatePath("/gestao/usuarios");
-  return { ok: true };
+  return comTratamentoForm("gestao.usuarios.alternarAtivo", async (): Promise<EstadoEdicao> => {
+    const ator = await exigirPapel("GESTOR");
+    const r = await atualizarUsuario(usuarioId, { ativo }, ator);
+    if (!r.ok) return { erro: MENSAGEM[r.erro] };
+    revalidatePath("/gestao/usuarios");
+    return { ok: true };
+  });
 }
