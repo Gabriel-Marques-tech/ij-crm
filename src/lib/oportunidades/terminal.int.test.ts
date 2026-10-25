@@ -177,6 +177,39 @@ describe("ganho em vendas", () => {
     expect(await db.timeline.count({ where: { oportunidadeId: vendaId, tipo: "VINCULO_PROJETO" } })).toBe(1);
   });
 
+  it("outro escritor liga um projeto à venda no meio do ganho (P2002 no índice único) → sucesso idempotente, sem duplicar", async () => {
+    const { vendas, projetos, ana, vendaId } = await semear();
+    // Um INSERT em oportunidade esbarra no lock de pipeline (FK → KEY SHARE na
+    // linha do pipeline), então a corrida real é de quem LIGA um card existente
+    // à venda (ex.: import/LLM preenchendo origem_oportunidade_id): o UPDATE não
+    // toca o pipeline. A transação dele segura a linha (não commitada): o ganho
+    // não a vê, bloqueia no índice único ao inserir e recebe P2002 no commit dela.
+    const solto = await db.oportunidade.create({
+      data: { pipelineId: projetos.id, faseId: fase(projetos, "em_execucao").id, titulo: "Import", responsavelId: ana.id, criadoVia: "IMPORT" },
+    });
+    let commitEm = 0;
+    const intruso = db.$transaction(async (tx) => {
+      await tx.oportunidade.update({ where: { id: solto.id }, data: { origemOportunidadeId: vendaId } });
+      await tx.$executeRaw`SELECT pg_sleep(0.6)`;
+      commitEm = Date.now();
+    });
+    await new Promise((r) => setTimeout(r, 150));
+    const r = await moverCard(vendaId, fase(vendas, "contrato_assinado").id, ana, { dadosTerminal: { valorFechado: "100" } });
+    const fimEm = Date.now();
+    await intruso;
+    expect(commitEm).toBeGreaterThan(0);
+    expect(fimEm).toBeGreaterThanOrEqual(commitEm); // o ganho de fato esperou o intruso
+    expect(r).toEqual({ ok: true, mudou: true, terminal: "GANHO" });
+    const ps = await projetosDe(vendaId);
+    expect(ps.map((p) => p.id)).toEqual([solto.id]);
+    expect(await db.oportunidade.count()).toBe(2);
+    const venda = await db.oportunidade.findUniqueOrThrow({ where: { id: vendaId } });
+    expect(venda.faseId).toBe(fase(vendas, "contrato_assinado").id);
+    expect(venda.valorFechado?.toFixed(2)).toBe("100.00");
+    expect(await db.transicaoFase.count({ where: { oportunidadeId: vendaId } })).toBe(2);
+    expect((await tl(vendaId)).at(-1)!.payload).toEqual({ projetoId: solto.id, criado: false });
+  });
+
   it("projeto soft-deletado não é recriado no re-ganho (um projeto por venda, para sempre)", async () => {
     const { vendas, ana, vendaId } = await semear();
     const ganho = fase(vendas, "contrato_assinado").id;

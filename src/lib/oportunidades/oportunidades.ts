@@ -19,7 +19,7 @@ import { listarPipelines, travarPipelines } from "@/lib/fases/fases";
 import { diaEmFuso } from "./aging";
 import { validarTitulo, type CampoEditavel, type ValorCampo } from "./campos";
 import { ErroDeRegra, type ErroOportunidade } from "./erros";
-import { aoEntrarEmTerminal, aoSairDeTerminal, pipelinesExtrasDoTerminal } from "./terminal";
+import { aoEntrarEmTerminal, aoSairDeTerminal, ehConflitoDeProjetoDaVenda, pipelinesExtrasDoTerminal } from "./terminal";
 import type { DadosTerminal } from "./terminal-regras";
 
 export type { ErroOportunidade } from "./erros";
@@ -176,61 +176,80 @@ export async function moverCard(
   por: Ator,
   opts: { dadosTerminal?: DadosTerminal } = {},
 ): Promise<Resultado<{ mudou: boolean; terminal: TipoTerminal | null }>> {
+  const tentar = () => moverUmaVez(id, paraFaseId, por, opts);
   try {
-    return await db.$transaction(async (tx) => {
-      const alvo = await tx.oportunidade.findFirst({
-        where: { id, deletadoEm: null },
-        select: { pipelineId: true, pipeline: { select: { chave: true } } },
-      });
-      if (!alvo) throw new ErroDeRegra("CARD_NAO_ENCONTRADO");
-      // Antes do lock só para decidir QUAIS quadros travar (pipelineId de card e
-      // de fase nunca mudam). O tipo terminal pode mudar: é reconferido abaixo.
-      const previa = await tx.fase.findUnique({ where: { id: paraFaseId }, select: { tipoTerminal: true } });
-      const extras = await idsDePipelines(tx, pipelinesExtrasDoTerminal(alvo.pipeline.chave, previa?.tipoTerminal ?? null));
-      await travarPipelines(tx, [alvo.pipelineId, ...extras]);
-
-      const op = await tx.oportunidade.findFirst({ where: { id, deletadoEm: null }, select: { faseId: true } });
-      if (!op) throw new ErroDeRegra("CARD_NAO_ENCONTRADO");
-      const destino = await faseDestino(tx, paraFaseId, alvo.pipelineId);
-      if (destino.id === op.faseId) return { ok: true as const, mudou: false, terminal: null };
-      // Gestor mudou o tipo terminal da fase entre a prévia e o lock: o conjunto
-      // travado pode não bastar, e travar mais agora quebraria a ordem. Recusa.
-      const necessarios = await idsDePipelines(tx, pipelinesExtrasDoTerminal(alvo.pipeline.chave, destino.tipoTerminal));
-      if (necessarios.some((p) => !extras.includes(p))) throw new ErroDeRegra("CONFLITO_CONCORRENTE");
-
-      const origem = await tx.fase.findUniqueOrThrow({ where: { id: op.faseId } });
-
-      const agora = new Date();
-      // Entradas da Timeline depois da MOVIMENTACAO: `em` estritamente crescente.
-      let passo = 0;
-      const instante = () => new Date(agora.getTime() + ++passo);
-      await tx.oportunidade.update({ where: { id }, data: { faseId: destino.id, faseDesde: agora } });
-      await tx.transicaoFase.create({ data: { oportunidadeId: id, deFaseId: op.faseId, paraFaseId: destino.id, usuarioId: por.id, origem: "UI", em: agora } });
-      await tx.timeline.create({
-        data: { oportunidadeId: id, tipo: "MOVIMENTACAO", payload: { deFaseId: op.faseId, paraFaseId: destino.id }, usuarioId: por.id, em: agora },
-      });
-      // Sai antes de entrar: ganho → perdido limpa o ganho e grava o motivo.
-      if (origem.isTerminal) {
-        await aoSairDeTerminal({ tx, oportunidadeId: id, pipelineChave: alvo.pipeline.chave, origem, porUsuarioId: por.id, em: agora, instante });
-      }
-      if (destino.isTerminal) {
-        await aoEntrarEmTerminal({
-          tx,
-          oportunidadeId: id,
-          pipelineChave: alvo.pipeline.chave,
-          deFaseId: op.faseId,
-          destino,
-          porUsuarioId: por.id,
-          em: agora,
-          instante,
-          dados: opts.dadosTerminal,
-        });
-      }
-      return { ok: true as const, mudou: true, terminal: destino.tipoTerminal };
-    });
+    return await tentar();
   } catch (e) {
-    return traduzir(e);
+    // Outro escritor (sem o lock de vendas, ex.: import/LLM) ligou um projeto a
+    // esta venda entre a leitura e o INSERT do gancho. O Postgres abortou a
+    // transação, então não dá para tratar lá dentro: refaz o movimento UMA vez
+    // numa transação nova, que agora enxerga o projeto e só registra o vínculo.
+    if (!ehConflitoDeProjetoDaVenda(e)) return traduzir(e);
+    try {
+      return await tentar();
+    } catch (e2) {
+      return traduzir(e2);
+    }
   }
+}
+
+async function moverUmaVez(
+  id: string,
+  paraFaseId: string,
+  por: Ator,
+  opts: { dadosTerminal?: DadosTerminal },
+): Promise<Resultado<{ mudou: boolean; terminal: TipoTerminal | null }>> {
+  return db.$transaction(async (tx) => {
+    const alvo = await tx.oportunidade.findFirst({
+      where: { id, deletadoEm: null },
+      select: { pipelineId: true, pipeline: { select: { chave: true } } },
+    });
+    if (!alvo) throw new ErroDeRegra("CARD_NAO_ENCONTRADO");
+    // Antes do lock só para decidir QUAIS quadros travar (pipelineId de card e
+    // de fase nunca mudam). O tipo terminal pode mudar: é reconferido abaixo.
+    const previa = await tx.fase.findUnique({ where: { id: paraFaseId }, select: { tipoTerminal: true } });
+    const extras = await idsDePipelines(tx, pipelinesExtrasDoTerminal(alvo.pipeline.chave, previa?.tipoTerminal ?? null));
+    await travarPipelines(tx, [alvo.pipelineId, ...extras]);
+
+    const op = await tx.oportunidade.findFirst({ where: { id, deletadoEm: null }, select: { faseId: true } });
+    if (!op) throw new ErroDeRegra("CARD_NAO_ENCONTRADO");
+    const destino = await faseDestino(tx, paraFaseId, alvo.pipelineId);
+    if (destino.id === op.faseId) return { ok: true as const, mudou: false, terminal: null };
+    // Gestor mudou o tipo terminal da fase entre a prévia e o lock: o conjunto
+    // travado pode não bastar, e travar mais agora quebraria a ordem. Recusa.
+    const necessarios = await idsDePipelines(tx, pipelinesExtrasDoTerminal(alvo.pipeline.chave, destino.tipoTerminal));
+    if (necessarios.some((p) => !extras.includes(p))) throw new ErroDeRegra("CONFLITO_CONCORRENTE");
+
+    const origem = await tx.fase.findUniqueOrThrow({ where: { id: op.faseId } });
+
+    const agora = new Date();
+    // Entradas da Timeline depois da MOVIMENTACAO: `em` estritamente crescente.
+    let passo = 0;
+    const instante = () => new Date(agora.getTime() + ++passo);
+    await tx.oportunidade.update({ where: { id }, data: { faseId: destino.id, faseDesde: agora } });
+    await tx.transicaoFase.create({ data: { oportunidadeId: id, deFaseId: op.faseId, paraFaseId: destino.id, usuarioId: por.id, origem: "UI", em: agora } });
+    await tx.timeline.create({
+      data: { oportunidadeId: id, tipo: "MOVIMENTACAO", payload: { deFaseId: op.faseId, paraFaseId: destino.id }, usuarioId: por.id, em: agora },
+    });
+    // Sai antes de entrar: ganho → perdido limpa o ganho e grava o motivo.
+    if (origem.isTerminal) {
+      await aoSairDeTerminal({ tx, oportunidadeId: id, pipelineChave: alvo.pipeline.chave, origem, porUsuarioId: por.id, em: agora, instante });
+    }
+    if (destino.isTerminal) {
+      await aoEntrarEmTerminal({
+        tx,
+        oportunidadeId: id,
+        pipelineChave: alvo.pipeline.chave,
+        deFaseId: op.faseId,
+        destino,
+        porUsuarioId: por.id,
+        em: agora,
+        instante,
+        dados: opts.dadosTerminal,
+      });
+    }
+    return { ok: true as const, mudou: true, terminal: destino.tipoTerminal };
+  });
 }
 
 export type PatchCard = Partial<Record<CampoEditavel, ValorCampo>>;

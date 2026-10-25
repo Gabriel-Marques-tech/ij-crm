@@ -62,6 +62,18 @@ export function pipelinesExtrasDoTerminal(pipelineChave: string, tipo: TipoTermi
   return [];
 }
 
+/**
+ * P2002 no índice único `origem_oportunidade_id`: alguém ligou um projeto à
+ * venda no meio do ganho. `moverCard` refaz o movimento (idempotente).
+ */
+export function ehConflitoDeProjetoDaVenda(e: unknown): boolean {
+  const err = e as { code?: string; meta?: { target?: unknown } };
+  if (err?.code !== "P2002") return false;
+  const alvo = err.meta?.target;
+  const nomes = Array.isArray(alvo) ? alvo.map(String) : typeof alvo === "string" ? [alvo] : [];
+  return nomes.some((n) => n.includes("origem_oportunidade_id") || n.includes("origemOportunidadeId"));
+}
+
 type CampoTerminal = "valorFechado" | "dataGanho" | "motivoPerda";
 type Valor = string | null;
 
