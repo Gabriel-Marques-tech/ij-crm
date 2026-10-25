@@ -17,6 +17,7 @@ export type ErroFase =
   | "TERMINAL_PERDIDO_OBRIGATORIO"
   | "DESTINO_OBRIGATORIO"
   | "DESTINO_INVALIDO"
+  | "DESTINO_TERMINAL_INCOMPATIVEL"
   | "FASE_EM_USO";
 
 /** Pipeline cuja regra de negócio exige também uma fase PERDIDO (§4.2). */
@@ -124,8 +125,20 @@ export function validarReordenacao(idsAtuais: readonly string[], idsNovos: reado
 export type AcaoRemocao = "EXCLUIR" | "ARQUIVAR";
 
 /**
+ * Cards migrados pela remoção de fase NÃO passam pelo gancho de terminal
+ * (`oportunidades/terminal.ts`): sem ele, card aberto que cai em ganho/perdido
+ * fica sem data_ganho/motivo/projeto, e card fechado que cai em fase aberta
+ * fica com dados de fechamento velhos. Só migra entre fases do MESMO tipo
+ * (abertas entre si; GANHO→GANHO; PERDIDO→PERDIDO), onde os dados continuam válidos.
+ */
+export function destinoCompativel(origem: { tipoTerminal: TipoTerminal | null }, destino: { tipoTerminal: TipoTerminal | null }): boolean {
+  return origem.tipoTerminal === destino.tipoTerminal;
+}
+
+/**
  * Decide o que acontece ao "remover" uma fase:
- * - com cards (vivos) → exige destino (mesmo pipeline, ativo, diferente); os
+ * - com cards (vivos) → exige destino (mesmo pipeline, ativo, diferente, do
+ *   mesmo tipo terminal — ver `destinoCompativel`); os
  *   cards migram e a fase é ARQUIVADA (a migração gera histórico com `de_fase_id`);
  * - sem cards vivos mas com qualquer transição → ARQUIVAR (`de_fase_id` é RESTRICT);
  * - cards soft-deletados não contam, não migram e não pedem destino — mas
@@ -133,11 +146,11 @@ export type AcaoRemocao = "EXCLUIR" | "ARQUIVAR";
  * - sem nada disso → EXCLUIR de verdade.
  */
 export function validarRemocao(input: {
-  fase: { id: string; pipelineId: string };
+  fase: { id: string; pipelineId: string; tipoTerminal: TipoTerminal | null };
   qtdCards: number;
   qtdTransicoes: number;
   qtdCardsDeletados?: number;
-  destino: { id: string; pipelineId: string; arquivadaEm: Date | null } | null;
+  destino: { id: string; pipelineId: string; arquivadaEm: Date | null; tipoTerminal: TipoTerminal | null } | null;
 }): { ok: true; acao: AcaoRemocao } | { ok: false; erro: ErroFase } {
   const { fase, qtdCards, qtdTransicoes, qtdCardsDeletados = 0, destino } = input;
   if (qtdCards > 0) {
@@ -145,6 +158,7 @@ export function validarRemocao(input: {
     if (destino.id === fase.id || destino.pipelineId !== fase.pipelineId || destino.arquivadaEm !== null) {
       return { ok: false, erro: "DESTINO_INVALIDO" };
     }
+    if (!destinoCompativel(fase, destino)) return { ok: false, erro: "DESTINO_TERMINAL_INCOMPATIVEL" };
   }
   const seguraFk = qtdCards > 0 || qtdTransicoes > 0 || qtdCardsDeletados > 0;
   return { ok: true, acao: seguraFk ? "ARQUIVAR" : "EXCLUIR" };

@@ -288,7 +288,7 @@ export async function removerFase(
         tx.oportunidade.count({ where: { faseId, deletadoEm: { not: null } } }),
         tx.transicaoFase.count({ where: { OR: [{ deFaseId: faseId }, { paraFaseId: faseId }] } }),
         opts.destinoFaseId
-          ? tx.fase.findUnique({ where: { id: opts.destinoFaseId }, select: { id: true, pipelineId: true, arquivadaEm: true } })
+          ? tx.fase.findUnique({ where: { id: opts.destinoFaseId }, select: { id: true, pipelineId: true, arquivadaEm: true, tipoTerminal: true } })
           : null,
       ]);
       const decisao = validarRemocao({ fase, qtdCards, qtdCardsDeletados, qtdTransicoes, destino: destino ?? null });

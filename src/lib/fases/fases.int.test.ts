@@ -324,6 +324,30 @@ describe("removerFase", () => {
   });
 });
 
+describe("removerFase × fases terminais (GAB-32)", () => {
+  it("cards de fase aberta não vão para ganho/perdido, e de terminal não voltam para aberta: nada muda", async () => {
+    const { vendas } = await semearPipelines();
+    const g = await gestor();
+    const aberta = faseDe(vendas, "em_negociacao");
+    const c = await card(vendas.id, aberta.id, g.id);
+    for (const destino of ["contrato_assinado", "perdido"]) {
+      expect(await removerFase(aberta.id, { destinoFaseId: faseDe(vendas, destino).id }, g)).toEqual({ ok: false, erro: "DESTINO_TERMINAL_INCOMPATIVEL" });
+    }
+    // Segundo PERDIDO para a fase perdida poder sair sem quebrar "≥1 PERDIDO".
+    const perdido2 = await db.fase.create({ data: { pipelineId: vendas.id, chave: "perdido_2", nome: "Perdido 2", ordem: 99, isTerminal: true, tipoTerminal: "PERDIDO" } });
+    const perdido = faseDe(vendas, "perdido");
+    const p = await db.oportunidade.create({ data: { pipelineId: vendas.id, faseId: perdido.id, titulo: "P", responsavelId: g.id, criadoVia: "UI", motivoPerda: "Preço" } });
+    expect(await removerFase(perdido.id, { destinoFaseId: aberta.id }, g)).toEqual({ ok: false, erro: "DESTINO_TERMINAL_INCOMPATIVEL" });
+    expect(await removerFase(perdido.id, { destinoFaseId: faseDe(vendas, "contrato_assinado").id }, g)).toEqual({ ok: false, erro: "DESTINO_TERMINAL_INCOMPATIVEL" });
+    expect((await db.oportunidade.findUniqueOrThrow({ where: { id: c.id } })).faseId).toBe(aberta.id);
+    expect((await db.oportunidade.findUniqueOrThrow({ where: { id: p.id } })).faseId).toBe(perdido.id);
+
+    // Mesmo tipo terminal: migra mantendo os dados do fechamento.
+    expect(await removerFase(perdido.id, { destinoFaseId: perdido2.id }, g)).toEqual({ ok: true, acao: "ARQUIVAR" });
+    expect(await db.oportunidade.findUniqueOrThrow({ where: { id: p.id } })).toMatchObject({ faseId: perdido2.id, motivoPerda: "Preço" });
+  });
+});
+
 describe("desarquivarFase", () => {
   it("volta a fase ao fim do quadro", async () => {
     const { vendas } = await semearPipelines();

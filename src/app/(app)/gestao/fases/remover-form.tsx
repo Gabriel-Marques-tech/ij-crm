@@ -10,7 +10,8 @@ const SELECT_CLASSE =
   "h-9 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50";
 
 /**
- * Remoção de fase. Com cards: pede destino, migra e arquiva. Só com histórico:
+ * Remoção de fase. Com cards: pede destino (`destinos` já vem só com fases do
+ * mesmo tipo terminal, ver `destinoCompativel`), migra e arquiva. Só com histórico:
  * arquiva. Sem nada: exclui de vez. A decisão final é do serviço; aqui só se
  * explica o que vai acontecer.
  */
@@ -37,7 +38,7 @@ export function RemoverForm({ fase, destinos, onFeito }: { fase: FaseComUso; des
           </Label>
           <select id="destinoFaseId" name="destinoFaseId" required defaultValue="" className={SELECT_CLASSE} disabled={semDestino}>
             <option value="" disabled>
-              {semDestino ? "Não há outra fase ativa neste quadro" : "Escolha a fase de destino"}
+              {semDestino ? "Nenhuma fase do mesmo tipo disponível" : "Escolha a fase de destino"}
             </option>
             {destinos.map((d) => (
               <option key={d.id} value={d.id}>
@@ -45,7 +46,11 @@ export function RemoverForm({ fase, destinos, onFeito }: { fase: FaseComUso; des
               </option>
             ))}
           </select>
-          <p className="text-xs text-fg-faint">A mudança fica registrada no histórico de cada card (origem: sistema) e o tempo na fase recomeça.</p>
+          <p className="text-xs text-fg-faint">
+            {semDestino
+              ? "Cards só migram para uma fase do mesmo tipo (aberta → aberta, ganho → ganho, perdido → perdido). Mova esses cards pelo Kanban — fases de ganho/perdido exigem os dados do fechamento."
+              : "A mudança fica registrada no histórico de cada card (origem: sistema) e o tempo na fase recomeça. Só aparecem fases do mesmo tipo (aberta, ganho ou perdido)."}
+          </p>
         </div>
       ) : null}
 

@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import type { FaseComUso, PipelineParaGestao } from "@/lib/fases/fases";
 import { desarquivarFaseAction, moverFaseAction } from "./actions";
 import { FaseForm } from "./fase-form";
+import { destinoCompativel } from "@/lib/fases/regras";
 import { RemoverForm } from "./remover-form";
 
 type Edicao = { modo: "criar" } | { modo: "editar"; fase: FaseComUso } | null;
@@ -155,7 +156,7 @@ export function QuadroFases({ pipeline }: { pipeline: PipelineParaGestao }) {
             <DialogTitle>Remover {removendo?.nome}</DialogTitle>
           </DialogHeader>
           {removendo ? (
-            <RemoverForm fase={removendo} destinos={ativas.filter((f) => f.id !== removendo.id)} onFeito={() => setRemovendo(null)} />
+            <RemoverForm fase={removendo} destinos={ativas.filter((f) => f.id !== removendo.id && destinoCompativel(removendo, f))} onFeito={() => setRemovendo(null)} />
           ) : null}
         </DialogContent>
       </Dialog>
