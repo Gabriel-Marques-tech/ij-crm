@@ -106,9 +106,16 @@ ganho em vendas trava também projetos) e recusam fase arquivada ou de outro qua
 em fase terminal; todo movimento grava `TransicaoFase` (origem `UI`) + Timeline
 `MOVIMENTACAO`, e cada campo editado vira `CAMPO_ALTERADO { campo, antes, depois }`. Cor de
 "dias na fase" (`aging.ts`): sem limite → neutro; `< 70%` do limite → verde; até o limite → âmbar;
-`≥ limite` → vermelho. Entrada em fase terminal passa por `aoEntrarEmTerminal` (`terminal.ts`),
-hoje no-op — GAB-32 preenche (ganho → projeto, valor fechado, motivo de perda) sem tomar outros
-locks além dos de `pipelinesExtrasDoTerminal`.
+`≥ limite` → vermelho.
+
+Ganho/perdido (`terminal.ts`, regras puras em `terminal-regras.ts`), dentro da transação do
+movimento: **ganho em Vendas** abre diálogo com valor fechado (opcional, BRL), grava `data_ganho`
+e cria o card em Projetos (fase de chave `em_execucao`, mesmo título/responsável/empresa/contato,
+`origem_oportunidade_id`). Um projeto por venda, garantido no banco (`origem_oportunidade_id`
+único): reabrir e ganhar de novo só registra o vínculo. **Perdido** exige motivo (preço, timing,
+concorrente, sem resposta, outro + texto) em qualquer quadro. Reabrir (sair do terminal) limpa
+`data_ganho`/`valor_fechado` ou `motivo_perda`; o valor antigo fica na Timeline. "Finalizado" em
+Projetos move direto, sem diálogo. Vendas/Projetos ficam na navegação (`?quadro=`).
 
 ## Preferências de visualização
 
