@@ -124,6 +124,11 @@ erro do Prisma só loga `code` + `target`/`modelName` (a mensagem ecoa dados da 
 "Sem conexão com o servidor" = a chamada nem chegou (rede/servidor fora). Helper:
 `src/lib/erros/registrar.ts` (`comTratamento` / `comTratamentoForm`).
 
+## Produção
+
+Deploy, rollback, backup/restore, QR da Evolution e troca do número do bot:
+[`docs/runbook.md`](docs/runbook.md) (`compose.prod.yml` + `scripts/deploy.sh`).
+
 ## Testes
 
 `pnpm test` roda unitários e de integração. Os de integração (`*.int.test.ts`)
