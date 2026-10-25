@@ -181,11 +181,12 @@ describe("review: telefone", () => {
     expect(normalizarTelefoneBr("11999998888", { exigirDdi: true })).toBeNull();
   });
 
-  it("assinante começando com 0/1 é inválido; celular de 9 dígitos é 9[6-9]", () => {
+  it("assinante de 8 dígitos começando com 0/1 é inválido; celular de 9 dígitos é 9 + qualquer dígito", () => {
     expect(normalizarTelefoneBr("11 0000-0031")).toBeNull();
     expect(normalizarTelefoneBr("11 1234-5678")).toBeNull();
-    expect(normalizarTelefoneBr("11 90000-0031")).toBeNull();
-    expect(normalizarTelefoneBr("11 95000-0000")).toBeNull();
+    expect(normalizarTelefoneBr("11 90000-0031")).toBe("+5511900000031");
+    expect(normalizarTelefoneBr("11 95000-0000")).toBe("+5511950000000");
+    expect(normalizarTelefoneBr("11 85000-0000")).toBeNull();
     expect(normalizarTelefoneBr("11 96000-0000")).toBe("+5511960000000");
   });
 });

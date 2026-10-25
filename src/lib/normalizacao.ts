@@ -46,8 +46,10 @@ const DDDS = new Set([
  * Nono dígito: celular (assinante começando com 6–9) sem o 9 ganha o 9 —
  * o WhatsApp de contas antigas entrega `55DD8888-7777`, e o mesmo celular
  * digitado com o 9 tem de cair no mesmo valor. Fixo (2–5) fica com 8 dígitos.
- * Assinante: fixo `[2-5]` + 7 dígitos; celular `9[6-9]` + 7 dígitos.
- * Começando com 0/1 não é assinante válido.
+ * Assinante: fixo `[2-5]` + 7 dígitos; celular `9` + 8 dígitos (qualquer
+ * segundo dígito: a Anatel pode abrir faixas 9X novas, e recusar um número
+ * real na ingestão é pior que aceitar um inválido raro). Com 8 dígitos,
+ * começando com 0/1 não é assinante válido.
  *
  * Sem "+", o padrão é BR (CRM brasileiro: na UI ninguém digita o 55). Quem
  * recebe número que SEMPRE traz DDI (ingestão do WhatsApp, import) passa
@@ -70,7 +72,7 @@ export function normalizarTelefoneBr(entrada: string, opcoes: { exigirDdi?: bool
   if (!DDDS.has(Number(d.slice(0, 2)))) return null;
   const ddd = d.slice(0, 2);
   let assinante = d.slice(2);
-  if (assinante.length === 9 && !/^9[6-9]/.test(assinante)) return null;
+  if (assinante.length === 9 && assinante[0] !== "9") return null;
   if (assinante.length === 8) {
     if (/^[6-9]/.test(assinante)) assinante = `9${assinante}`;
     else if (!/^[2-5]/.test(assinante)) return null;
