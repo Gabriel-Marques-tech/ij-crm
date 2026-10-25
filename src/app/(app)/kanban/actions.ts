@@ -24,7 +24,7 @@ const MENSAGEM: Record<ErroOportunidade, string> = {
  * `erro` de regra = texto pronto em português. Exceção inesperada vira
  * `{ ok: false, erro: "INESPERADO", ref }` (logada com a ref; ver `registrarErro`).
  */
-export type EstadoKanban = { erro?: string; ok?: true } | Inesperado;
+export type EstadoKanban = { erro?: string; ok?: true; /** id do card criado. */ id?: string } | Inesperado;
 
 const id = z.string().min(1).max(64);
 
@@ -41,7 +41,7 @@ export async function criarCardAction(pipelineId: string, faseId: string, titulo
     const r = await criarCard(p.data, ator);
     if (!r.ok) return { erro: MENSAGEM[r.erro] };
     revalidar();
-    return { ok: true };
+    return { ok: true, id: r.id };
   });
 }
 

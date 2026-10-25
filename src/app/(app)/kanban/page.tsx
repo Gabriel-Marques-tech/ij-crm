@@ -3,7 +3,7 @@ import { cn } from "cn";
 import { PageHeader } from "@/components/shell/page-header";
 import { exigirUsuario } from "@/lib/auth/atual";
 import { listarPipelines } from "@/lib/fases/fases";
-import { listarQuadro } from "@/lib/oportunidades/oportunidades";
+import { listarQuadro, listarResponsaveis } from "@/lib/oportunidades/oportunidades";
 import { QuadroKanban } from "./quadro-kanban";
 import { paraCliente } from "./tipos";
 
@@ -19,19 +19,22 @@ function agoraDoRequest(): number {
 }
 
 export default async function KanbanPage({ searchParams }: { searchParams: Promise<{ quadro?: string }> }) {
-  await exigirUsuario();
+  const usuario = await exigirUsuario();
   const { quadro: chave = "vendas" } = await searchParams;
-  const [pipelines, quadro] = await Promise.all([listarPipelines(), listarQuadro(chave)]);
+  const [pipelines, quadro, responsaveis] = await Promise.all([listarPipelines(), listarQuadro(chave), listarResponsaveis()]);
 
   return (
-    <>
+    // Quadro ocupa a tela até embaixo: 100dvh menos topbar (3.5rem), padding
+    // vertical do <main> (3rem / md 4rem) e barra inferior do mobile (4rem).
+    // As colunas esticam nessa altura e cada lista rola sozinha.
+    <div className="flex h-[calc(100dvh-10.5rem)] min-h-[28rem] flex-col md:h-[calc(100dvh-7.5rem)]">
       <PageHeader
         eyebrow={`kanban · ${quadro?.pipeline.chave ?? chave}`}
         title={quadro?.pipeline.nome ?? "Kanban"}
         description="Arraste os cards entre as fases (ou foque um card e use espaço + setas). Clique no título para abrir o detalhe."
       />
       {pipelines.length > 1 ? (
-        <nav aria-label="Quadros" className="-mt-4 mb-6 flex gap-1">
+        <nav aria-label="Quadros" className="-mt-4 mb-4 flex shrink-0 gap-1">
           {pipelines.map((p) => (
             <Link
               key={p.id}
@@ -49,12 +52,19 @@ export default async function KanbanPage({ searchParams }: { searchParams: Promi
       ) : null}
       {quadro ? (
         // `key` reinicia o estado otimista ao trocar de quadro.
-        <QuadroKanban key={quadro.pipeline.id} pipelineId={quadro.pipeline.id} agoraMs={agoraDoRequest()} {...paraCliente(quadro)} />
+        <QuadroKanban
+          key={quadro.pipeline.id}
+          pipelineId={quadro.pipeline.id}
+          agoraMs={agoraDoRequest()}
+          responsaveis={responsaveis}
+          meuId={usuario.id}
+          {...paraCliente(quadro)}
+        />
       ) : (
         <p className="rounded-xl border border-border bg-surface px-4 py-10 text-center text-sm text-fg-faint">
           Quadro não encontrado. Rode <code className="font-mono">pnpm db:seed</code>.
         </p>
       )}
-    </>
+    </div>
   );
 }

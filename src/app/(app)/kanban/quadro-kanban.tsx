@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useCallback, useMemo, useState, useTransition } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   DndContext,
   DragOverlay,
   KeyboardSensor,
+  MeasuringStrategy,
   MouseSensor,
   TouchSensor,
   closestCorners,
@@ -24,17 +25,27 @@ import { MensagemErro } from "@/components/erros/mensagem-erro";
 import { ConfirmarTerminal, type PedidoTerminal } from "@/components/kanban/confirmar-terminal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { executarAcao, type FalhaUI } from "@/lib/erros/cliente";
+import { FALHA_CONEXAO, executarAcao, falhaDe, type FalhaUI } from "@/lib/erros/cliente";
 import { criarCardAction, moverCardAction } from "./actions";
 import { CardVisual } from "./card-visual";
+import { escreverFiltros, filtrarCards, lerFiltros, type Filtros } from "./filtros";
 import { desfazerMovimento } from "./otimista";
+import { BarraFiltros, type Pessoa } from "./painel-filtros";
 import type { CardCliente, FaseCliente } from "./tipos";
 
-type Props = { pipelineId: string; fases: FaseCliente[]; cards: CardCliente[]; agoraMs: number };
+type Props = {
+  pipelineId: string;
+  fases: FaseCliente[];
+  cards: CardCliente[];
+  agoraMs: number;
+  /** Usuários ativos (responsáveis possíveis). */
+  responsaveis: Pessoa[];
+  meuId: string;
+};
 
 const idColuna = (faseId: string) => `fase:${faseId}`;
 
-export function QuadroKanban({ pipelineId, fases, cards: cardsServidor, agoraMs }: Props) {
+export function QuadroKanban({ pipelineId, fases, cards: cardsServidor, agoraMs, responsaveis, meuId }: Props) {
   // Estado otimista: parte do servidor e é re-sincronizado quando chegam props novas (revalidate).
   const [base, setBase] = useState(cardsServidor);
   const [cards, setCards] = useState(cardsServidor);
@@ -45,10 +56,43 @@ export function QuadroKanban({ pipelineId, fases, cards: cardsServidor, agoraMs 
 
   const [ativo, setAtivo] = useState<CardCliente | null>(null);
   const [expandidas, setExpandidas] = useState<Set<string>>(new Set());
+  // Fase cujo formulário de novo card abre ao expandir pela faixa recolhida.
+  const [criarEm, setCriarEm] = useState<string | null>(null);
   const [pedido, setPedido] = useState<(PedidoTerminal & { cardId: string; faseId: string }) | null>(null);
   const [erro, setErro] = useState<FalhaUI | null>(null);
   const [, startTransition] = useTransition();
   const router = useRouter();
+
+  // Filtros moram na URL (link compartilhável). `replaceState` não refaz o
+  // request do servidor; o Next sincroniza `useSearchParams` com ele.
+  const searchParams = useSearchParams();
+  const filtros = useMemo(() => lerFiltros(searchParams), [searchParams]);
+  const chaveFiltros = searchParams.toString();
+  const mudarFiltros = useCallback((f: Filtros) => {
+    const qs = escreverFiltros(f, new URLSearchParams(window.location.search)).toString();
+    window.history.replaceState(null, "", qs ? `?${qs}` : window.location.pathname);
+  }, []);
+
+  // Card que o usuário moveu/criou com filtro ativo continua visível até os
+  // filtros mudarem (senão some na mão dele, ex.: aging zera ao mover).
+  const [fixados, setFixados] = useState<{ chave: string; ids: Set<string> }>({ chave: chaveFiltros, ids: new Set() });
+  if (fixados.chave !== chaveFiltros) setFixados({ chave: chaveFiltros, ids: new Set() });
+  const fixar = (id: string) => setFixados((f) => ({ chave: f.chave, ids: new Set(f.ids).add(id) }));
+
+  const visiveis = useMemo(
+    () => filtrarCards(cards, filtros, { fases, agoraMs, sempreVisiveis: fixados.ids }),
+    [cards, filtros, fases, agoraMs, fixados.ids],
+  );
+  const pessoas = useMemo(() => {
+    // Ativos + quem ainda é responsável de algum card (mesmo inativo).
+    const m = new Map(responsaveis.map((r) => [r.id, r.nome]));
+    for (const c of cards) if (!m.has(c.responsavelId)) m.set(c.responsavelId, c.responsavelNome);
+    return [...m].map(([id, nome]) => ({ id, nome }));
+  }, [responsaveis, cards]);
+  const ufs = useMemo(
+    () => [...new Set([...cards.flatMap((c) => (c.estado ? [c.estado] : [])), ...filtros.uf])].sort(),
+    [cards, filtros.uf],
+  );
 
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
@@ -69,6 +113,7 @@ export function QuadroKanban({ pipelineId, fases, cards: cardsServidor, agoraMs 
     const original = cards.find((c) => c.id === cardId);
     if (!original || original.faseId === paraFaseId) return;
     setErro(null);
+    fixar(cardId);
     // Otimista: vai para o topo da coluna destino, zerando os dias na fase.
     setCards((cs) => [{ ...original, faseId: paraFaseId, faseDesdeMs: Date.now() }, ...cs.filter((c) => c.id !== cardId)]);
     startTransition(async () => {
@@ -117,17 +162,32 @@ export function QuadroKanban({ pipelineId, fases, cards: cardsServidor, agoraMs 
     onDragCancel: ({ active }) => `Movimento de ${tituloDe(active.id)} cancelado.`,
   };
 
+  const arrastando = ativo !== null;
+  const alternarExpandida = (faseId: string) =>
+    setExpandidas((s) => {
+      const n = new Set(s);
+      if (n.has(faseId)) n.delete(faseId);
+      else n.add(faseId);
+      return n;
+    });
+
   return (
     <>
+      <BarraFiltros filtros={filtros} onMudar={mudarFiltros} pessoas={pessoas} meuId={meuId} ufs={ufs} visiveis={visiveis.length} total={cards.length} />
       {erro ? (
         <div className="mb-4 rounded-lg border border-danger/50 bg-surface px-3 py-2">
           <MensagemErro falha={erro} className="text-sm" />
         </div>
       ) : null}
+      {visiveis.length === 0 && cards.length > 0 ? (
+        <p className="mb-4 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-fg-mute">Nenhum card com esses filtros.</p>
+      ) : null}
       <DndContext
         id={`kanban-${pipelineId}`}
         sensors={sensors}
         collisionDetection={closestCorners}
+        // Colunas recolhidas abrem quando o arrasto começa: re-mede os alvos.
+        measuring={{ droppable: { strategy: MeasuringStrategy.Always } }}
         onDragStart={onDragStart}
         onDragEnd={onDragEnd}
         onDragCancel={() => setAtivo(null)}
@@ -138,21 +198,42 @@ export function QuadroKanban({ pipelineId, fases, cards: cardsServidor, agoraMs 
           },
         }}
       >
-        <div className="-mx-4 flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-4 md:-mx-8 md:snap-none md:px-8">
+        <div className="-mx-4 flex min-h-0 flex-1 snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-2 md:-mx-8 md:snap-none md:px-8">
           {fases.map((f) => {
-            const daFase = cards.filter((c) => c.faseId === f.id);
-            const colapsada = f.isTerminal && !expandidas.has(f.id);
-            const alternar = () =>
-              setExpandidas((s) => {
-                const n = new Set(s);
-                if (n.has(f.id)) n.delete(f.id);
-                else n.add(f.id);
-                return n;
-              });
+            const daFase = visiveis.filter((c) => c.faseId === f.id);
+            // Recolhida: terminal (padrão) ou vazia, salvo se o usuário abriu.
+            // Durante um arrasto tudo abre, para virar alvo visível.
+            const recolhivel = f.isTerminal || daFase.length === 0;
+            const colapsada = recolhivel && !arrastando && !expandidas.has(f.id);
             return colapsada ? (
-              <ColunaColapsada key={f.id} fase={f} total={daFase.length} onExpandir={alternar} />
+              <ColunaColapsada
+                key={f.id}
+                fase={f}
+                total={daFase.length}
+                onExpandir={() => alternarExpandida(f.id)}
+                onNovo={
+                  f.isTerminal
+                    ? undefined
+                    : () => {
+                        setCriarEm(f.id);
+                        alternarExpandida(f.id);
+                      }
+                }
+              />
             ) : (
-              <Coluna key={f.id} fase={f} cards={daFase} agoraMs={agoraMs} pipelineId={pipelineId} onRecolher={f.isTerminal ? alternar : undefined} />
+              <Coluna
+                key={f.id}
+                fase={f}
+                cards={daFase}
+                agoraMs={agoraMs}
+                pipelineId={pipelineId}
+                criandoInicial={criarEm === f.id}
+                onCriado={(id) => {
+                  setCriarEm(null);
+                  if (id) fixar(id);
+                }}
+                onRecolher={recolhivel && !arrastando && expandidas.has(f.id) ? () => alternarExpandida(f.id) : undefined}
+              />
             );
           })}
         </div>
@@ -175,27 +256,39 @@ function CorDaFase({ cor }: { cor: string | null }) {
   return <span aria-hidden className="size-2 shrink-0 rounded-full bg-fg-faint" style={cor ? { backgroundColor: cor } : undefined} />;
 }
 
+/** Coluna aberta: ocupa a altura toda do quadro; a lista de cards rola sozinha. */
 function Coluna({
   fase,
   cards,
   agoraMs,
   pipelineId,
+  criandoInicial,
+  onCriado,
   onRecolher,
 }: {
   fase: FaseCliente;
   cards: CardCliente[];
   agoraMs: number;
   pipelineId: string;
+  criandoInicial: boolean;
+  /** Fim do formulário de novo card; `id` quando criou. */
+  onCriado: (id?: string) => void;
   onRecolher?: () => void;
 }) {
+  // A coluna inteira é o alvo do drop (inclusive o cabeçalho).
   const { setNodeRef, isOver } = useDroppable({ id: idColuna(fase.id) });
-  const [criando, setCriando] = useState(false);
+  const [criando, setCriando] = useState(criandoInicial);
+  const fimCriar = (id?: string) => {
+    setCriando(false);
+    onCriado(id);
+  };
 
   return (
     <section
+      ref={setNodeRef}
       aria-label={`Fase ${fase.nome}, ${cards.length} card(s)`}
       className={cn(
-        "flex w-[85vw] max-w-72 shrink-0 snap-start flex-col rounded-xl border border-border bg-muted/60 sm:w-72",
+        "flex min-h-0 w-[85vw] max-w-72 shrink-0 snap-start flex-col rounded-xl border border-border bg-muted/60 sm:w-72",
         isOver && "border-border-strong bg-surface/40",
       )}
     >
@@ -217,8 +310,8 @@ function Coluna({
       </header>
       {fase.limiteDiasAlerta !== null ? <p className="-mt-1 px-3 pb-2 font-mono text-[10px] text-fg-faint">alerta ≥ {fase.limiteDiasAlerta}d</p> : null}
 
-      <div ref={setNodeRef} className="flex min-h-24 flex-1 flex-col gap-2 px-2 pb-2">
-        {criando ? <NovoCard pipelineId={pipelineId} faseId={fase.id} onFim={() => setCriando(false)} /> : null}
+      <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overscroll-contain px-2 pb-2">
+        {criando ? <NovoCard pipelineId={pipelineId} faseId={fase.id} onFim={fimCriar} /> : null}
         <SortableContext id={idColuna(fase.id)} items={cards.map((c) => c.id)} strategy={verticalListSortingStrategy}>
           {cards.map((c) => (
             <CardArrastavel key={c.id} card={c} fase={fase} agoraMs={agoraMs} />
@@ -230,24 +323,29 @@ function Coluna({
   );
 }
 
-/** Terminal recolhida: faixa estreita, ainda aceita drop. */
-function ColunaColapsada({ fase, total, onExpandir }: { fase: FaseCliente; total: number; onExpandir: () => void }) {
+/** Coluna recolhida (terminal ou vazia): faixa estreita, ainda aceita drop. */
+function ColunaColapsada({ fase, total, onExpandir, onNovo }: { fase: FaseCliente; total: number; onExpandir: () => void; onNovo?: () => void }) {
   const { setNodeRef, isOver } = useDroppable({ id: idColuna(fase.id) });
   return (
     <section
       ref={setNodeRef}
       aria-label={`Fase ${fase.nome} (recolhida), ${total} card(s)`}
       className={cn(
-        "flex w-12 shrink-0 snap-start flex-col items-center rounded-xl border border-dashed border-border bg-muted/40 py-3",
+        "flex w-12 shrink-0 snap-start flex-col items-center gap-1 rounded-xl border border-dashed border-border bg-muted/40 py-3",
         isOver && "border-solid border-border-strong bg-surface/40",
       )}
     >
+      {onNovo ? (
+        <Button variant="ghost" size="icon-xs" aria-label={`Novo card em ${fase.nome}`} title="Novo card" onClick={onNovo}>
+          <Plus />
+        </Button>
+      ) : null}
       <button
         type="button"
         onClick={onExpandir}
         aria-label={`Expandir ${fase.nome}`}
         title={`Expandir ${fase.nome}`}
-        className="flex flex-1 flex-col items-center gap-2 rounded-md px-1 text-fg-mute outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+        className="flex flex-1 flex-col items-center gap-2 rounded-md px-1 pt-1 text-fg-mute outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
       >
         <CorDaFase cor={fase.cor} />
         <span className="font-mono text-xs tabular">{total}</span>
@@ -277,7 +375,7 @@ function CardArrastavel({ card, fase, agoraMs }: { card: CardCliente; fase: Fase
   );
 }
 
-function NovoCard({ pipelineId, faseId, onFim }: { pipelineId: string; faseId: string; onFim: () => void }) {
+function NovoCard({ pipelineId, faseId, onFim }: { pipelineId: string; faseId: string; onFim: (id?: string) => void }) {
   const [titulo, setTitulo] = useState("");
   const [erro, setErro] = useState<FalhaUI | null>(null);
   const [pendente, startTransition] = useTransition();
@@ -287,11 +385,19 @@ function NovoCard({ pipelineId, faseId, onFim }: { pipelineId: string; faseId: s
     if (!titulo.trim()) return onFim();
     setErro(null);
     startTransition(async () => {
-      const falha = await executarAcao(() => criarCardAction(pipelineId, faseId, titulo), "criar o card");
+      // Chamada direta (não `executarAcao`) porque precisamos do id criado.
+      let r: Awaited<ReturnType<typeof criarCardAction>>;
+      try {
+        r = await criarCardAction(pipelineId, faseId, titulo);
+      } catch {
+        setErro(FALHA_CONEXAO);
+        return;
+      }
+      const falha = falhaDe(r, "criar o card");
       if (falha) setErro(falha);
       else {
         setTitulo("");
-        onFim();
+        onFim("id" in r ? r.id : undefined);
       }
     });
   }
@@ -310,7 +416,7 @@ function NovoCard({ pipelineId, faseId, onFim }: { pipelineId: string; faseId: s
       />
       <MensagemErro falha={erro} className="mt-1" />
       <div className="mt-2 flex justify-end gap-1">
-        <Button type="button" variant="ghost" size="xs" onClick={onFim}>
+        <Button type="button" variant="ghost" size="xs" onClick={() => onFim()}>
           Cancelar
         </Button>
         <Button type="submit" size="xs" disabled={pendente}>
