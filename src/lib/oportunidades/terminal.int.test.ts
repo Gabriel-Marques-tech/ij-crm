@@ -98,6 +98,14 @@ describe("ganho em vendas", () => {
     expect(tv[3].payload).toEqual({ projetoId: p.id, criado: true });
   });
 
+  it("sem o objeto de dados do fechamento (chamada direta, sem diálogo) o ganho é recusado e nada muda", async () => {
+    const { vendas, ana, vendaId } = await semear();
+    expect(await moverCard(vendaId, fase(vendas, "contrato_assinado").id, ana)).toEqual({ ok: false, erro: "DADOS_TERMINAL_OBRIGATORIOS" });
+    const venda = await db.oportunidade.findUniqueOrThrow({ where: { id: vendaId } });
+    expect(venda).toMatchObject({ faseId: fase(vendas, "em_negociacao").id, dataGanho: null });
+    expect(await db.oportunidade.count()).toBe(1);
+  });
+
   it("valor fechado opcional em BRL é gravado (com histórico); inválido recusa o movimento inteiro", async () => {
     const { vendas, ana, vendaId } = await semear();
     const ganho = fase(vendas, "contrato_assinado").id;
@@ -208,7 +216,8 @@ describe("perdido", () => {
   it("motivo obrigatório (da lista; “outro” com texto); sem ele o card não move", async () => {
     const { vendas, ana, vendaId } = await semear();
     const perdido = fase(vendas, "perdido").id;
-    expect(await moverCard(vendaId, perdido, ana)).toEqual({ ok: false, erro: "MOTIVO_PERDA_OBRIGATORIO" });
+    expect(await moverCard(vendaId, perdido, ana)).toEqual({ ok: false, erro: "DADOS_TERMINAL_OBRIGATORIOS" });
+    expect(await moverCard(vendaId, perdido, ana, { dadosTerminal: {} })).toEqual({ ok: false, erro: "MOTIVO_PERDA_OBRIGATORIO" });
     expect(await moverCard(vendaId, perdido, ana, { dadosTerminal: { motivo: "achismo" } })).toEqual({ ok: false, erro: "MOTIVO_PERDA_INVALIDO" });
     expect(await moverCard(vendaId, perdido, ana, { dadosTerminal: { motivo: "outro", detalhe: " " } })).toEqual({
       ok: false,

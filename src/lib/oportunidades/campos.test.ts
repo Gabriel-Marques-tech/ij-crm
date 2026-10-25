@@ -46,7 +46,10 @@ describe("interpretarCampo", () => {
 
   it("orçamento aceita formato BR e ponto decimal; guarda string com 2 casas", () => {
     expect(interpretarCampo("orcamentoPrevisto", "R$ 12.500,50")).toEqual({ ok: true, valor: "12500.50" });
-    expect(interpretarCampo("orcamentoPrevisto", "12500.5")).toEqual({ ok: true, valor: "12500.50" });
+    expect(interpretarCampo("orcamentoPrevisto", "12500,5")).toEqual({ ok: true, valor: "12500.50" });
+    expect(interpretarCampo("orcamentoPrevisto", "12.500")).toEqual({ ok: true, valor: "12500.00" });
+    // Formato BR: ponto é milhar, nunca decimal.
+    expect(interpretarCampo("orcamentoPrevisto", "12500.5").ok).toBe(false);
     expect(interpretarCampo("orcamentoPrevisto", "8000")).toEqual({ ok: true, valor: "8000.00" });
     expect(interpretarCampo("orcamentoPrevisto", "")).toEqual({ ok: true, valor: null });
     expect(interpretarCampo("orcamentoPrevisto", "-5").ok).toBe(false);

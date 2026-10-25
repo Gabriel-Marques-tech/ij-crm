@@ -22,6 +22,7 @@ const MENSAGEM: Record<ErroOportunidade, string> = {
   NOTA_INVALIDA: "A nota precisa ter entre 1 e 5000 caracteres.",
   FASE_INICIAL_PROJETOS_INDISPONIVEL:
     "O quadro Projetos está sem a fase “Em execução” (chave em_execucao) ativa, onde nasce o card do projeto. Peça à gestão para restaurá-la.",
+  DADOS_TERMINAL_OBRIGATORIOS: "Faltam os dados do fechamento (valor ou motivo). Mova o card de novo para abrir o diálogo.",
   VALOR_FECHADO_INVALIDO: "Valor fechado inválido. Ex.: 12.500,00",
   MOTIVO_PERDA_OBRIGATORIO: "Escolha o motivo da perda.",
   MOTIVO_PERDA_INVALIDO: "Motivo da perda inválido.",

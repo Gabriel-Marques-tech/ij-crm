@@ -6,10 +6,23 @@ describe("lerDinheiro", () => {
     expect(lerDinheiro("12.500,00")).toEqual({ ok: true, valor: "12500.00" });
     expect(lerDinheiro("R$ 1.234,5")).toEqual({ ok: true, valor: "1234.50" });
     expect(lerDinheiro("r$12500")).toEqual({ ok: true, valor: "12500.00" });
-    expect(lerDinheiro("  8000.75 ")).toEqual({ ok: true, valor: "8000.75" });
+    expect(lerDinheiro("  8000,75 ")).toEqual({ ok: true, valor: "8000.75" });
     expect(lerDinheiro("0")).toEqual({ ok: true, valor: "0.00" });
     expect(lerDinheiro("12.500")).toEqual({ ok: true, valor: "12500.00" });
     expect(lerDinheiro("1.250.000")).toEqual({ ok: true, valor: "1250000.00" });
+  });
+
+  it("milhar BR sem centavos e decimal com vírgula", () => {
+    expect(lerDinheiro("1.234")).toEqual({ ok: true, valor: "1234.00" });
+    expect(lerDinheiro("12.500")).toEqual({ ok: true, valor: "12500.00" });
+    expect(lerDinheiro("1.234,56")).toEqual({ ok: true, valor: "1234.56" });
+    expect(lerDinheiro("1,5")).toEqual({ ok: true, valor: "1.50" });
+  });
+
+  it("ponto só é milhar (grupos de 3); decimal é com vírgula: '1.23', '8000.75' e o americano '1,234.56' são recusados", () => {
+    for (const ruim of ["1.23", "8000.75", "12500.5", "1,234.56", "12.34,5", "1.2345"]) {
+      expect(lerDinheiro(ruim), ruim).toEqual({ ok: false });
+    }
   });
 
   it("vazio = sem valor", () => {
@@ -35,8 +48,14 @@ describe("dialogoTerminal", () => {
 });
 
 describe("interpretarGanho", () => {
+  it("exige o objeto de dados (o servidor é a porta, não o diálogo)", () => {
+    expect(interpretarGanho(undefined)).toEqual({ ok: false, erro: "DADOS_TERMINAL_OBRIGATORIOS" });
+    expect(interpretarGanho(null)).toEqual({ ok: false, erro: "DADOS_TERMINAL_OBRIGATORIOS" });
+    expect(interpretarGanho([])).toEqual({ ok: false, erro: "DADOS_TERMINAL_OBRIGATORIOS" });
+    expect(interpretarGanho("12")).toEqual({ ok: false, erro: "DADOS_TERMINAL_OBRIGATORIOS" });
+  });
+
   it("valor opcional: ausente ou vazio → null", () => {
-    expect(interpretarGanho(undefined)).toEqual({ ok: true, valorFechado: null });
     expect(interpretarGanho({})).toEqual({ ok: true, valorFechado: null });
     expect(interpretarGanho({ valorFechado: "" })).toEqual({ ok: true, valorFechado: null });
   });
@@ -54,7 +73,8 @@ describe("interpretarPerda", () => {
   });
 
   it("motivo é obrigatório e precisa ser da lista", () => {
-    expect(interpretarPerda(undefined)).toEqual({ ok: false, erro: "MOTIVO_PERDA_OBRIGATORIO" });
+    expect(interpretarPerda(undefined)).toEqual({ ok: false, erro: "DADOS_TERMINAL_OBRIGATORIOS" });
+    expect(interpretarPerda({})).toEqual({ ok: false, erro: "MOTIVO_PERDA_OBRIGATORIO" });
     expect(interpretarPerda({ motivo: "" })).toEqual({ ok: false, erro: "MOTIVO_PERDA_OBRIGATORIO" });
     expect(interpretarPerda({ motivo: "toString" })).toEqual({ ok: false, erro: "MOTIVO_PERDA_INVALIDO" });
     expect(interpretarPerda({ motivo: 3 })).toEqual({ ok: false, erro: "MOTIVO_PERDA_INVALIDO" });

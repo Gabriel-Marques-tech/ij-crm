@@ -126,7 +126,9 @@ describe("moverCard", () => {
     const { vendas, vendedora } = await semear();
     const c = await criarCard({ pipelineId: vendas.id, faseId: fase(vendas, "em_negociacao").id, titulo: "Acme" }, vendedora);
     if (!c.ok) throw new Error(c.erro);
-    expect(await moverCard(c.id, fase(vendas, "contrato_assinado").id, vendedora)).toEqual({ ok: true, mudou: true, terminal: "GANHO" });
+    // Sem os dados do fechamento (diálogo) o servidor recusa; com eles (mesmo vazios), move.
+    expect(await moverCard(c.id, fase(vendas, "contrato_assinado").id, vendedora)).toEqual({ ok: false, erro: "DADOS_TERMINAL_OBRIGATORIOS" });
+    expect(await moverCard(c.id, fase(vendas, "contrato_assinado").id, vendedora, { dadosTerminal: {} })).toEqual({ ok: true, mudou: true, terminal: "GANHO" });
   });
 
   it("recusa destino de outro pipeline, arquivado ou inexistente, e card soft-deletado", async () => {
@@ -157,7 +159,7 @@ describe("moverCard", () => {
       liberouEm = Date.now();
     });
     await new Promise((r) => setTimeout(r, 100));
-    const r = await moverCard(c.id, fase(vendas, "contrato_assinado").id, vendedora);
+    const r = await moverCard(c.id, fase(vendas, "contrato_assinado").id, vendedora, { dadosTerminal: {} });
     const terminouEm = Date.now();
     await segurando;
     expect(r).toEqual({ ok: true, mudou: true, terminal: "GANHO" });

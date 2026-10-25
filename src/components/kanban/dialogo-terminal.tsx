@@ -20,6 +20,7 @@ import {
 export type PedidoTerminal = { titulo: string; faseNome: string; tipo: "GANHO" | "PERDIDO" };
 
 const MENSAGEM: Record<ErroDadosTerminal, string> = {
+  DADOS_TERMINAL_OBRIGATORIOS: "Dados inválidos.",
   VALOR_FECHADO_INVALIDO: "Valor inválido. Ex.: 12.500,00",
   MOTIVO_PERDA_OBRIGATORIO: "Escolha um motivo.",
   MOTIVO_PERDA_INVALIDO: "Motivo inválido.",
