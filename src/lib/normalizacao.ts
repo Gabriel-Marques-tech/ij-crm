@@ -7,12 +7,29 @@
  */
 import type { TipoContatoPonto } from "@prisma/client";
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+/** Parte local: sem espaço, `@`, `<>`, `,`, `;`, aspas. */
+const LOCAL_EMAIL_RE = /^[^\s@<>,;"']+$/;
 
+/**
+ * Email → `local@dominio` em minúsculas. Tira o "embrulho" comum de quem cola
+ * de um cabeçalho ou texto (`<ana@acme.com>`, aspas, `.,;:` no fim). O
+ * domínio passa pela mesma normalização do domínio de empresa (IDN →
+ * punycode, TLD alfabético), para email e empresa casarem igual.
+ */
 export function normalizarEmail(entrada: string): string | null {
-  const v = entrada.trim().toLowerCase();
-  if (!EMAIL_RE.test(v)) return null;
-  return v;
+  let v = entrada.trim();
+  for (;;) {
+    const antes = v;
+    v = v.replace(/^[<"'\s]+/, "").replace(/[>"'\s.,;:]+$/, "");
+    if (v === antes) break;
+  }
+  v = v.toLowerCase();
+  const arroba = v.indexOf("@");
+  if (arroba <= 0 || arroba !== v.lastIndexOf("@")) return null;
+  const local = v.slice(0, arroba);
+  if (!LOCAL_EMAIL_RE.test(local)) return null;
+  const dominio = dominioValido(v.slice(arroba + 1));
+  return dominio ? `${local}@${dominio}` : null;
 }
 
 /** DDDs em uso (Anatel). Qualquer outro par de dígitos não é telefone BR. */
@@ -29,25 +46,35 @@ const DDDS = new Set([
  * Nono dígito: celular (assinante começando com 6–9) sem o 9 ganha o 9 —
  * o WhatsApp de contas antigas entrega `55DD8888-7777`, e o mesmo celular
  * digitado com o 9 tem de cair no mesmo valor. Fixo (2–5) fica com 8 dígitos.
- * Com 9 dígitos, o assinante precisa começar com 9 (é a regra do celular).
+ * Assinante: fixo `[2-5]` + 7 dígitos; celular `9[6-9]` + 7 dígitos.
+ * Começando com 0/1 não é assinante válido.
+ *
+ * Sem "+", o padrão é BR (CRM brasileiro: na UI ninguém digita o 55). Quem
+ * recebe número que SEMPRE traz DDI (ingestão do WhatsApp, import) passa
+ * `{ exigirDdi: true }`: aí `5551234567` não vira um fixo de Porto Alegre
+ * por acidente — sem 55 + DDD + assinante completo, é null.
  */
-export function normalizarTelefoneBr(entrada: string): string | null {
+export function normalizarTelefoneBr(entrada: string, opcoes: { exigirDdi?: boolean } = {}): string | null {
   const bruto = entrada.trim();
   let d = bruto.replace(/\D/g, "");
   if (!d) return null;
-  if (bruto.startsWith("+")) {
+  if (bruto.startsWith("+") || opcoes.exigirDdi) {
     if (!d.startsWith("55")) return null;
     d = d.slice(2);
   } else if (d.startsWith("55") && d.length >= 12) {
     d = d.slice(2);
+  } else if (d.startsWith("0") && (d.length === 11 || d.length === 12)) {
+    d = d.slice(1); // 0 + DDD + número
   }
-  if (d.startsWith("0") && (d.length === 11 || d.length === 12)) d = d.slice(1); // 0 + DDD + número
   if (d.length !== 10 && d.length !== 11) return null;
   if (!DDDS.has(Number(d.slice(0, 2)))) return null;
   const ddd = d.slice(0, 2);
   let assinante = d.slice(2);
-  if (assinante.length === 9 && assinante[0] !== "9") return null;
-  if (assinante.length === 8 && /^[6-9]/.test(assinante)) assinante = `9${assinante}`;
+  if (assinante.length === 9 && !/^9[6-9]/.test(assinante)) return null;
+  if (assinante.length === 8) {
+    if (/^[6-9]/.test(assinante)) assinante = `9${assinante}`;
+    else if (!/^[2-5]/.test(assinante)) return null;
+  }
   return `+55${ddd}${assinante}`;
 }
 
@@ -95,12 +122,34 @@ export function formatarCnpj(cnpj: string): string {
 // ---------------------------------------------------------------- domínio
 
 const ROTULO_DOMINIO = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+const TLD = /^(?:[a-z]{2,}|xn--[a-z0-9-]+)$/;
+
+/**
+ * Host → forma canônica: minúsculo, sem ponto final, IDN em punycode
+ * (`ação.com.br` → `xn--ao-siap.com.br`, via WHATWG URL), rótulos válidos,
+ * ≥ 2 rótulos e TLD alfabético. Usado no domínio de email E no de empresa,
+ * para que os dois casem igual.
+ */
+function dominioValido(host: string): string | null {
+  const bruto = host.trim().replace(/\.$/, "");
+  if (!bruto || /[\s/?#@:]/.test(bruto)) return null;
+  let v: string;
+  try {
+    v = new URL(`http://${bruto}`).hostname;
+  } catch {
+    return null;
+  }
+  const rotulos = v.split(".");
+  if (rotulos.length < 2) return null;
+  if (!rotulos.every((r) => ROTULO_DOMINIO.test(r))) return null;
+  if (!TLD.test(rotulos[rotulos.length - 1])) return null;
+  return v;
+}
 
 /**
  * Domínio de uma empresa a partir de email (`ana@acme.com.br`), URL
  * (`https://www.acme.com.br/x`) ou do próprio domínio: lowercase, sem
- * `www.`, sem porta/caminho/ponto final. Exige ao menos um ponto e TLD
- * alfabético.
+ * `www.`, sem porta/caminho/ponto final, IDN em punycode.
  */
 export function normalizarDominio(entrada: string): string | null {
   let v = entrada.trim().toLowerCase();
@@ -112,48 +161,36 @@ export function normalizarDominio(entrada: string): string | null {
   v = v.replace(/:\d*$/, ""); // porta
   v = v.replace(/\.$/, "");
   v = v.replace(/^www\./, "");
-  const rotulos = v.split(".");
-  if (rotulos.length < 2) return null;
-  if (!rotulos.every((r) => ROTULO_DOMINIO.test(r))) return null;
-  if (!/^[a-z]{2,}$/.test(rotulos[rotulos.length - 1])) return null;
-  return v;
+  return dominioValido(v);
 }
 
 /**
  * Provedores de email de uso pessoal: o domínio não identifica empresa, então
  * nunca é gravado como `dominio_email` nem usado em `encontrarEmpresa`.
+ * `familias` cobre os que existem em vários TLDs (`gmx.de`, `yandex.ru`,
+ * `yahoo.co.uk`…): primeiro rótulo + TLD de país/genérico curto.
  */
-const DOMINIOS_PUBLICOS = new Set([
-  "gmail.com",
-  "googlemail.com",
-  "hotmail.com",
-  "hotmail.com.br",
-  "outlook.com",
-  "outlook.com.br",
-  "live.com",
-  "msn.com",
-  "yahoo.com",
-  "yahoo.com.br",
-  "icloud.com",
-  "me.com",
-  "mac.com",
-  "uol.com.br",
-  "bol.com.br",
-  "terra.com.br",
-  "ig.com.br",
-  "globo.com",
-  "globomail.com",
-  "r7.com",
-  "zipmail.com.br",
-  "protonmail.com",
-  "proton.me",
-  "aol.com",
-  "gmx.com",
-  "yandex.com",
-]);
+export const PROVEDORES_PESSOAIS = {
+  dominios: [
+    "gmail.com", "googlemail.com",
+    "hotmail.com", "hotmail.com.br", "outlook.com", "outlook.com.br", "live.com", "live.com.br", "msn.com", "msn.com.br",
+    "yahoo.com", "yahoo.com.br", "ymail.com", "rocketmail.com",
+    "icloud.com", "me.com", "mac.com",
+    "proton.me", "protonmail.com", "protonmail.ch", "pm.me",
+    "uol.com.br", "bol.com.br", "terra.com.br", "ig.com.br", "globo.com", "globomail.com", "r7.com", "zipmail.com.br", "oi.com.br",
+    "zoho.com", "zohomail.com", "aol.com", "mail.com", "email.com", "tutanota.com", "tuta.io", "fastmail.com", "hey.com",
+  ],
+  familias: ["gmx", "yandex", "yahoo", "hotmail", "outlook", "live"],
+} as const;
+
+const PESSOAIS = new Set<string>(PROVEDORES_PESSOAIS.dominios);
+const FAMILIA_TLD = /^[a-z]{2,3}(?:\.[a-z]{2})?$/;
 
 export function ehDominioPublico(dominio: string): boolean {
-  return DOMINIOS_PUBLICOS.has(dominio);
+  if (PESSOAIS.has(dominio)) return true;
+  const ponto = dominio.indexOf(".");
+  const primeiro = dominio.slice(0, ponto);
+  return (PROVEDORES_PESSOAIS.familias as readonly string[]).includes(primeiro) && FAMILIA_TLD.test(dominio.slice(ponto + 1));
 }
 
 // ---------------------------------------------------------------- pontos de contato

@@ -156,3 +156,51 @@ describe("normalizarPonto", () => {
     expect(normalizarPonto("oi")).toBeNull();
   });
 });
+
+describe("review: email com embrulho", () => {
+  it.each([
+    ["ana@acme.com.", "ana@acme.com"],
+    ["<ana@acme.com>", "ana@acme.com"],
+    ["ana@acme.com,", "ana@acme.com"],
+    ['"Ana@Acme.com";', "ana@acme.com"],
+    ["ana@ação.com.br", "ana@xn--ao-siap.com.br"],
+  ])("%s → %s", (entrada, esperado) => {
+    expect(normalizarEmail(entrada)).toBe(esperado);
+  });
+
+  it("rejeita TLD não alfabético e <>,; no meio", () => {
+    for (const e of ["ana@acme.c0m", "ana@acme.123", "a<b@acme.com", "ana,bia@acme.com", "ana@ac;me.com", "a@b@acme.com"]) expect(normalizarEmail(e)).toBeNull();
+  });
+});
+
+describe("review: telefone", () => {
+  it("5551234567: BR por padrão (fixo de POA); exigindo DDI é inválido", () => {
+    expect(normalizarTelefoneBr("5551234567")).toBe("+555551234567");
+    expect(normalizarTelefoneBr("5551234567", { exigirDdi: true })).toBeNull();
+    expect(normalizarTelefoneBr("5511999998888", { exigirDdi: true })).toBe("+5511999998888");
+    expect(normalizarTelefoneBr("11999998888", { exigirDdi: true })).toBeNull();
+  });
+
+  it("assinante começando com 0/1 é inválido; celular de 9 dígitos é 9[6-9]", () => {
+    expect(normalizarTelefoneBr("11 0000-0031")).toBeNull();
+    expect(normalizarTelefoneBr("11 1234-5678")).toBeNull();
+    expect(normalizarTelefoneBr("11 90000-0031")).toBeNull();
+    expect(normalizarTelefoneBr("11 95000-0000")).toBeNull();
+    expect(normalizarTelefoneBr("11 96000-0000")).toBe("+5511960000000");
+  });
+});
+
+describe("review: domínio IDN e provedores", () => {
+  it("IDN vira punycode, igual para empresa e email", () => {
+    expect(normalizarDominio("https://www.Ação.com.br")).toBe("xn--ao-siap.com.br");
+    expect(normalizarDominio("ana@ação.com.br")).toBe(normalizarEmail("ana@ação.com.br")!.split("@")[1]);
+  });
+
+  it("lista ampliada e famílias multi-TLD", () => {
+    for (const d of ["live.com.br", "msn.com.br", "ymail.com", "rocketmail.com", "zoho.com", "mail.com", "gmx.de", "gmx.net", "yandex.ru", "yahoo.co.uk"]) {
+      expect(ehDominioPublico(d)).toBe(true);
+    }
+    expect(ehDominioPublico("live.acme.com")).toBe(false);
+    expect(ehDominioPublico("gmxacme.com.br")).toBe(false);
+  });
+});
