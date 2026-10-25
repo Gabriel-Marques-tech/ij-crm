@@ -16,6 +16,7 @@ import {
   validarCor,
   validarRemocao,
   validarReordenacao,
+  validarMudancaTerminal,
   validarTerminais,
   type AcaoRemocao,
   type ErroFase,
@@ -198,6 +199,10 @@ export async function editarFase(
       const fase = await tx.fase.findUniqueOrThrow({ where: { id: faseId }, include: { pipeline: { select: { chave: true } } } });
       if (fase.arquivadaEm) throw new ErroDeRegra("FASE_ARQUIVADA");
       if (dados.tipoTerminal !== undefined && dados.tipoTerminal !== fase.tipoTerminal) {
+        // Contado sob o lock do quadro: criar/mover card toma o mesmo lock.
+        const qtdCards = await tx.oportunidade.count({ where: { faseId, deletadoEm: null } });
+        const erroCards = validarMudancaTerminal({ de: fase.tipoTerminal, para: dados.tipoTerminal, qtdCards });
+        if (erroCards) throw new ErroDeRegra(erroCards);
         const ativas = await tx.fase.findMany({ where: { pipelineId: fase.pipelineId, arquivadaEm: null }, select: { id: true, tipoTerminal: true } });
         const simuladas = ativas.map((f) => (f.id === faseId ? { tipoTerminal: dados.tipoTerminal! } : f));
         const erro = validarTerminais(fase.pipeline.chave, simuladas);

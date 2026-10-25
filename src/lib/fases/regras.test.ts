@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { chaveDeNome, chaveUnica, destinoCompativel, inserirComChaveUnica, validarCor, validarRemocao, validarReordenacao, validarTerminais } from "./regras";
+import { chaveDeNome, chaveUnica, destinoCompativel, validarMudancaTerminal, inserirComChaveUnica, validarCor, validarRemocao, validarReordenacao, validarTerminais } from "./regras";
 
 describe("inserirComChaveUnica", () => {
   const p2002 = Object.assign(new Error("unique"), { code: "P2002", meta: { target: ["pipeline_id", "chave"] } });
@@ -137,5 +137,15 @@ describe("destinoCompativel", () => {
     expect(destinoCompativel({ tipoTerminal: null }, { tipoTerminal: "GANHO" })).toBe(false);
     expect(destinoCompativel({ tipoTerminal: "PERDIDO" }, { tipoTerminal: null })).toBe(false);
     expect(destinoCompativel({ tipoTerminal: "GANHO" }, { tipoTerminal: "PERDIDO" })).toBe(false);
+  });
+});
+
+describe("validarMudancaTerminal", () => {
+  it("com cards vivos o tipo terminal não muda; sem cards, ou sem mudança, passa", () => {
+    expect(validarMudancaTerminal({ de: null, para: "GANHO", qtdCards: 1 })).toBe("FASE_COM_CARDS_TERMINAL");
+    expect(validarMudancaTerminal({ de: "GANHO", para: null, qtdCards: 3 })).toBe("FASE_COM_CARDS_TERMINAL");
+    expect(validarMudancaTerminal({ de: "GANHO", para: "PERDIDO", qtdCards: 1 })).toBe("FASE_COM_CARDS_TERMINAL");
+    expect(validarMudancaTerminal({ de: "GANHO", para: "GANHO", qtdCards: 1 })).toBeNull();
+    expect(validarMudancaTerminal({ de: null, para: "PERDIDO", qtdCards: 0 })).toBeNull();
   });
 });

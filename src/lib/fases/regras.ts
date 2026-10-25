@@ -18,6 +18,7 @@ export type ErroFase =
   | "DESTINO_OBRIGATORIO"
   | "DESTINO_INVALIDO"
   | "DESTINO_TERMINAL_INCOMPATIVEL"
+  | "FASE_COM_CARDS_TERMINAL"
   | "FASE_EM_USO";
 
 /** Pipeline cuja regra de negócio exige também uma fase PERDIDO (§4.2). */
@@ -108,6 +109,15 @@ export function validarTerminais(
   if (!tem("GANHO")) return "TERMINAL_GANHO_OBRIGATORIO";
   if (pipelineChave === PIPELINE_VENDAS && !tem("PERDIDO")) return "TERMINAL_PERDIDO_OBRIGATORIO";
   return null;
+}
+
+/**
+ * Mudar se a fase é de ganho/perdido com cards vivos dentro deixaria esses
+ * cards fechados sem os dados do fechamento (ou abertos com dados velhos):
+ * eles não passam pelo gancho de terminal. Com cards, só sem mudar o tipo.
+ */
+export function validarMudancaTerminal(m: { de: TipoTerminal | null; para: TipoTerminal | null; qtdCards: number }): ErroFase | null {
+  return m.de !== m.para && m.qtdCards > 0 ? "FASE_COM_CARDS_TERMINAL" : null;
 }
 
 /** A nova ordem precisa ser uma permutação exata das fases ativas atuais. */

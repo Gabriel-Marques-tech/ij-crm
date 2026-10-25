@@ -164,6 +164,29 @@ describe("criarFase", () => {
 });
 
 describe("editarFase", () => {
+  it("fase com cards vivos não muda de tipo terminal (cards não passariam pelo gancho); o resto edita", async () => {
+    const { vendas } = await semearPipelines();
+    const g = await gestor();
+    const aberta = faseDe(vendas, "em_negociacao");
+    await card(vendas.id, aberta.id, g.id);
+    expect(await editarFase(aberta.id, { tipoTerminal: "GANHO" })).toEqual({ ok: false, erro: "FASE_COM_CARDS_TERMINAL" });
+    const ganho = faseDe(vendas, "contrato_assinado");
+    await card(vendas.id, ganho.id, g.id);
+    // Segundo GANHO: sem ele a regra "≥1 GANHO" responderia antes.
+    await db.fase.create({ data: { pipelineId: vendas.id, chave: "ganho_2", nome: "Ganho 2", ordem: 99, isTerminal: true, tipoTerminal: "GANHO" } });
+    expect(await editarFase(ganho.id, { tipoTerminal: null })).toEqual({ ok: false, erro: "FASE_COM_CARDS_TERMINAL" });
+    expect(await editarFase(ganho.id, { tipoTerminal: "PERDIDO" })).toEqual({ ok: false, erro: "FASE_COM_CARDS_TERMINAL" });
+    // Mesmo tipo (o formulário reenvia o atual) e outros campos passam.
+    expect(await editarFase(ganho.id, { nome: "Assinado", tipoTerminal: "GANHO" })).toEqual({ ok: true });
+    expect(await editarFase(aberta.id, { nome: "Negociando", tipoTerminal: null })).toEqual({ ok: true });
+    const f = await db.fase.findUniqueOrThrow({ where: { id: aberta.id } });
+    expect(f).toMatchObject({ nome: "Negociando", isTerminal: false, tipoTerminal: null });
+    // Card soft-deletado não conta.
+    const vazia = faseDe(vendas, "primeiro_contato");
+    await db.oportunidade.create({ data: { pipelineId: vendas.id, faseId: vazia.id, titulo: "m", responsavelId: g.id, criadoVia: "UI", deletadoEm: new Date() } });
+    expect(await editarFase(vazia.id, { tipoTerminal: "PERDIDO" })).toEqual({ ok: true });
+  });
+
   it("edita nome, cor, limite e terminal", async () => {
     const { vendas } = await semearPipelines();
     const f = faseDe(vendas, "em_negociacao");
