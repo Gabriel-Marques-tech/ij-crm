@@ -110,6 +110,18 @@ em fase terminal; todo movimento grava `TransicaoFase` (origem `UI`) + Timeline
 hoje no-op — GAB-32 preenche (ganho → projeto, valor fechado, motivo de perda) sem tomar outros
 locks além dos de `pipelinesExtrasDoTerminal`.
 
+## Empresas e Contatos
+
+`/empresas` e `/contatos` (lista com busca + detalhe editável); no card, a seção "Empresa e
+contato" vincula/cria inline (Timeline `CAMPO_ALTERADO { campo: "empresa"|"contato", antes,
+depois }` com nomes). Normalização única em `src/lib/normalizacao.ts`: telefone → E.164 BR
+(celular sem o 9 ganha o 9), email lowercase/trim, CNPJ alfanumérico (sem pontuação, maiúsculo,
+DV módulo 11 com ASCII−48 — **nunca `\D`**), domínio de email/URL sem `www.`. Telefone/email
+é único no sistema (`contato_ponto (tipo, valor_normalizado)`): repetir devolve o dono. Match
+automático (ingestão/import) só por identificador exato, em `src/lib/contatos/match.ts`:
+`encontrarContatoPorIdentificador(telefone|email)` e `encontrarEmpresa(cnpj|dominio)` — busca
+por nome é só autocomplete, nunca vínculo.
+
 ## Preferências de visualização
 
 Opções de visualização de cada usuário (ex.: no Kanban, "mostrar colunas vazias" e colunas abertas à mão, por quadro) ficam em `usuario.preferencias` (JSONB versionado, validado com zod em `src/lib/preferencias/`); cada um só grava as próprias, e JSON inválido vira o padrão.
