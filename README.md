@@ -109,13 +109,20 @@ em fase terminal; todo movimento grava `TransicaoFase` (origem `UI`) + Timeline
 `≥ limite` → vermelho.
 
 Ganho/perdido (`terminal.ts`, regras puras em `terminal-regras.ts`), dentro da transação do
-movimento: **ganho em Vendas** abre diálogo com valor fechado (opcional, BRL), grava `data_ganho`
-e cria o card em Projetos (fase de chave `em_execucao`, mesmo título/responsável/empresa/contato,
-`origem_oportunidade_id`). Um projeto por venda, garantido no banco (`origem_oportunidade_id`
-único): reabrir e ganhar de novo só registra o vínculo. **Perdido** exige motivo (preço, timing,
-concorrente, sem resposta, outro + texto) em qualquer quadro. Reabrir (sair do terminal) limpa
-`data_ganho`/`valor_fechado` ou `motivo_perda`; o valor antigo fica na Timeline. "Finalizado" em
-Projetos move direto, sem diálogo. Vendas/Projetos ficam na navegação (`?quadro=`).
+movimento — o servidor é a porta: sem o objeto `dadosTerminal` (pode ser `{}`) o movimento para
+ganho em Vendas ou para perdido é recusado. **Ganho em Vendas**: diálogo com valor fechado
+(opcional, BRL estrito: ponto só milhar, vírgula decimal — `12.500`, `1.234,56`), grava
+`data_ganho` e cria o card em Projetos (fase de chave `em_execucao`, mesmo
+título/responsável/empresa/contato, `origem_oportunidade_id`). Um projeto por venda, garantido no
+banco (`origem_oportunidade_id` único; P2002 de outro escritor no meio do ganho → o movimento é
+refeito e só registra o vínculo). **Perdido** exige motivo (preço, timing, concorrente, sem
+resposta, outro + texto) em qualquer quadro. **Reabrir mantém** `data_ganho`/`valor_fechado` e
+`motivo_perda` (último fechamento; o diálogo seguinte vem pré-preenchido, re-ganho atualiza a
+data). Se a venda sai do ganho, o projeto não é movido nem apagado: ganha uma entrada na Timeline
+e um aviso ("venda reaberta/perdida") enquanto a venda não voltar a ganho. "Finalizado" em
+Projetos move direto. Remover fase em Gestão só migra cards para fase do mesmo tipo (aberta,
+ganho ou perdido) — a migração não passa pelo gancho. Vendas/Projetos ficam na navegação (lista
+pelo `?quadro=`; o detalhe declara o quadro do card).
 
 ## Preferências de visualização
 
