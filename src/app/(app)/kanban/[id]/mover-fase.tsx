@@ -1,29 +1,43 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { ConfirmarTerminal, type PedidoTerminal } from "@/components/kanban/confirmar-terminal";
+import { DialogoTerminal, type PedidoTerminal } from "@/components/kanban/dialogo-terminal";
 import { MensagemErro } from "@/components/erros/mensagem-erro";
 import { executarAcao, type FalhaUI } from "@/lib/erros/cliente";
+import { dialogoTerminal, type DadosTerminal } from "@/lib/oportunidades/terminal-regras";
 import { moverCardAction } from "../actions";
 import type { FaseCliente } from "../tipos";
 
-/** Mover de fase pelo detalhe (alternativa ao arrasto, boa no celular). */
-export function MoverFase({ cardId, titulo, faseAtualId, fases }: { cardId: string; titulo: string; faseAtualId: string; fases: FaseCliente[] }) {
+/** Mover de fase pelo detalhe (alternativa ao arrasto, boa no celular). Mesmos diálogos de ganho/perdido do quadro. */
+export function MoverFase({
+  cardId,
+  titulo,
+  faseAtualId,
+  fases,
+  pipelineChave,
+}: {
+  cardId: string;
+  titulo: string;
+  faseAtualId: string;
+  fases: FaseCliente[];
+  pipelineChave: string;
+}) {
   const [pedido, setPedido] = useState<(PedidoTerminal & { faseId: string }) | null>(null);
   const [erro, setErro] = useState<FalhaUI | null>(null);
   const [pendente, startTransition] = useTransition();
 
-  function mover(faseId: string) {
+  function mover(faseId: string, dados?: DadosTerminal) {
     setErro(null);
     startTransition(async () => {
-      setErro(await executarAcao(() => moverCardAction(cardId, faseId), "mover o card"));
+      setErro(await executarAcao(() => moverCardAction(cardId, faseId, dados), "mover o card"));
     });
   }
 
   function escolher(faseId: string) {
     const f = fases.find((x) => x.id === faseId);
     if (!f || f.id === faseAtualId) return;
-    if (f.isTerminal) setPedido({ faseId, titulo, faseNome: f.nome, tipo: f.tipoTerminal });
+    const tipo = dialogoTerminal(pipelineChave, f.tipoTerminal);
+    if (tipo) setPedido({ faseId, titulo, faseNome: f.nome, tipo });
     else mover(faseId);
   }
 
@@ -47,11 +61,11 @@ export function MoverFase({ cardId, titulo, faseAtualId, fases }: { cardId: stri
         ))}
       </select>
       <MensagemErro falha={erro} className="mt-1" />
-      <ConfirmarTerminal
+      <DialogoTerminal
         pedido={pedido}
         onCancelar={() => setPedido(null)}
-        onConfirmar={() => {
-          if (pedido) mover(pedido.faseId);
+        onConfirmar={(dados) => {
+          if (pedido) mover(pedido.faseId, dados);
           setPedido(null);
         }}
       />

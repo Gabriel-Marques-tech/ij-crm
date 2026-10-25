@@ -6,6 +6,7 @@ import { exigirUsuario } from "@/lib/auth/atual";
 import { comTratamento, type Inesperado } from "@/lib/erros/registrar";
 import { ehCampoEditavel, interpretarCampo } from "@/lib/oportunidades/campos";
 import { adicionarNota, criarCard, editarCard, moverCard, type ErroOportunidade } from "@/lib/oportunidades/oportunidades";
+import { DETALHE_PERDA_MAX, type DadosTerminal } from "@/lib/oportunidades/terminal-regras";
 import { salvarVisualizacaoKanban } from "@/lib/preferencias/servico";
 
 const MENSAGEM: Record<ErroOportunidade, string> = {
@@ -19,6 +20,13 @@ const MENSAGEM: Record<ErroOportunidade, string> = {
   TITULO_INVALIDO: "Informe um título (até 200 caracteres).",
   RESPONSAVEL_INVALIDO: "Responsável inválido ou inativo.",
   NOTA_INVALIDA: "A nota precisa ter entre 1 e 5000 caracteres.",
+  FASE_INICIAL_PROJETOS_INDISPONIVEL:
+    "O quadro Projetos está sem a fase “Em execução” (chave em_execucao) ativa, onde nasce o card do projeto. Peça à gestão para restaurá-la.",
+  VALOR_FECHADO_INVALIDO: "Valor fechado inválido. Ex.: 12.500,00",
+  MOTIVO_PERDA_OBRIGATORIO: "Escolha o motivo da perda.",
+  MOTIVO_PERDA_INVALIDO: "Motivo da perda inválido.",
+  MOTIVO_PERDA_DETALHE_OBRIGATORIO: "Em “Outro”, descreva o motivo da perda.",
+  MOTIVO_PERDA_DETALHE_LONGO: `O detalhe do motivo pode ter até ${DETALHE_PERDA_MAX} caracteres.`,
 };
 
 /**
@@ -46,11 +54,20 @@ export async function criarCardAction(pipelineId: string, faseId: string, titulo
   });
 }
 
-export async function moverCardAction(cardId: string, paraFaseId: string): Promise<EstadoKanban> {
+// Só a forma (strings curtas); o conteúdo é validado no gancho, dentro da transação.
+const dadosTerminal = z
+  .object({ valorFechado: z.string().max(50), motivo: z.string().max(50), detalhe: z.string().max(2000) })
+  .partial()
+  .strict();
+
+/** `dados`: o que o diálogo de ganho/perdido coletou (ver `terminal-regras.ts`). */
+export async function moverCardAction(cardId: string, paraFaseId: string, dados?: DadosTerminal): Promise<EstadoKanban> {
   return comTratamento("kanban.moverCard", async (): Promise<EstadoKanban> => {
     const ator = await exigirUsuario();
     if (!id.safeParse(cardId).success || !id.safeParse(paraFaseId).success) return { erro: "Dados inválidos." };
-    const r = await moverCard(cardId, paraFaseId, ator);
+    const d = dadosTerminal.optional().safeParse(dados);
+    if (!d.success) return { erro: "Dados inválidos." };
+    const r = await moverCard(cardId, paraFaseId, ator, { dadosTerminal: d.data });
     if (!r.ok) return { erro: MENSAGEM[r.erro] };
     revalidar(cardId);
     return { ok: true };
