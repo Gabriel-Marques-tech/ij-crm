@@ -73,6 +73,8 @@ export type CardDoQuadro = {
   revisar: boolean;
   proximaAcao: string | null;
   proximaAcaoEm: Date | null;
+  origem: Origem | null;
+  estado: string | null;
   responsavel: { id: string; nome: string };
   empresa: { nome: string } | null;
 };
@@ -102,6 +104,8 @@ export async function listarQuadro(pipelineChave: string): Promise<Quadro | null
       revisar: true,
       proximaAcao: true,
       proximaAcaoEm: true,
+      origem: true,
+      estado: true,
       responsavel: { select: { id: true, nome: true } },
       empresa: { select: { nome: true } },
     },

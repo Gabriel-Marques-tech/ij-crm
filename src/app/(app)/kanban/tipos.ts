@@ -1,4 +1,4 @@
-import type { TipoTerminal } from "@prisma/client";
+import type { Origem, TipoTerminal } from "@prisma/client";
 import type { Quadro } from "@/lib/oportunidades/oportunidades";
 
 /** Dados serializáveis que o servidor passa ao quadro cliente. */
@@ -19,8 +19,12 @@ export type CardCliente = {
   revisar: boolean;
   proximaAcao: string | null;
   proximaAcaoEmMs: number | null;
+  responsavelId: string;
   responsavelNome: string;
   empresaNome: string | null;
+  origem: Origem | null;
+  /** UF (sigla) ou null. */
+  estado: string | null;
 };
 
 export function paraCliente(q: Quadro): { fases: FaseCliente[]; cards: CardCliente[] } {
@@ -41,8 +45,11 @@ export function paraCliente(q: Quadro): { fases: FaseCliente[]; cards: CardClien
       revisar: c.revisar,
       proximaAcao: c.proximaAcao,
       proximaAcaoEmMs: c.proximaAcaoEm?.getTime() ?? null,
+      responsavelId: c.responsavel.id,
       responsavelNome: c.responsavel.nome,
       empresaNome: c.empresa?.nome ?? null,
+      origem: c.origem,
+      estado: c.estado,
     })),
   };
 }
