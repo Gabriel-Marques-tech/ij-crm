@@ -110,6 +110,10 @@ em fase terminal; todo movimento grava `TransicaoFase` (origem `UI`) + Timeline
 hoje no-op — GAB-32 preenche (ganho → projeto, valor fechado, motivo de perda) sem tomar outros
 locks além dos de `pipelinesExtrasDoTerminal`.
 
+## Preferências de visualização
+
+Opções de visualização de cada usuário (ex.: no Kanban, "mostrar colunas vazias" e colunas abertas à mão, por quadro) ficam em `usuario.preferencias` (JSONB versionado, validado com zod em `src/lib/preferencias/`); cada um só grava as próprias, e JSON inválido vira o padrão.
+
 ## Erros e debug
 
 Exceção inesperada numa server action não vira tela de erro: a action devolve
