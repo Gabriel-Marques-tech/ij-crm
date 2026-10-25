@@ -6,6 +6,7 @@ import { exigirUsuario } from "@/lib/auth/atual";
 import { comTratamento, type Inesperado } from "@/lib/erros/registrar";
 import { ehCampoEditavel, interpretarCampo } from "@/lib/oportunidades/campos";
 import { adicionarNota, criarCard, editarCard, moverCard, type ErroOportunidade } from "@/lib/oportunidades/oportunidades";
+import { salvarVisualizacaoKanban } from "@/lib/preferencias/servico";
 
 const MENSAGEM: Record<ErroOportunidade, string> = {
   CARD_NAO_ENCONTRADO: "Card não encontrado (pode ter sido excluído). Recarregue a página.",
@@ -78,6 +79,21 @@ export async function adicionarNotaAction(cardId: string, texto: string): Promis
     const r = await adicionarNota(cardId, texto, ator);
     if (!r.ok) return { erro: MENSAGEM[r.erro] };
     revalidar(cardId);
+    return { ok: true };
+  });
+}
+
+/**
+ * Visualização do quadro (mostrar vazias, colunas abertas à mão) do usuário
+ * DA SESSÃO: não recebe id de usuário, então ninguém grava a de outro. Sem
+ * revalidate: a UI já aplicou otimista e o próximo render lê do banco.
+ */
+export async function salvarVisualizacaoKanbanAction(pipelineChave: string, visualizacao: { mostrarVazias: boolean; abertas: string[] }): Promise<EstadoKanban> {
+  return comTratamento("kanban.salvarVisualizacao", async (): Promise<EstadoKanban> => {
+    const ator = await exigirUsuario();
+    if (!id.safeParse(pipelineChave).success) return { erro: "Dados inválidos." };
+    const r = await salvarVisualizacaoKanban(ator.id, pipelineChave, visualizacao);
+    if (!r.ok) return { erro: r.erro === "QUADRO_INEXISTENTE" ? "Quadro não encontrado." : "Dados inválidos." };
     return { ok: true };
   });
 }

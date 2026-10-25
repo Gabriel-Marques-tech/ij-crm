@@ -4,6 +4,8 @@ import type { Quadro } from "@/lib/oportunidades/oportunidades";
 /** Dados serializáveis que o servidor passa ao quadro cliente. */
 export type FaseCliente = {
   id: string;
+  /** Chave estável da fase (preferências guardam chaves, não ids). */
+  chave: string;
   nome: string;
   cor: string | null;
   limiteDiasAlerta: number | null;
@@ -31,6 +33,7 @@ export function paraCliente(q: Quadro): { fases: FaseCliente[]; cards: CardClien
   return {
     fases: q.fases.map((f) => ({
       id: f.id,
+      chave: f.chave,
       nome: f.nome,
       cor: f.cor,
       limiteDiasAlerta: f.limiteDiasAlerta,

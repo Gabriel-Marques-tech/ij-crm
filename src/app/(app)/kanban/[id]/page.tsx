@@ -95,6 +95,7 @@ export default async function CardPage({ params }: { params: Promise<{ id: strin
                 faseAtualId={card.faseId}
                 fases={fasesDoQuadro.map((f) => ({
                   id: f.id,
+                  chave: f.chave,
                   nome: f.arquivadaEm ? `${f.nome} (arquivada)` : f.nome,
                   cor: f.cor,
                   limiteDiasAlerta: f.limiteDiasAlerta,

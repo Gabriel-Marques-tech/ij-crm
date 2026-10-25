@@ -11,8 +11,8 @@ const contagem = new Map([
   ["a", 3],
   ["ganho", 2],
 ]);
-const abertas = (abertasManual: string[] = [], alvoArrasto: string | null = null) =>
-  [...colunasAbertas({ fases, contagem, abertasManual: new Set(abertasManual), alvoArrasto })].sort();
+const abertas = (abertasManual: string[] = [], alvoArrasto: string | null = null, mostrarVazias = false) =>
+  [...colunasAbertas({ fases, contagem, abertasManual: new Set(abertasManual), alvoArrasto, mostrarVazias })].sort();
 
 describe("colunasAbertas", () => {
   it("sem arrasto: abre só coluna não terminal com card", () => {
@@ -33,6 +33,11 @@ describe("colunasAbertas", () => {
 
   it("alvo numa coluna já aberta não muda nada", () => {
     expect(abertas([], "a")).toEqual(["a"]);
+  });
+
+  it("mostrar vazias: abre as não terminais vazias; terminal segue recolhida", () => {
+    expect(abertas([], null, true)).toEqual(["a", "vazia", "vazia2"]);
+    expect(abertas(["ganho"], null, true)).toEqual(["a", "ganho", "vazia", "vazia2"]);
   });
 
   it("alvo desconhecido é ignorado", () => {

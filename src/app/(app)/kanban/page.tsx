@@ -4,6 +4,8 @@ import { PageHeader } from "@/components/shell/page-header";
 import { exigirUsuario } from "@/lib/auth/atual";
 import { listarPipelines } from "@/lib/fases/fases";
 import { listarQuadro, listarResponsaveis } from "@/lib/oportunidades/oportunidades";
+import { visualizacaoKanban } from "@/lib/preferencias/preferencias";
+import { obterPreferencias } from "@/lib/preferencias/servico";
 import { QuadroKanban } from "./quadro-kanban";
 import { paraCliente } from "./tipos";
 
@@ -21,7 +23,12 @@ function agoraDoRequest(): number {
 export default async function KanbanPage({ searchParams }: { searchParams: Promise<{ quadro?: string }> }) {
   const usuario = await exigirUsuario();
   const { quadro: chave = "vendas" } = await searchParams;
-  const [pipelines, quadro, responsaveis] = await Promise.all([listarPipelines(), listarQuadro(chave), listarResponsaveis()]);
+  const [pipelines, quadro, responsaveis, preferencias] = await Promise.all([
+    listarPipelines(),
+    listarQuadro(chave),
+    listarResponsaveis(),
+    obterPreferencias(usuario.id),
+  ]);
 
   return (
     // Quadro ocupa a tela até embaixo: 100dvh menos topbar (3.5rem), padding
@@ -58,6 +65,8 @@ export default async function KanbanPage({ searchParams }: { searchParams: Promi
           agoraMs={agoraDoRequest()}
           responsaveis={responsaveis}
           meuId={usuario.id}
+          pipelineChave={quadro.pipeline.chave}
+          visualizacao={visualizacaoKanban(preferencias, quadro.pipeline.chave, quadro.fases.map((f) => f.chave))}
           {...paraCliente(quadro)}
         />
       ) : (

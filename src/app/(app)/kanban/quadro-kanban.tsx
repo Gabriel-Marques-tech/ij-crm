@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   DndContext,
@@ -27,12 +27,13 @@ import { ConfirmarTerminal, type PedidoTerminal } from "@/components/kanban/conf
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { FALHA_CONEXAO, executarAcao, falhaDe, type FalhaUI } from "@/lib/erros/cliente";
-import { criarCardAction, moverCardAction } from "./actions";
+import { criarCardAction, moverCardAction, salvarVisualizacaoKanbanAction } from "./actions";
 import { CardVisual } from "./card-visual";
 import { colunasAbertas, proximoAlvo } from "./colunas";
 import { escreverFiltros, filtrarCards, lerFiltros, type Filtros } from "./filtros";
 import { desfazerMovimento } from "./otimista";
 import { BarraFiltros, type Pessoa } from "./painel-filtros";
+import type { VisualizacaoKanban } from "@/lib/preferencias/preferencias";
 import type { CardCliente, FaseCliente } from "./tipos";
 
 type Props = {
@@ -43,11 +44,17 @@ type Props = {
   /** Usuários ativos (responsáveis possíveis). */
   responsaveis: Pessoa[];
   meuId: string;
+  pipelineChave: string;
+  /** Preferência salva do usuário para este quadro (chaves de fase já filtradas). */
+  visualizacao: VisualizacaoKanban;
 };
 
 const idColuna = (faseId: string) => `fase:${faseId}`;
 
-export function QuadroKanban({ pipelineId, fases, cards: cardsServidor, agoraMs, responsaveis, meuId }: Props) {
+/** Abrir/recolher coluna à mão salva depois de uma pausa (vários cliques = um request). */
+const ATRASO_SALVAR_COLUNAS_MS = 800;
+
+export function QuadroKanban({ pipelineId, fases, cards: cardsServidor, agoraMs, responsaveis, meuId, pipelineChave, visualizacao }: Props) {
   // Estado otimista: parte do servidor e é re-sincronizado quando chegam props novas (revalidate).
   const [base, setBase] = useState(cardsServidor);
   const [cards, setCards] = useState(cardsServidor);
@@ -59,13 +66,42 @@ export function QuadroKanban({ pipelineId, fases, cards: cardsServidor, agoraMs,
   const [ativo, setAtivo] = useState<CardCliente | null>(null);
   // Coluna sob o card arrastado (estável: ver `proximoAlvo`); null fora de arrasto.
   const [alvo, setAlvo] = useState<string | null>(null);
-  const [expandidas, setExpandidas] = useState<Set<string>>(new Set());
+  // Abertas à mão + "mostrar vazias": preferência do usuário, salva no servidor.
+  const [expandidas, setExpandidas] = useState<Set<string>>(
+    () => new Set(fases.filter((f) => visualizacao.abertas.includes(f.chave)).map((f) => f.id)),
+  );
+  const [mostrarVazias, setMostrarVazias] = useState(visualizacao.mostrarVazias);
   // Fase cujo formulário de novo card abre ao expandir pela faixa recolhida.
   const [criarEm, setCriarEm] = useState<string | null>(null);
   const [pedido, setPedido] = useState<(PedidoTerminal & { cardId: string; faseId: string }) | null>(null);
   const [erro, setErro] = useState<FalhaUI | null>(null);
   const [, startTransition] = useTransition();
   const router = useRouter();
+
+  // Salvar visualização: otimista (o estado local já mudou), com atraso; a
+  // última chamada vence. Ao desmontar, o que estiver pendente sai na hora.
+  const pendente = useRef<{ timer: ReturnType<typeof setTimeout>; enviar: () => void } | null>(null);
+  function salvarVisualizacao(v: { mostrarVazias: boolean; expandidas: Set<string> }, atrasoMs: number) {
+    const abertas = fases.filter((f) => v.expandidas.has(f.id)).map((f) => f.chave);
+    const enviar = () => {
+      pendente.current = null;
+      void executarAcao(() => salvarVisualizacaoKanbanAction(pipelineChave, { mostrarVazias: v.mostrarVazias, abertas }), "salvar a visualização").then(
+        (falha) => falha && setErro(falha),
+      );
+    };
+    if (pendente.current) clearTimeout(pendente.current.timer);
+    pendente.current = { timer: setTimeout(enviar, atrasoMs), enviar };
+  }
+  useEffect(
+    () => () => {
+      const p = pendente.current;
+      if (p) {
+        clearTimeout(p.timer);
+        p.enviar();
+      }
+    },
+    [],
+  );
 
   // Filtros moram na URL (link compartilhável). `replaceState` não refaz o
   // request do servidor; o Next sincroniza `useSearchParams` com ele.
@@ -188,18 +224,29 @@ export function QuadroKanban({ pipelineId, fases, cards: cardsServidor, agoraMs,
     contagem: new Map([...porFase].map(([id, cs]) => [id, cs.length])),
     abertasManual: expandidas,
     alvoArrasto: arrastando ? alvo : null,
+    mostrarVazias,
   });
-  const alternarExpandida = (faseId: string) =>
-    setExpandidas((s) => {
-      const n = new Set(s);
-      if (n.has(faseId)) n.delete(faseId);
-      else n.add(faseId);
-      return n;
-    });
+  const alternarExpandida = (faseId: string) => {
+    const n = new Set(expandidas);
+    if (n.has(faseId)) n.delete(faseId);
+    else n.add(faseId);
+    setExpandidas(n);
+    salvarVisualizacao({ mostrarVazias, expandidas: n }, ATRASO_SALVAR_COLUNAS_MS);
+  };
+  const alternarVazias = () => {
+    setMostrarVazias(!mostrarVazias);
+    salvarVisualizacao({ mostrarVazias: !mostrarVazias, expandidas }, 0);
+  };
 
   return (
     <>
-      <BarraFiltros filtros={filtros} onMudar={mudarFiltros} pessoas={pessoas} meuId={meuId} ufs={ufs} visiveis={visiveis.length} total={cards.length} />
+      <BarraFiltros
+        acoes={
+          <Button variant="ghost" size="sm" aria-pressed={mostrarVazias} onClick={alternarVazias}>
+            {mostrarVazias ? "Recolher colunas vazias" : "Mostrar colunas vazias"}
+          </Button>
+        }
+        filtros={filtros} onMudar={mudarFiltros} pessoas={pessoas} meuId={meuId} ufs={ufs} visiveis={visiveis.length} total={cards.length} />
       {erro ? (
         <div className="mb-4 rounded-lg border border-danger/50 bg-surface px-3 py-2">
           <MensagemErro falha={erro} className="text-sm" />
@@ -230,7 +277,7 @@ export function QuadroKanban({ pipelineId, fases, cards: cardsServidor, agoraMs,
             const daFase = porFase.get(f.id) ?? [];
             // Regra em `colunas.ts`: recolhida = terminal ou vazia, salvo se
             // aberta à mão ou se é a coluna sob o card arrastado.
-            const recolhivel = f.isTerminal || daFase.length === 0;
+            const recolhivel = f.isTerminal || (!mostrarVazias && daFase.length === 0);
             const colapsada = !abertas.has(f.id);
             return colapsada ? (
               <ColunaColapsada

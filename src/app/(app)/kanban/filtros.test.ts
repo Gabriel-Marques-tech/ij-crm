@@ -10,6 +10,7 @@ const diaSP = (n: number) => AGORA + n * DIA;
 
 const fase = (id: string, limite: number | null): FaseCliente => ({
   id,
+  chave: id,
   nome: id,
   cor: null,
   limiteDiasAlerta: limite,

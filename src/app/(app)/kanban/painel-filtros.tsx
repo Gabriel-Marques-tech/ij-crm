@@ -20,6 +20,8 @@ type Props = {
   ufs: string[];
   visiveis: number;
   total: number;
+  /** Controles extras ao lado do botão Filtros (ex.: mostrar colunas vazias). */
+  acoes?: ReactNode;
 };
 
 const ATRASO_BUSCA_MS = 250;
@@ -50,6 +52,7 @@ export function BarraFiltros(props: Props) {
   return (
     <div className="mb-4 flex flex-wrap items-center gap-2">
       <PainelFiltros {...props} ativos={ativos} />
+      {props.acoes}
       {chips.map((c) => (
         <button
           key={c.chave}
