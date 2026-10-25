@@ -10,6 +10,7 @@ import {
   moverFase,
   removerFase,
   reordenarFases,
+  travarPipelines,
 } from "./fases";
 
 const db = dbTeste();
@@ -348,5 +349,36 @@ describe("listarPipelinesParaGestao", () => {
     const fb = lista[0].fases.find((f) => f.chave === "em_negociacao")!;
     expect(fa.uso).toEqual({ cards: 0, transicoes: 1 });
     expect(fb.uso).toEqual({ cards: 1, transicoes: 1 });
+  });
+});
+
+describe("travarPipelines", () => {
+  it("trava cada pipeline uma vez, em ordem crescente de id, qualquer que seja a ordem pedida", async () => {
+    const ordem: unknown[] = [];
+    const txFalso = {
+      $queryRaw: async (_partes: TemplateStringsArray, ...valores: unknown[]) => {
+        ordem.push(valores[0]);
+        return [{ id: valores[0] }];
+      },
+    } as unknown as Parameters<typeof travarPipelines>[0];
+    expect(await travarPipelines(txFalso, ["c", "a", "b", "a"])).toBe(true);
+    expect(ordem).toEqual(["a", "b", "c"]);
+  });
+
+  it("pipeline inexistente no conjunto → false", async () => {
+    const { vendas } = await semearPipelines();
+    expect(await db.$transaction((tx) => travarPipelines(tx, [vendas.id, "nao-existe"]))).toBe(false);
+  });
+
+  it("operações cruzadas (vendas+projetos × projetos+vendas) não dão deadlock", async () => {
+    const { vendas, projetos } = await semearPipelines();
+    const op = (ids: string[]) =>
+      db.$transaction(async (tx) => {
+        await travarPipelines(tx, ids);
+        await tx.$executeRaw`SELECT pg_sleep(0.1)`;
+        return true;
+      });
+    const rs = await Promise.all([op([vendas.id, projetos.id]), op([projetos.id, vendas.id]), op([vendas.id, projetos.id]), op([projetos.id, vendas.id])]);
+    expect(rs).toEqual([true, true, true, true]);
   });
 });

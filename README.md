@@ -98,6 +98,32 @@ Nesta fatia (GAB-28) o bot só reage a mensagens com `#crm` de usuários ativos 
 `remetente_desconhecido`) e descartado sem persistir conteúdo. Classificação e LLM entram no
 GAB-34/GAB-39.
 
+## Kanban
+
+`/kanban` (Vendas; `?quadro=projetos` para Projetos) e detalhe em `/kanban/[id]`. Serviço em
+`src/lib/oportunidades/`: criar/mover tomam o lock de pipeline (`travarPipelines`, ordem por id;
+ganho em vendas trava também projetos) e recusam fase arquivada ou de outro quadro; card não nasce
+em fase terminal; todo movimento grava `TransicaoFase` (origem `UI`) + Timeline
+`MOVIMENTACAO`, e cada campo editado vira `CAMPO_ALTERADO { campo, antes, depois }`. Cor de
+"dias na fase" (`aging.ts`): sem limite → neutro; `< 70%` do limite → verde; até o limite → âmbar;
+`≥ limite` → vermelho. Entrada em fase terminal passa por `aoEntrarEmTerminal` (`terminal.ts`),
+hoje no-op — GAB-32 preenche (ganho → projeto, valor fechado, motivo de perda) sem tomar outros
+locks além dos de `pipelinesExtrasDoTerminal`.
+
+## Preferências de visualização
+
+Opções de visualização de cada usuário (ex.: no Kanban, "mostrar colunas vazias" e colunas abertas à mão, por quadro) ficam em `usuario.preferencias` (JSONB versionado, validado com zod em `src/lib/preferencias/`); cada um só grava as próprias, e JSON inválido vira o padrão.
+
+## Erros e debug
+
+Exceção inesperada numa server action não vira tela de erro: a action devolve
+`erro: "INESPERADO"` com uma `ref` curta (8 hex), mostrada ao usuário ("Erro no servidor
+(ref: abc123de)"). Peça a ref e procure no log do servidor: `grep 'ref=abc123de'` (ou
+`docker compose logs app | grep ref=abc123de`). A linha traz contexto, tipo e 3 frames do stack;
+erro do Prisma só loga `code` + `target`/`modelName` (a mensagem ecoa dados da query).
+"Sem conexão com o servidor" = a chamada nem chegou (rede/servidor fora). Helper:
+`src/lib/erros/registrar.ts` (`comTratamento` / `comTratamentoForm`).
+
 ## Produção
 
 Deploy, rollback, backup/restore, QR da Evolution e troca do número do bot:
