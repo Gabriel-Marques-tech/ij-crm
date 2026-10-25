@@ -15,6 +15,7 @@ import {
   useSensors,
   type Announcements,
   type DragEndEvent,
+  type DragOverEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
 import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
@@ -28,6 +29,7 @@ import { Input } from "@/components/ui/input";
 import { FALHA_CONEXAO, executarAcao, falhaDe, type FalhaUI } from "@/lib/erros/cliente";
 import { criarCardAction, moverCardAction } from "./actions";
 import { CardVisual } from "./card-visual";
+import { colunasAbertas, proximoAlvo } from "./colunas";
 import { escreverFiltros, filtrarCards, lerFiltros, type Filtros } from "./filtros";
 import { desfazerMovimento } from "./otimista";
 import { BarraFiltros, type Pessoa } from "./painel-filtros";
@@ -55,6 +57,8 @@ export function QuadroKanban({ pipelineId, fases, cards: cardsServidor, agoraMs,
   }
 
   const [ativo, setAtivo] = useState<CardCliente | null>(null);
+  // Coluna sob o card arrastado (estável: ver `proximoAlvo`); null fora de arrasto.
+  const [alvo, setAlvo] = useState<string | null>(null);
   const [expandidas, setExpandidas] = useState<Set<string>>(new Set());
   // Fase cujo formulário de novo card abre ao expandir pela faixa recolhida.
   const [criarEm, setCriarEm] = useState<string | null>(null);
@@ -142,10 +146,21 @@ export function QuadroKanban({ pipelineId, fases, cards: cardsServidor, agoraMs,
 
   function onDragStart(e: DragStartEvent) {
     setAtivo(cards.find((c) => c.id === e.active.id) ?? null);
+    setAlvo(null);
+  }
+
+  function onDragOver(e: DragOverEvent) {
+    // Mouse, toque e teclado (setas) passam por aqui.
+    setAlvo((atual) => proximoAlvo(atual, faseDoAlvo(e.over?.id)));
+  }
+
+  function fimArrasto() {
+    setAtivo(null);
+    setAlvo(null);
   }
 
   function onDragEnd(e: DragEndEvent) {
-    setAtivo(null);
+    fimArrasto();
     const para = faseDoAlvo(e.over?.id);
     if (para) aoSoltar(String(e.active.id), para);
   }
@@ -163,6 +178,17 @@ export function QuadroKanban({ pipelineId, fases, cards: cardsServidor, agoraMs,
   };
 
   const arrastando = ativo !== null;
+  const porFase = useMemo(() => {
+    const m = new Map<string, CardCliente[]>();
+    for (const c of visiveis) m.set(c.faseId, [...(m.get(c.faseId) ?? []), c]);
+    return m;
+  }, [visiveis]);
+  const abertas = colunasAbertas({
+    fases,
+    contagem: new Map([...porFase].map(([id, cs]) => [id, cs.length])),
+    abertasManual: expandidas,
+    alvoArrasto: arrastando ? alvo : null,
+  });
   const alternarExpandida = (faseId: string) =>
     setExpandidas((s) => {
       const n = new Set(s);
@@ -189,8 +215,9 @@ export function QuadroKanban({ pipelineId, fases, cards: cardsServidor, agoraMs,
         // Colunas recolhidas abrem quando o arrasto começa: re-mede os alvos.
         measuring={{ droppable: { strategy: MeasuringStrategy.Always } }}
         onDragStart={onDragStart}
+        onDragOver={onDragOver}
         onDragEnd={onDragEnd}
-        onDragCancel={() => setAtivo(null)}
+        onDragCancel={fimArrasto}
         accessibility={{
           announcements,
           screenReaderInstructions: {
@@ -200,11 +227,11 @@ export function QuadroKanban({ pipelineId, fases, cards: cardsServidor, agoraMs,
       >
         <div className="-mx-4 flex min-h-0 flex-1 snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-2 md:-mx-8 md:snap-none md:px-8">
           {fases.map((f) => {
-            const daFase = visiveis.filter((c) => c.faseId === f.id);
-            // Recolhida: terminal (padrão) ou vazia, salvo se o usuário abriu.
-            // Durante um arrasto tudo abre, para virar alvo visível.
+            const daFase = porFase.get(f.id) ?? [];
+            // Regra em `colunas.ts`: recolhida = terminal ou vazia, salvo se
+            // aberta à mão ou se é a coluna sob o card arrastado.
             const recolhivel = f.isTerminal || daFase.length === 0;
-            const colapsada = recolhivel && !arrastando && !expandidas.has(f.id);
+            const colapsada = !abertas.has(f.id);
             return colapsada ? (
               <ColunaColapsada
                 key={f.id}
@@ -331,8 +358,8 @@ function ColunaColapsada({ fase, total, onExpandir, onNovo }: { fase: FaseClient
       ref={setNodeRef}
       aria-label={`Fase ${fase.nome} (recolhida), ${total} card(s)`}
       className={cn(
-        "flex w-12 shrink-0 snap-start flex-col items-center gap-1 rounded-xl border border-dashed border-border bg-muted/40 py-3",
-        isOver && "border-solid border-border-strong bg-surface/40",
+        "flex w-12 shrink-0 snap-start flex-col items-center gap-1 rounded-xl border border-dashed border-border bg-muted/40 py-3 transition-colors",
+        isOver && "border-solid border-border-strong bg-surface-hover ring-1 ring-border-strong",
       )}
     >
       {onNovo ? (
