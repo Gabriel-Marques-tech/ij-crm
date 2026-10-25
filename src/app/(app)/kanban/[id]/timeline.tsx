@@ -31,7 +31,7 @@ function LinkCard({ id, relacionados, rotulo }: { id: unknown; relacionados: Rea
   const c = typeof id === "string" ? relacionados.get(id) : undefined;
   if (!c || typeof id !== "string") return <>{rotulo} (removido)</>;
   return (
-    <Link href={`/kanban/${id}?quadro=${c.quadro}`} className="font-medium text-foreground underline decoration-fg-faint underline-offset-2 hover:decoration-foreground">
+    <Link href={`/kanban/${id}`} className="font-medium text-foreground underline decoration-fg-faint underline-offset-2 hover:decoration-foreground">
       {c.titulo}
     </Link>
   );

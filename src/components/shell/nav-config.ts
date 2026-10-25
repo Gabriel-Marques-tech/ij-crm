@@ -17,7 +17,7 @@ export type NavItem = {
   icon: LucideIcon;
   /** papel mínimo para ver o item; undefined = todos */
   minPapel?: "GESTOR" | "ADMIN";
-  /** Item de um quadro do Kanban (alternador Vendas/Projetos): ativo pelo `?quadro=`. */
+  /** Item de um quadro do Kanban (alternador Vendas/Projetos): ativo pelo quadro da página. */
   quadro?: string;
 };
 
@@ -45,9 +45,9 @@ export function isActive(pathname: string, href: string): boolean {
 }
 
 /**
- * Item ativo considerando o quadro do Kanban. Na lista (`/kanban`) sem
- * `?quadro=` vale o padrão; no detalhe (`/kanban/[id]`) só o `?quadro=` que os
- * links do app põem — sem ele, nenhum quadro acende (não dá para saber).
+ * Item ativo considerando o quadro do Kanban. `quadro` = o declarado pela página
+ * (detalhe do card, ver `quadro-ativo.tsx`) ou o `?quadro=` da lista. Na lista
+ * sem `?quadro=` vale o padrão; no detalhe sem quadro declarado nenhum acende.
  */
 export function itemAtivo(item: NavItem, pathname: string, quadro: string | null): boolean {
   if (!item.quadro) return isActive(pathname, item.href);

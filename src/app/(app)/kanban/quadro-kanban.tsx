@@ -312,7 +312,6 @@ export function QuadroKanban({ pipelineId, fases, cards: cardsServidor, agoraMs,
                 cards={daFase}
                 agoraMs={agoraMs}
                 pipelineId={pipelineId}
-                quadro={pipelineChave}
                 criandoInicial={criarEm === f.id}
                 onCriado={(id) => {
                   setCriarEm(null);
@@ -323,7 +322,7 @@ export function QuadroKanban({ pipelineId, fases, cards: cardsServidor, agoraMs,
             );
           })}
         </div>
-        <DragOverlay>{ativo ? <CardVisual card={ativo} fase={faseDe(ativo.faseId)} agoraMs={agoraMs} quadro={pipelineChave} arrastando /> : null}</DragOverlay>
+        <DragOverlay>{ativo ? <CardVisual card={ativo} fase={faseDe(ativo.faseId)} agoraMs={agoraMs} arrastando /> : null}</DragOverlay>
       </DndContext>
       <DialogoTerminal
         pedido={pedido}
@@ -348,7 +347,6 @@ function Coluna({
   cards,
   agoraMs,
   pipelineId,
-  quadro,
   criandoInicial,
   onCriado,
   onRecolher,
@@ -357,7 +355,6 @@ function Coluna({
   cards: CardCliente[];
   agoraMs: number;
   pipelineId: string;
-  quadro: string;
   criandoInicial: boolean;
   /** Fim do formulário de novo card; `id` quando criou. */
   onCriado: (id?: string) => void;
@@ -402,7 +399,7 @@ function Coluna({
         {criando ? <NovoCard pipelineId={pipelineId} faseId={fase.id} onFim={fimCriar} /> : null}
         <SortableContext id={idColuna(fase.id)} items={cards.map((c) => c.id)} strategy={verticalListSortingStrategy}>
           {cards.map((c) => (
-            <CardArrastavel key={c.id} card={c} fase={fase} agoraMs={agoraMs} quadro={quadro} />
+            <CardArrastavel key={c.id} card={c} fase={fase} agoraMs={agoraMs} />
           ))}
         </SortableContext>
         {cards.length === 0 && !criando ? <p className="px-2 py-6 text-center text-xs text-fg-faint">Solte um card aqui</p> : null}
@@ -443,7 +440,7 @@ function ColunaColapsada({ fase, total, onExpandir, onNovo }: { fase: FaseClient
   );
 }
 
-function CardArrastavel({ card, fase, agoraMs, quadro }: { card: CardCliente; fase: FaseCliente; agoraMs: number; quadro: string }) {
+function CardArrastavel({ card, fase, agoraMs }: { card: CardCliente; fase: FaseCliente; agoraMs: number }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: card.id,
     data: { faseId: card.faseId },
@@ -458,7 +455,7 @@ function CardArrastavel({ card, fase, agoraMs, quadro }: { card: CardCliente; fa
       aria-label={`${card.titulo}. Pressione espaço para mover.`}
       {...listeners}
     >
-      <CardVisual card={card} fase={fase} agoraMs={agoraMs} quadro={quadro} />
+      <CardVisual card={card} fase={fase} agoraMs={agoraMs} />
     </div>
   );
 }

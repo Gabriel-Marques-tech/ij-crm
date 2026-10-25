@@ -5,6 +5,7 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { cn } from "cn";
 import type { Papel } from "@prisma/client";
 import { itemAtivo, itensParaPapel } from "./nav-config";
+import { useQuadroAtivo } from "./quadro-ativo";
 import { Wordmark } from "./wordmark";
 
 /**
@@ -14,8 +15,11 @@ import { Wordmark } from "./wordmark";
  */
 export function Rail({ papel }: { papel: Papel }) {
   const pathname = usePathname();
-  // Vendas e Projetos são o mesmo /kanban: o quadro vem do ?quadro=.
-  const quadro = useSearchParams().get("quadro");
+  // Vendas e Projetos são o mesmo /kanban: na lista o quadro vem do ?quadro=;
+  // no detalhe, a página declara o quadro do card (`MarcarQuadroAtivo`).
+  const parametro = useSearchParams().get("quadro");
+  const declarado = useQuadroAtivo();
+  const quadro = declarado ?? parametro;
   const itens = itensParaPapel(papel);
 
   return (

@@ -9,7 +9,7 @@ type Vinculado = { id: string; titulo: string; deletadoEm: Date | null; pipeline
 function LinkVinculado({ c }: { c: Vinculado }) {
   if (c.deletadoEm) return <span className="text-fg-mute">{c.titulo} (removido)</span>;
   return (
-    <Link href={`/kanban/${c.id}?quadro=${c.pipeline.chave}`} className="text-foreground underline decoration-fg-faint underline-offset-2 hover:decoration-foreground">
+    <Link href={`/kanban/${c.id}`} className="text-foreground underline decoration-fg-faint underline-offset-2 hover:decoration-foreground">
       {c.titulo}
     </Link>
   );

@@ -11,14 +11,11 @@ export function CardVisual({
   card,
   fase,
   agoraMs,
-  quadro,
   arrastando = false,
 }: {
   card: CardCliente;
   fase: FaseCliente | undefined;
   agoraMs: number;
-  /** Chave do quadro: vai no link do detalhe para o alternador da navegação acender o quadro certo. */
-  quadro: string;
   arrastando?: boolean;
 }) {
   const agora = new Date(agoraMs);
@@ -36,7 +33,7 @@ export function CardVisual({
       )}
     >
       <Link
-        href={`/kanban/${card.id}?quadro=${quadro}`}
+        href={`/kanban/${card.id}`}
         className="block text-sm leading-snug font-medium text-foreground outline-none hover:underline focus-visible:underline"
         // Não deixa o clique no link iniciar arrasto por teclado no card pai.
         onKeyDown={(e) => e.stopPropagation()}

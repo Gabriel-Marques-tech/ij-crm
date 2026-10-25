@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { DiasNaFase } from "@/components/kanban/aging";
 import { Avatar } from "@/components/kanban/avatar";
+import { MarcarQuadroAtivo } from "@/components/shell/quadro-ativo";
 import { exigirUsuario } from "@/lib/auth/atual";
 import { listarPipelines } from "@/lib/fases/fases";
 import { diaEmFuso, diasNaFase, estadoProximaAcao, nivelAging } from "@/lib/oportunidades/aging";
@@ -59,6 +60,8 @@ export default async function CardPage({ params }: { params: Promise<{ id: strin
 
   return (
     <>
+      {/* Navegação acende Vendas/Projetos pelo quadro do card (sem depender de ?quadro=). */}
+      <MarcarQuadroAtivo quadro={card.pipeline.chave} />
       <Link
         href={`/kanban?quadro=${card.pipeline.chave}`}
         className="mb-4 inline-flex items-center gap-1.5 font-mono text-xs text-fg-mute hover:text-foreground"
