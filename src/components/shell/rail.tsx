@@ -1,10 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { cn } from "cn";
 import type { Papel } from "@prisma/client";
-import { isActive, itensParaPapel } from "./nav-config";
+import { itemAtivo, itensParaPapel } from "./nav-config";
 import { Wordmark } from "./wordmark";
 
 /**
@@ -14,6 +14,8 @@ import { Wordmark } from "./wordmark";
  */
 export function Rail({ papel }: { papel: Papel }) {
   const pathname = usePathname();
+  // Vendas e Projetos são o mesmo /kanban: o quadro vem do ?quadro=.
+  const quadro = useSearchParams().get("quadro");
   const itens = itensParaPapel(papel);
 
   return (
@@ -27,7 +29,7 @@ export function Rail({ papel }: { papel: Papel }) {
           <Wordmark compact />
         </Link>
         {itens.map((item) => {
-          const active = isActive(pathname, item.href);
+          const active = itemAtivo(item, pathname, quadro);
           const Icon = item.icon;
           return (
             <Link
@@ -54,7 +56,7 @@ export function Rail({ papel }: { papel: Papel }) {
         className="md:hidden fixed inset-x-0 bottom-0 z-20 flex border-t border-sidebar-border bg-sidebar"
       >
         {itens.map((item) => {
-          const active = isActive(pathname, item.href);
+          const active = itemAtivo(item, pathname, quadro);
           const Icon = item.icon;
           return (
             <Link
