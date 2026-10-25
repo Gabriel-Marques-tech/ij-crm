@@ -1,17 +1,18 @@
 "use client";
 
-import Link from "next/link";
 import { useState, useTransition } from "react";
 import { Building2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MensagemErro } from "@/components/erros/mensagem-erro";
 import { BuscaEntidade } from "@/components/entidades/busca-entidade";
+import { VinculoLink } from "@/components/entidades/vinculo-link";
+import type { Vinculo } from "@/lib/entidades/vinculo";
 import { executarAcao, type FalhaUI } from "@/lib/erros/cliente";
 import { buscarEmpresasParaAutocomplete } from "../../empresas/buscar";
 import { definirEmpresaDoContatoAction } from "../actions";
 
-/** Empresa do contato (opcional): escolha explícita no autocomplete. */
-export function EmpresaDoContato({ contatoId, empresa }: { contatoId: string; empresa: { id: string; nome: string } | null }) {
+/** Empresa do contato (opcional): escolha explícita no autocomplete. Excluída/mesclada aparece como tal. */
+export function EmpresaDoContato({ contatoId, empresa }: { contatoId: string; empresa: Vinculo | null }) {
   const [trocando, setTrocando] = useState(false);
   const [erro, setErro] = useState<FalhaUI | null>(null);
   const [pendente, startTransition] = useTransition();
@@ -30,9 +31,9 @@ export function EmpresaDoContato({ contatoId, empresa }: { contatoId: string; em
       {empresa && !trocando ? (
         <div className="flex items-center gap-2">
           <Building2 className="size-3.5 text-fg-mute" aria-hidden />
-          <Link href={`/empresas/${empresa.id}`} className="truncate text-sm text-foreground hover:underline">
-            {empresa.nome}
-          </Link>
+          <span className="min-w-0 truncate text-sm">
+            <VinculoLink tipo="empresa" vinculo={empresa} />
+          </span>
           <span className="ml-auto flex gap-1">
             <Button type="button" variant="ghost" size="xs" disabled={pendente} onClick={() => setTrocando(true)}>
               trocar

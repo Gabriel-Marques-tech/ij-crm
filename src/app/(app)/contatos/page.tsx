@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Mail, Phone } from "lucide-react";
 import { PageHeader } from "@/components/shell/page-header";
 import { FormBusca } from "@/components/entidades/form-busca";
+import { VinculoLink } from "@/components/entidades/vinculo-link";
 import { exigirUsuario } from "@/lib/auth/atual";
 import { listarContatos } from "@/lib/contatos/contatos";
 import { NovoContato } from "./novo-contato";
@@ -44,9 +45,7 @@ export default async function ContatosPage({ searchParams }: { searchParams: Pro
                   </td>
                   <td className="hidden px-4 py-2.5 sm:table-cell">
                     {c.empresa ? (
-                      <Link href={`/empresas/${c.empresa.id}`} className="text-fg-soft hover:text-foreground hover:underline">
-                        {c.empresa.nome}
-                      </Link>
+                      <VinculoLink tipo="empresa" vinculo={c.empresa} className="text-fg-soft hover:text-foreground hover:underline" />
                     ) : (
                       <span className="text-fg-faint">—</span>
                     )}

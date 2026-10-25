@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { Plus, X } from "lucide-react";
@@ -9,6 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { MensagemErro } from "@/components/erros/mensagem-erro";
+import { LinkDuplicado } from "@/components/entidades/link-duplicado";
 import { BuscaEntidade, type OpcaoBusca } from "@/components/entidades/busca-entidade";
 import { FALHA_CONEXAO, falhaDe, type FalhaUI } from "@/lib/erros/cliente";
 import type { Duplicado } from "@/lib/entidades/mensagens";
@@ -92,11 +92,7 @@ export function NovoContato() {
             )}
           </div>
           <MensagemErro falha={erro} />
-          {duplicado ? (
-            <Link href={`/contatos/${duplicado.id}`} className="block text-xs text-fg-mute hover:text-foreground hover:underline">
-              abrir {duplicado.nome} →
-            </Link>
-          ) : null}
+          <LinkDuplicado duplicado={duplicado} />
           <div className="flex justify-end">
             <Button type="submit" disabled={pendente || !dados.nome.trim()}>
               Criar

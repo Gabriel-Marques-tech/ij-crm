@@ -154,7 +154,7 @@ export default async function CardPage({ params }: { params: Promise<{ id: strin
             </div>
           </section>
 
-          <Vinculos cardId={card.id} empresa={card.empresa} contato={card.contato} />
+          <Vinculos cardId={card.id} />
 
           <section className="rounded-xl border border-border bg-surface p-4">
             <h2 className="mb-3 text-sm font-medium">Nota</h2>

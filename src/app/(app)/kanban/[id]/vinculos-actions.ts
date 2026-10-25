@@ -47,11 +47,18 @@ export async function criarEVincularEmpresaAction(cardId: string, nome: string):
   });
 }
 
-const NovoContato = z.object({ nome: z.string().max(1000), telefone: z.string().max(200).optional(), email: z.string().max(200).optional() });
+const NovoContato = z.object({
+  nome: z.string().max(1000),
+  telefone: z.string().max(200).optional(),
+  email: z.string().max(200).optional(),
+  /** Só a empresa ATUAL do card (checkbox explícito na UI); qualquer outra é recusada. */
+  empresaId: id.nullish(),
+});
 
 /**
- * Cria contato inline e vincula. Se o card já tem empresa, o contato nasce
- * nela. Telefone/email que já são de alguém → nada é criado; a resposta traz
+ * Cria contato inline e vincula ao card. O contato só nasce numa empresa se o
+ * usuário marcou "Vincular à empresa <nome>" — e só a empresa viva do card.
+ * Telefone/email que já são de alguém → nada é criado; a resposta traz
  * `duplicado` para a UI perguntar "vincular <dono>?".
  */
 export async function criarEVincularContatoAction(cardId: string, dados: z.input<typeof NovoContato>): Promise<EstadoEntidade> {
@@ -61,7 +68,8 @@ export async function criarEVincularContatoAction(cardId: string, dados: z.input
     if (!id.safeParse(cardId).success || !p.success) return { erro: "Dados inválidos." };
     const card = await db.oportunidade.findFirst({ where: { id: cardId, deletadoEm: null }, select: { empresaId: true } });
     if (!card) return { erro: MENSAGEM_VINCULO.CARD_NAO_ENCONTRADO };
-    const c = await criarContato({ nome: p.data.nome, empresaId: card.empresaId, pontos: [p.data.telefone ?? "", p.data.email ?? ""] });
+    if (p.data.empresaId && p.data.empresaId !== card.empresaId) return { erro: "A empresa do card mudou. Recarregue a página." };
+    const c = await criarContato({ nome: p.data.nome, empresaId: p.data.empresaId ?? null, pontos: [p.data.telefone ?? "", p.data.email ?? ""] });
     if (!c.ok) return mensagemFalhaContato(c);
     const r = await vincularAoCard(cardId, "contato", c.id, ator);
     if (!r.ok) return { erro: MENSAGEM_VINCULO[r.erro] };

@@ -1,12 +1,12 @@
 "use client";
 
-import Link from "next/link";
 import { useState, useTransition } from "react";
 import { Mail, Phone, X } from "lucide-react";
 import type { TipoContatoPonto } from "@prisma/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MensagemErro } from "@/components/erros/mensagem-erro";
+import { LinkDuplicado } from "@/components/entidades/link-duplicado";
 import { FALHA_CONEXAO, falhaDe, type FalhaUI } from "@/lib/erros/cliente";
 import type { Duplicado } from "@/lib/entidades/mensagens";
 import { adicionarPontoAction, removerPontoAction } from "../actions";
@@ -93,11 +93,7 @@ export function Pontos({ contatoId, pontos }: { contatoId: string; pontos: Ponto
         </Button>
       </form>
       <MensagemErro falha={erro} />
-      {duplicado ? (
-        <Link href={`/contatos/${duplicado.id}`} className="block text-xs text-fg-mute hover:text-foreground hover:underline">
-          abrir {duplicado.nome} →
-        </Link>
-      ) : null}
+          <LinkDuplicado duplicado={duplicado} />
     </div>
   );
 }

@@ -5,6 +5,8 @@ import { CampoEditavel } from "@/components/entidades/campo-editavel";
 import { ListaOportunidades } from "@/components/entidades/lista-oportunidades";
 import { exigirUsuario } from "@/lib/auth/atual";
 import { obterEmpresa } from "@/lib/empresas/empresas";
+import { textoVinculo } from "@/lib/entidades/vinculo";
+import { hrefSeguro } from "@/lib/href";
 import { formatarCnpj } from "@/lib/normalizacao";
 import { UFS } from "@/lib/oportunidades/campos";
 import { editarEmpresaCampoAction } from "../actions";
@@ -16,6 +18,7 @@ export default async function EmpresaPage({ params }: { params: Promise<{ id: st
   const { id } = await params;
   const e = await obterEmpresa(id);
   if (!e) notFound();
+  const site = hrefSeguro(e.site);
   const salvar = (campo: string) => editarEmpresaCampoAction.bind(null, e.id, campo);
 
   return (
@@ -47,8 +50,8 @@ export default async function EmpresaPage({ params }: { params: Promise<{ id: st
             <CampoEditavel id="empresa-site" rotulo="Site" valor={e.site ?? ""} salvar={salvar("site")} className="sm:col-span-2" />
             <CampoEditavel id="empresa-obs" rotulo="Observações" tipo="textarea" valor={e.observacoes ?? ""} salvar={salvar("observacoes")} className="sm:col-span-2" />
           </div>
-          {e.site ? (
-            <a href={e.site} target="_blank" rel="noopener noreferrer" className="mt-2 inline-block font-mono text-[11px] text-fg-mute hover:text-foreground hover:underline">
+          {site ? (
+            <a href={site} target="_blank" rel="noopener noreferrer" className="mt-2 inline-block font-mono text-[11px] text-fg-mute hover:text-foreground hover:underline">
               abrir site ↗
             </a>
           ) : null}
@@ -89,7 +92,7 @@ export default async function EmpresaPage({ params }: { params: Promise<{ id: st
             <h2 className="mb-3 text-sm font-medium">
               Oportunidades <span className="font-mono text-xs text-fg-mute tabular">{e.oportunidades.length}</span>
             </h2>
-            <ListaOportunidades itens={e.oportunidades.map((o) => ({ ...o, extra: o.contato?.nome }))} />
+            <ListaOportunidades itens={e.oportunidades.map((o) => ({ ...o, extra: textoVinculo("contato", o.contato) }))} />
           </section>
         </div>
       </div>

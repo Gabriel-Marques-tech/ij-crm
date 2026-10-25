@@ -5,6 +5,7 @@ import { CampoEditavel } from "@/components/entidades/campo-editavel";
 import { ListaOportunidades } from "@/components/entidades/lista-oportunidades";
 import { exigirUsuario } from "@/lib/auth/atual";
 import { obterContato } from "@/lib/contatos/contatos";
+import { textoVinculo } from "@/lib/entidades/vinculo";
 import { editarContatoCampoAction } from "../actions";
 import { EmpresaDoContato } from "./empresa-do-contato";
 import { Pontos } from "./pontos";
@@ -17,8 +18,8 @@ export default async function ContatoPage({ params }: { params: Promise<{ id: st
   const c = await obterContato(id);
   if (!c) notFound();
   const salvar = (campo: string) => editarContatoCampoAction.bind(null, c.id, campo);
-  // Empresa soft-deletada não aparece como vínculo vivo.
-  const empresa = c.empresa && !c.empresa.deletadoEm ? { id: c.empresa.id, nome: c.empresa.nome } : null;
+  // Empresa excluída/mesclada aparece como tal (nunca como ativa).
+  const empresa = c.empresa;
 
   return (
     <>
@@ -27,7 +28,7 @@ export default async function ContatoPage({ params }: { params: Promise<{ id: st
       </Link>
 
       <header className="mb-6 rounded-xl border border-border bg-surface p-4">
-        <p className="eyebrow mb-1">contato{empresa ? ` · ${empresa.nome}` : ""}</p>
+        <p className="eyebrow mb-1">contato{empresa?.estado === "ATIVO" ? ` · ${empresa.nome}` : ""}</p>
         <CampoEditavel id="contato-nome" rotulo="Nome" valor={c.nome} salvar={salvar("nome")} className="[&_button]:text-xl [&_button]:font-semibold [&>label]:sr-only" />
       </header>
 
@@ -52,7 +53,7 @@ export default async function ContatoPage({ params }: { params: Promise<{ id: st
           <h2 className="mb-3 text-sm font-medium">
             Oportunidades <span className="font-mono text-xs text-fg-mute tabular">{c.oportunidades.length}</span>
           </h2>
-          <ListaOportunidades itens={c.oportunidades.map((o) => ({ ...o, extra: o.empresa?.nome }))} />
+          <ListaOportunidades itens={c.oportunidades.map((o) => ({ ...o, extra: textoVinculo("empresa", o.empresa) }))} />
         </section>
       </div>
     </>

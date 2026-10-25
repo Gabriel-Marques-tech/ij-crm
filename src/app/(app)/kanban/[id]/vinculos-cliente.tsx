@@ -7,13 +7,15 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MensagemErro } from "@/components/erros/mensagem-erro";
 import { BuscaEntidade, type OpcaoBusca } from "@/components/entidades/busca-entidade";
+import { VinculoLink } from "@/components/entidades/vinculo-link";
+import type { Vinculo } from "@/lib/entidades/vinculo";
 import { FALHA_CONEXAO, falhaDe, type FalhaUI } from "@/lib/erros/cliente";
 import type { Duplicado, EstadoEntidade } from "@/lib/entidades/mensagens";
 import { buscarEmpresasParaAutocomplete as buscarEmpresas } from "../../empresas/buscar";
 import { buscarContatosParaAutocomplete as buscarContatos } from "../../contatos/buscar";
 import { criarEVincularContatoAction, criarEVincularEmpresaAction, vincularAction } from "./vinculos-actions";
 
-type Ref = { id: string; nome: string } | null;
+type Ref = Vinculo | null;
 
 /** Chama a action; rejeição = transporte. Devolve a resposta e a falha já traduzida. */
 async function chamar(fn: () => Promise<EstadoEntidade>, acao: string): Promise<{ r?: EstadoEntidade; falha: FalhaUI | null }> {
@@ -29,21 +31,21 @@ async function chamar(fn: () => Promise<EstadoEntidade>, acao: string): Promise<
  * Empresa e Contato do card (GAB-31). Autocomplete por nome só exibe; o
  * vínculo é a escolha explícita. Cada troca vira Timeline CAMPO_ALTERADO.
  */
-export function Vinculos({ cardId, empresa, contato }: { cardId: string; empresa: Ref; contato: Ref }) {
+export function VinculosCliente({ cardId, empresa, contato }: { cardId: string; empresa: Ref; contato: Ref }) {
   return (
     <section className="rounded-xl border border-border bg-surface p-4">
       <h2 className="mb-4 text-sm font-medium">Empresa e contato</h2>
       <div className="grid gap-4 sm:grid-cols-2">
         <VinculoEmpresa cardId={cardId} atual={empresa} />
-        <VinculoContato cardId={cardId} atual={contato} />
+        <VinculoContato cardId={cardId} atual={contato} empresaDoCard={empresa?.estado === "ATIVO" ? empresa : null} />
       </div>
     </section>
   );
 }
 
-function Atual({ href, nome, icone: Icone, onTrocar, onRemover, pendente, rotulo }: {
-  href: string;
-  nome: string;
+function Atual({ tipo, vinculo, icone: Icone, onTrocar, onRemover, pendente, rotulo }: {
+  tipo: "empresa" | "contato";
+  vinculo: Vinculo;
   icone: typeof Building2;
   onTrocar: () => void;
   onRemover: () => void;
@@ -53,9 +55,9 @@ function Atual({ href, nome, icone: Icone, onTrocar, onRemover, pendente, rotulo
   return (
     <div className="flex items-center gap-2">
       <Icone className="size-3.5 shrink-0 text-fg-mute" aria-hidden />
-      <Link href={href} className="min-w-0 truncate text-sm text-foreground hover:underline">
-        {nome}
-      </Link>
+      <span className="min-w-0 truncate text-sm">
+        <VinculoLink tipo={tipo} vinculo={vinculo} />
+      </span>
       <span className="ml-auto flex shrink-0 gap-1">
         <Button type="button" variant="ghost" size="xs" disabled={pendente} onClick={onTrocar}>
           trocar
@@ -86,8 +88,8 @@ function VinculoEmpresa({ cardId, atual }: { cardId: string; atual: Ref }) {
       <p className="eyebrow mb-1">Empresa</p>
       {atual && !buscando ? (
         <Atual
-          href={`/empresas/${atual.id}`}
-          nome={atual.nome}
+          tipo="empresa"
+          vinculo={atual}
           icone={Building2}
           rotulo="empresa"
           pendente={pendente}
@@ -118,9 +120,9 @@ function VinculoEmpresa({ cardId, atual }: { cardId: string; atual: Ref }) {
   );
 }
 
-function VinculoContato({ cardId, atual }: { cardId: string; atual: Ref }) {
+function VinculoContato({ cardId, atual, empresaDoCard }: { cardId: string; atual: Ref; empresaDoCard: Ref }) {
   const [buscando, setBuscando] = useState(false);
-  const [novo, setNovo] = useState<{ nome: string; telefone: string; email: string } | null>(null);
+  const [novo, setNovo] = useState<{ nome: string; telefone: string; email: string; naEmpresa: boolean } | null>(null);
   const [duplicado, setDuplicado] = useState<Duplicado | null>(null);
   const [erro, setErro] = useState<FalhaUI | null>(null);
   const [pendente, startTransition] = useTransition();
@@ -143,7 +145,10 @@ function VinculoContato({ cardId, atual }: { cardId: string; atual: Ref }) {
   function criar(e: React.FormEvent) {
     e.preventDefault();
     if (!novo?.nome.trim()) return;
-    executar(() => criarEVincularContatoAction(cardId, novo), "criar o contato");
+    executar(
+      () => criarEVincularContatoAction(cardId, { nome: novo.nome, telefone: novo.telefone, email: novo.email, empresaId: empresaDoCard && novo.naEmpresa ? empresaDoCard.id : null }),
+      "criar o contato",
+    );
   }
 
   return (
@@ -151,8 +156,8 @@ function VinculoContato({ cardId, atual }: { cardId: string; atual: Ref }) {
       <p className="eyebrow mb-1">Contato</p>
       {atual && !buscando && !novo ? (
         <Atual
-          href={`/contatos/${atual.id}`}
-          nome={atual.nome}
+          tipo="contato"
+          vinculo={atual}
           icone={Contact}
           rotulo="contato"
           pendente={pendente}
@@ -164,6 +169,12 @@ function VinculoContato({ cardId, atual }: { cardId: string; atual: Ref }) {
           <Input aria-label="Nome do contato" value={novo.nome} maxLength={200} onChange={(e) => setNovo({ ...novo, nome: e.target.value })} placeholder="nome" autoFocus />
           <Input aria-label="Telefone" value={novo.telefone} inputMode="tel" onChange={(e) => setNovo({ ...novo, telefone: e.target.value })} placeholder="telefone (opcional)" />
           <Input aria-label="Email" value={novo.email} type="email" onChange={(e) => setNovo({ ...novo, email: e.target.value })} placeholder="email (opcional)" />
+          {empresaDoCard ? (
+            <label className="flex items-center gap-2 text-xs text-fg-soft">
+              <input type="checkbox" checked={novo.naEmpresa} onChange={(e) => setNovo({ ...novo, naEmpresa: e.target.checked })} className="accent-primary" />
+              Vincular à empresa {empresaDoCard.nome}
+            </label>
+          ) : null}
           <div className="flex justify-end gap-2">
             <Button type="button" variant="ghost" size="sm" onClick={limpar} disabled={pendente}>
               cancelar
@@ -185,7 +196,7 @@ function VinculoContato({ cardId, atual }: { cardId: string; atual: Ref }) {
             onEscolher={(o) => executar(() => vincularAction(cardId, "contato", o.id), "vincular o contato")}
             onCriar={(nome) => {
               setErro(null);
-              setNovo({ nome, telefone: "", email: "" });
+              setNovo({ nome, telefone: "", email: "", naEmpresa: true });
             }}
           />
           {buscando ? (
