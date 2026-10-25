@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { dbTeste, limparBanco } from "@/test/db";
 import { invalidarCachePipelines } from "@/lib/fases/cache";
 import { inicioDoDia } from "@/lib/oportunidades/campos";
-import { marcarAcaoFeita } from "@/lib/oportunidades/feita";
+import { definirProximaAcao, marcarAcaoFeita } from "@/lib/oportunidades/feita";
 import { carregarSemana, resolverVendedor } from "./semana";
 
 const db = dbTeste();
@@ -197,5 +197,52 @@ describe("marcarAcaoFeita", () => {
     expect(semana.totais.vencida).toBe(0);
     expect(semana.destaque).toMatchObject({ id: c.id, proximaAcao: "Reunião" });
     expect(semana.destaqueFaixa).toBe("semana");
+  });
+});
+
+describe("definirProximaAcao (card sem próxima ação)", () => {
+  it("define ação + data juntas, cada uma com CAMPO_ALTERADO, sem NOTA", async () => {
+    const s = await semear();
+    const c = await card(s, "x", { proximaAcao: null, dia: null });
+    expect(await definirProximaAcao(c.id, { proximaAcao: "Ligar", proximaAcaoEm: dia("2026-10-27") }, s.ana)).toEqual({ ok: true });
+    const op = await db.oportunidade.findUniqueOrThrow({ where: { id: c.id } });
+    expect(op.proximaAcao).toBe("Ligar");
+    expect(op.proximaAcaoEm).toEqual(dia("2026-10-27"));
+    const tl = await db.timeline.findMany({ where: { oportunidadeId: c.id }, orderBy: [{ em: "asc" }, { id: "asc" }] });
+    expect(tl.map((t) => t.tipo)).toEqual(["CAMPO_ALTERADO", "CAMPO_ALTERADO"]);
+  });
+
+  it("corrida: alguém definiu a próxima ação depois do render → ACAO_MUDOU, nada sobrescrito", async () => {
+    const s = await semear();
+    const c = await card(s, "x", { proximaAcao: null, dia: null });
+    // Outra aba define primeiro.
+    await db.oportunidade.update({ where: { id: c.id }, data: { proximaAcao: "Da outra aba", proximaAcaoEm: dia("2026-10-26") } });
+    expect(await definirProximaAcao(c.id, { proximaAcao: "Minha", proximaAcaoEm: dia("2026-10-27") }, s.ana)).toEqual({ ok: false, erro: "ACAO_MUDOU" });
+    const op = await db.oportunidade.findUniqueOrThrow({ where: { id: c.id } });
+    expect(op.proximaAcao).toBe("Da outra aba");
+    expect(op.proximaAcaoEm).toEqual(dia("2026-10-26"));
+    expect(await db.timeline.count()).toBe(0);
+
+    // Só a data preenchida também conta como "mudou".
+    const d = await card(s, "y", { proximaAcao: null, dia: "2026-10-28" });
+    expect(await definirProximaAcao(d.id, { proximaAcao: "Minha", proximaAcaoEm: dia("2026-10-27") }, s.ana)).toEqual({ ok: false, erro: "ACAO_MUDOU" });
+  });
+
+  it("duas abas ao mesmo tempo no mesmo card: só uma grava", async () => {
+    const s = await semear();
+    const c = await card(s, "x", { proximaAcao: null, dia: null });
+    const rs = await Promise.all([
+      definirProximaAcao(c.id, { proximaAcao: "A", proximaAcaoEm: dia("2026-10-27") }, s.ana),
+      definirProximaAcao(c.id, { proximaAcao: "B", proximaAcaoEm: dia("2026-10-28") }, s.bruno),
+    ]);
+    expect(rs.filter((r) => r.ok)).toHaveLength(1);
+    expect(rs.filter((r) => !r.ok)).toEqual([{ ok: false, erro: "ACAO_MUDOU" }]);
+    expect(await db.timeline.count()).toBe(2);
+  });
+
+  it("soft-deletado → CARD_NAO_ENCONTRADO", async () => {
+    const s = await semear();
+    const c = await card(s, "x", { proximaAcao: null, dia: null, deletado: true });
+    expect(await definirProximaAcao(c.id, { proximaAcao: "A", proximaAcaoEm: dia("2026-10-27") }, s.ana)).toEqual({ ok: false, erro: "CARD_NAO_ENCONTRADO" });
   });
 });

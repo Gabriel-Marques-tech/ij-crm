@@ -4,8 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { exigirUsuario } from "@/lib/auth/atual";
 import { comTratamento, type Inesperado } from "@/lib/erros/registrar";
-import { marcarAcaoFeita, type ErroFeita } from "@/lib/oportunidades/feita";
-import { editarCard } from "@/lib/oportunidades/oportunidades";
+import { definirProximaAcao, marcarAcaoFeita, type ErroFeita } from "@/lib/oportunidades/feita";
 import { validarProximaEscolha } from "@/lib/semana/agrupar";
 
 export type EstadoSemana = { erro?: string; ok?: true } | Inesperado;
@@ -66,8 +65,9 @@ export async function definirProximaAction(cardId: string, proximaAcao: string, 
     }
     const v = validarProximaEscolha(proximaAcao, diaBruto, new Date());
     if (!v.ok) return { erro: v.erro };
-    const r = await editarCard(cardId, { proximaAcao: v.proximaAcao, proximaAcaoEm: v.proximaAcaoEm }, ator);
-    if (!r.ok) return { erro: r.erro === "CARD_NAO_ENCONTRADO" ? MENSAGEM.CARD_NAO_ENCONTRADO : "Não foi possível salvar." };
+    // Recusa (ACAO_MUDOU) se alguém definiu a próxima ação depois do render.
+    const r = await definirProximaAcao(cardId, { proximaAcao: v.proximaAcao, proximaAcaoEm: v.proximaAcaoEm }, ator);
+    if (!r.ok) return { erro: MENSAGEM[r.erro] };
     revalidar(cardId);
     return { ok: true };
   });

@@ -23,6 +23,7 @@ class Recusa extends Error {
   }
 }
 
+// Sem checagem de dono/papel de propósito: a matriz do §4.5 deixa todo papel editar card e próxima ação.
 export async function marcarAcaoFeita(
   id: string,
   esperado: AcaoEsperada,
@@ -65,6 +66,33 @@ export async function marcarAcaoFeita(
   } catch (e) {
     if (e instanceof Recusa) return { ok: false, erro: e.erro };
     // Só proximaAcao/proximaAcaoEm no patch e o card já travado: a única regra possível é "sumiu".
+    if (e instanceof ErroDeRegra && e.erro === "CARD_NAO_ENCONTRADO") return { ok: false, erro: "CARD_NAO_ENCONTRADO" };
+    throw e;
+  }
+}
+
+/**
+ * Card que a tela mostrou SEM próxima ação ganha uma (ação + data juntas).
+ * Trava a linha e exige que continue vazio: se outra aba/pessoa definiu algo
+ * entre o render e o clique, recusa com `ACAO_MUDOU` em vez de sobrescrever.
+ * Mesma permissão do `marcarAcaoFeita` (§4.5: todo papel edita a próxima ação).
+ */
+export async function definirProximaAcao(
+  id: string,
+  valores: { proximaAcao: string; proximaAcaoEm: Date },
+  por: { id: string },
+): Promise<{ ok: true } | { ok: false; erro: ErroFeita }> {
+  try {
+    await db.$transaction(async (tx) => {
+      const travado = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM oportunidade WHERE id = ${id} AND deletado_em IS NULL FOR UPDATE`;
+      if (travado.length === 0) throw new Recusa("CARD_NAO_ENCONTRADO");
+      const atual = await tx.oportunidade.findUniqueOrThrow({ where: { id }, select: { proximaAcao: true, proximaAcaoEm: true } });
+      if (atual.proximaAcao !== null || atual.proximaAcaoEm !== null) throw new Recusa("ACAO_MUDOU");
+      await aplicarPatch(tx, id, { proximaAcao: valores.proximaAcao, proximaAcaoEm: valores.proximaAcaoEm }, por);
+    });
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof Recusa) return { ok: false, erro: e.erro };
     if (e instanceof ErroDeRegra && e.erro === "CARD_NAO_ENCONTRADO") return { ok: false, erro: "CARD_NAO_ENCONTRADO" };
     throw e;
   }
