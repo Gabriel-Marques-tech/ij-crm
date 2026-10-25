@@ -80,14 +80,20 @@ function PainelFiltros({ filtros, onMudar, pessoas, meuId, ufs, visiveis, ativos
   // Busca com atraso: digita local, aplica na URL depois de uma pausa.
   const [busca, setBusca] = useState(filtros.q);
   const [qAplicado, setQAplicado] = useState(filtros.q);
+  const [enviado, setEnviado] = useState(filtros.q);
   if (qAplicado !== filtros.q) {
-    // Mudou por fora (chip removido, "Limpar"): o campo acompanha.
     setQAplicado(filtros.q);
-    setBusca(filtros.q);
+    // Só acompanha mudança que veio de fora (chip removido, "Limpar"); a que
+    // nós mesmos enviamos não pode apagar o que foi digitado depois.
+    if (filtros.q !== enviado) setBusca(filtros.q);
   }
   useEffect(() => {
-    if (busca.trim() === filtros.q) return;
-    const t = setTimeout(() => onMudar({ ...filtros, q: busca.trim() }), ATRASO_BUSCA_MS);
+    const q = busca.trim();
+    if (q === filtros.q) return;
+    const t = setTimeout(() => {
+      setEnviado(q);
+      onMudar({ ...filtros, q });
+    }, ATRASO_BUSCA_MS);
     return () => clearTimeout(t);
   }, [busca, filtros, onMudar]);
 
