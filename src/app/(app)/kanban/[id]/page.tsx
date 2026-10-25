@@ -13,6 +13,7 @@ import { CampoInline, RevisarSwitch } from "./campo-inline";
 import { MoverFase } from "./mover-fase";
 import { NotaForm } from "./nota-form";
 import { Timeline } from "./timeline";
+import { Vinculos } from "./vinculos";
 
 export const metadata = { title: "Card" };
 
@@ -152,6 +153,8 @@ export default async function CardPage({ params }: { params: Promise<{ id: strin
               </div>
             </div>
           </section>
+
+          <Vinculos cardId={card.id} empresa={card.empresa} contato={card.contato} />
 
           <section className="rounded-xl border border-border bg-surface p-4">
             <h2 className="mb-3 text-sm font-medium">Nota</h2>
