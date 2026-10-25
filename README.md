@@ -119,8 +119,12 @@ depois }` com nomes). Normalização única em `src/lib/normalizacao.ts`: telefo
 DV módulo 11 com ASCII−48 — **nunca `\D`**), domínio de email/URL sem `www.`. Telefone/email
 é único no sistema (`contato_ponto (tipo, valor_normalizado)`): repetir devolve o dono. Match
 automático (ingestão/import) só por identificador exato, em `src/lib/contatos/match.ts`:
-`encontrarContatoPorIdentificador(telefone|email)` e `encontrarEmpresa(cnpj|dominio)` — busca
-por nome é só autocomplete, nunca vínculo.
+`encontrarContatoPorIdentificador(telefone|email)` (→ `ENCONTRADO | NAO_ENCONTRADO |
+BLOQUEADO_EXCLUIDO`; o último vai para revisão humana, nunca cria) e `encontrarEmpresa(cnpj|dominio)`
+(→ `{ empresa, via }`; **só `via: "cnpj"` vincula sozinho**, domínio é sugestão a confirmar).
+Busca por nome é só autocomplete (curingas do LIKE escapados), nunca vínculo. Ingestão/import
+passam `{ exigirDdi: true }` em `normalizarTelefoneBr`. Vínculo para registro excluído/mesclado
+aparece como tal (`src/lib/entidades/vinculo.ts`), nunca como link ativo.
 
 ## Preferências de visualização
 
