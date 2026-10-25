@@ -59,6 +59,7 @@ enum TipoTimeline {
   NOTA
   MENSAGEM_WHATSAPP
   IMPORT
+  VINCULO_PROJETO
 }
 
 enum StatusMensagem {
@@ -238,7 +239,8 @@ model Oportunidade {
   revisar               Boolean    @default(false)
   faseDesde             DateTime   @default(now()) @map("fase_desde")
   criadoVia             CriadoVia  @map("criado_via")
-  origemOportunidadeId  String?    @map("origem_oportunidade_id")
+  // Único: uma venda gera no máximo UM card de projeto, mesmo reaberta e ganha de novo (GAB-32).
+  origemOportunidadeId  String?    @unique @map("origem_oportunidade_id")
   reabertaDeId          String?    @map("reaberta_de_id")
   pipefyId              String?    @unique @map("pipefy_id")
   deletadoEm            DateTime?  @map("deletado_em")
@@ -251,7 +253,7 @@ model Oportunidade {
   contato               Contato?   @relation(fields: [contatoId], references: [id])
   responsavel           Usuario    @relation("responsavel", fields: [responsavelId], references: [id])
   origemOportunidade    Oportunidade?  @relation("projetoDeVenda", fields: [origemOportunidadeId], references: [id])
-  projetos              Oportunidade[] @relation("projetoDeVenda")
+  projeto               Oportunidade?  @relation("projetoDeVenda")
   reabertaDe            Oportunidade?  @relation("reabertura", fields: [reabertaDeId], references: [id])
   reaberturas           Oportunidade[] @relation("reabertura")
   transicoes            TransicaoFase[]
@@ -263,7 +265,6 @@ model Oportunidade {
   @@index([empresaId])
   @@index([contatoId])
   @@index([proximaAcaoEm])
-  @@index([origemOportunidadeId])
   @@index([reabertaDeId])
   @@map("oportunidade")
 }
