@@ -1,5 +1,6 @@
 import type { Origem, TipoTerminal } from "@prisma/client";
 import type { Quadro } from "@/lib/oportunidades/oportunidades";
+import { alertaDaVenda, type AlertaVenda } from "@/lib/oportunidades/terminal-regras";
 
 /** Dados serializáveis que o servidor passa ao quadro cliente. */
 export type FaseCliente = {
@@ -27,6 +28,11 @@ export type CardCliente = {
   origem: Origem | null;
   /** UF (sigla) ou null. */
   estado: string | null;
+  /** Último fechamento ("10000.00" / texto), mantido ao reabrir: pré-preenche o diálogo. */
+  valorFechado: string | null;
+  motivoPerda: string | null;
+  /** Projeto cuja venda de origem saiu do ganho. */
+  alertaVenda: AlertaVenda | null;
 };
 
 export function paraCliente(q: Quadro): { fases: FaseCliente[]; cards: CardCliente[] } {
@@ -53,6 +59,9 @@ export function paraCliente(q: Quadro): { fases: FaseCliente[]; cards: CardClien
       empresaNome: c.empresa?.nome ?? null,
       origem: c.origem,
       estado: c.estado,
+      valorFechado: c.valorFechado?.toFixed(2) ?? null,
+      motivoPerda: c.motivoPerda,
+      alertaVenda: alertaDaVenda(c.origemOportunidade),
     })),
   };
 }

@@ -15,12 +15,15 @@ export function MoverFase({
   faseAtualId,
   fases,
   pipelineChave,
+  fechamento,
 }: {
   cardId: string;
   titulo: string;
   faseAtualId: string;
   fases: FaseCliente[];
   pipelineChave: string;
+  /** Último fechamento guardado: pré-preenche o diálogo. */
+  fechamento: { valorFechado: string | null; motivoPerda: string | null };
 }) {
   const [pedido, setPedido] = useState<(PedidoTerminal & { faseId: string }) | null>(null);
   const [erro, setErro] = useState<FalhaUI | null>(null);
@@ -37,7 +40,7 @@ export function MoverFase({
     const f = fases.find((x) => x.id === faseId);
     if (!f || f.id === faseAtualId) return;
     const tipo = dialogoTerminal(pipelineChave, f.tipoTerminal);
-    if (tipo) setPedido({ faseId, titulo, faseNome: f.nome, tipo });
+    if (tipo) setPedido({ faseId, titulo, faseNome: f.nome, tipo, inicial: fechamento });
     else mover(faseId);
   }
 

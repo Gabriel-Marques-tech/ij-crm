@@ -96,3 +96,46 @@ export function interpretarPerda(dados: unknown): { ok: true; motivoPerda: strin
   if (m.chave === "outro" && detalhe === "") return { ok: false, erro: "MOTIVO_PERDA_DETALHE_OBRIGATORIO" };
   return { ok: true, motivoPerda: detalhe ? `${m.rotulo}: ${detalhe}` : m.rotulo };
 }
+
+const DECIMAL_BR = new Intl.NumberFormat("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+/** Valor guardado ("10000.00") → texto do campo do diálogo ("10.000,00"); `lerDinheiro` lê de volta. */
+export function valorParaCampo(valor: string | null): string {
+  if (valor === null || valor === "") return "";
+  const n = Number(valor);
+  return Number.isFinite(n) ? DECIMAL_BR.format(n).replace(/\s/g, "") : "";
+}
+
+/**
+ * `motivo_perda` gravado → seleção do diálogo (pré-preenche a re-perda). Inverso
+ * de `interpretarPerda`; texto que não começa por um rótulo da lista (ex.: vindo
+ * do import) vira "outro" com o texto como detalhe.
+ */
+export function motivoDeTexto(texto: string | null): { motivo: ChaveMotivoPerda | ""; detalhe: string } {
+  if (!texto) return { motivo: "", detalhe: "" };
+  for (const m of MOTIVOS_PERDA) {
+    if (texto === m.rotulo) return { motivo: m.chave, detalhe: "" };
+    if (texto.startsWith(`${m.rotulo}: `)) return { motivo: m.chave, detalhe: texto.slice(m.rotulo.length + 2) };
+  }
+  return { motivo: "outro", detalhe: texto };
+}
+
+export type AlertaVenda = "reaberta" | "perdida" | "removida";
+
+/**
+ * Aviso do card de PROJETO enquanto a venda de origem não está em ganho
+ * (reaberta, perdida ou removida). O projeto nunca é movido/apagado sozinho:
+ * o aviso é para alguém decidir. Card sem venda de origem → null.
+ */
+export function alertaDaVenda(origem: { deletadoEm: Date | null; fase: { tipoTerminal: TipoTerminal | null } } | null): AlertaVenda | null {
+  if (!origem) return null;
+  if (origem.deletadoEm) return "removida";
+  if (origem.fase.tipoTerminal === "GANHO") return null;
+  return origem.fase.tipoTerminal === "PERDIDO" ? "perdida" : "reaberta";
+}
+
+export const ROTULO_ALERTA_VENDA: Record<AlertaVenda, string> = {
+  reaberta: "venda reaberta",
+  perdida: "venda perdida",
+  removida: "venda removida",
+};

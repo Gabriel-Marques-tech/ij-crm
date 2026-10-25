@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dialogoTerminal, interpretarGanho, interpretarPerda, lerDinheiro, MOTIVOS_PERDA } from "./terminal-regras";
+import { alertaDaVenda, dialogoTerminal, interpretarGanho, interpretarPerda, lerDinheiro, MOTIVOS_PERDA, motivoDeTexto, valorParaCampo } from "./terminal-regras";
 
 describe("lerDinheiro", () => {
   it("aceita formato BR, com ou sem R$, e devolve decimal com 2 casas", () => {
@@ -95,5 +95,38 @@ describe("interpretarPerda", () => {
   it("detalhe tem limite de tamanho", () => {
     expect(interpretarPerda({ motivo: "timing", detalhe: "x".repeat(501) })).toEqual({ ok: false, erro: "MOTIVO_PERDA_DETALHE_LONGO" });
     expect(interpretarPerda({ motivo: "timing", detalhe: 42 })).toEqual({ ok: false, erro: "MOTIVO_PERDA_INVALIDO" });
+  });
+});
+
+describe("pré-preenchimento do diálogo (re-ganho / re-perda)", () => {
+  it("valor guardado (decimal) → texto BR que o próprio parser aceita", () => {
+    expect(valorParaCampo("10000.00")).toBe("10.000,00");
+    expect(valorParaCampo("1.5")).toBe("1,50");
+    expect(valorParaCampo(null)).toBe("");
+    for (const v of ["10000.00", "1234567.89", "0.00"]) {
+      expect(lerDinheiro(valorParaCampo(v))).toEqual({ ok: true, valor: Number(v).toFixed(2) });
+    }
+  });
+
+  it("motivo gravado → motivo + detalhe; texto fora da lista vira “outro”", () => {
+    expect(motivoDeTexto("Preço")).toEqual({ motivo: "preco", detalhe: "" });
+    expect(motivoDeTexto("Concorrente: fechou com a X")).toEqual({ motivo: "concorrente", detalhe: "fechou com a X" });
+    expect(motivoDeTexto("Outro: empresa fechou")).toEqual({ motivo: "outro", detalhe: "empresa fechou" });
+    expect(motivoDeTexto("cliente sumiu")).toEqual({ motivo: "outro", detalhe: "cliente sumiu" });
+    expect(motivoDeTexto(null)).toEqual({ motivo: "", detalhe: "" });
+    // Ida e volta.
+    const r = interpretarPerda(motivoDeTexto("Timing: só em 2027"));
+    expect(r).toEqual({ ok: true, motivoPerda: "Timing: só em 2027" });
+  });
+});
+
+describe("alertaDaVenda", () => {
+  const venda = (tipoTerminal: "GANHO" | "PERDIDO" | null, deletadoEm: Date | null = null) => ({ deletadoEm, fase: { tipoTerminal } });
+  it("só avisa enquanto a venda de origem não está em ganho", () => {
+    expect(alertaDaVenda(null)).toBeNull();
+    expect(alertaDaVenda(venda("GANHO"))).toBeNull();
+    expect(alertaDaVenda(venda(null))).toBe("reaberta");
+    expect(alertaDaVenda(venda("PERDIDO"))).toBe("perdida");
+    expect(alertaDaVenda(venda("GANHO", new Date()))).toBe("removida");
   });
 });

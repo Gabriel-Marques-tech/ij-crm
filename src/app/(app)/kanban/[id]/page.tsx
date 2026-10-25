@@ -102,6 +102,7 @@ export default async function CardPage({ params }: { params: Promise<{ id: strin
                 titulo={card.titulo}
                 faseAtualId={card.faseId}
                 pipelineChave={card.pipeline.chave}
+                fechamento={{ valorFechado: card.valorFechado?.toFixed(2) ?? null, motivoPerda: card.motivoPerda }}
                 fases={fasesDoQuadro.map((f) => ({
                   id: f.id,
                   chave: f.chave,

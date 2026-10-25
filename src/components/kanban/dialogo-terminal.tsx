@@ -11,13 +11,24 @@ import {
   MOTIVOS_PERDA,
   interpretarGanho,
   interpretarPerda,
+  motivoDeTexto,
+  valorParaCampo,
   type ChaveMotivoPerda,
   type DadosTerminal,
   type ErroDadosTerminal,
 } from "@/lib/oportunidades/terminal-regras";
 
-/** `tipo` = qual diálogo (ver `dialogoTerminal`): ganho pede valor, perdido pede motivo. */
-export type PedidoTerminal = { titulo: string; faseNome: string; tipo: "GANHO" | "PERDIDO" };
+/**
+ * `tipo` = qual diálogo (ver `dialogoTerminal`): ganho pede valor, perdido pede
+ * motivo. `inicial` = último fechamento guardado no card (reabrir mantém os
+ * campos): pré-preenche o re-ganho / a re-perda.
+ */
+export type PedidoTerminal = {
+  titulo: string;
+  faseNome: string;
+  tipo: "GANHO" | "PERDIDO";
+  inicial?: { valorFechado: string | null; motivoPerda: string | null };
+};
 
 const MENSAGEM: Record<ErroDadosTerminal, string> = {
   DADOS_TERMINAL_OBRIGATORIOS: "Dados inválidos.",
@@ -67,7 +78,7 @@ function Rodape({ onCancelar, rotulo }: { onCancelar: () => void; rotulo: string
 }
 
 function FormGanho({ pedido, onConfirmar, onCancelar }: PropsForm) {
-  const [valor, setValor] = useState("");
+  const [valor, setValor] = useState(() => valorParaCampo(pedido.inicial?.valorFechado ?? null));
   const [erro, setErro] = useState<string | null>(null);
   const idValor = useId();
 
@@ -83,7 +94,7 @@ function FormGanho({ pedido, onConfirmar, onCancelar }: PropsForm) {
       <DialogHeader>
         <DialogTitle>Ganho: {pedido.faseNome}</DialogTitle>
         <DialogDescription>
-          “{pedido.titulo}” vira ganho e ganha um card no quadro Projetos (Em execução). Dá para reabrir depois.
+          “{pedido.titulo}” vira ganho e ganha um card no quadro Projetos (Em execução), se ainda não tiver. Dá para reabrir depois.
         </DialogDescription>
       </DialogHeader>
       <div className="grid gap-1.5">
@@ -121,8 +132,9 @@ function FormGanho({ pedido, onConfirmar, onCancelar }: PropsForm) {
 }
 
 function FormPerdido({ pedido, onConfirmar, onCancelar }: PropsForm) {
-  const [motivo, setMotivo] = useState<ChaveMotivoPerda | "">("");
-  const [detalhe, setDetalhe] = useState("");
+  const [inicial] = useState(() => motivoDeTexto(pedido.inicial?.motivoPerda ?? null));
+  const [motivo, setMotivo] = useState<ChaveMotivoPerda | "">(inicial.motivo);
+  const [detalhe, setDetalhe] = useState(inicial.detalhe);
   const [erro, setErro] = useState<string | null>(null);
   const base = useId();
   const outro = motivo === "outro";

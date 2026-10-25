@@ -63,6 +63,11 @@ export type CardDoQuadro = {
   estado: string | null;
   responsavel: { id: string; nome: string };
   empresa: { nome: string } | null;
+  /** Último fechamento (mantido ao reabrir): pré-preenche o diálogo de ganho/perda. */
+  valorFechado: { toFixed(n: number): string } | null;
+  motivoPerda: string | null;
+  /** Card de projeto: a venda que o gerou (para o aviso de venda reaberta/perdida). */
+  origemOportunidade: { deletadoEm: Date | null; fase: { tipoTerminal: TipoTerminal | null } } | null;
 };
 
 export type Quadro = {
@@ -94,6 +99,9 @@ export async function listarQuadro(pipelineChave: string): Promise<Quadro | null
       estado: true,
       responsavel: { select: { id: true, nome: true } },
       empresa: { select: { nome: true } },
+      valorFechado: true,
+      motivoPerda: true,
+      origemOportunidade: { select: { deletadoEm: true, fase: { select: { tipoTerminal: true } } } },
     },
   });
   return { pipeline: { id: p.id, chave: p.chave, nome: p.nome }, fases: p.fases, cards };
@@ -109,7 +117,7 @@ export async function obterCard(id: string) {
       empresa: { select: { id: true, nome: true } },
       contato: { select: { id: true, nome: true } },
       // Venda ↔ projeto (GAB-32). Inclui soft-deletado: a UI mostra "removido".
-      origemOportunidade: { select: { id: true, titulo: true, deletadoEm: true, pipeline: { select: { chave: true } } } },
+      origemOportunidade: { select: { id: true, titulo: true, deletadoEm: true, pipeline: { select: { chave: true } }, fase: { select: { tipoTerminal: true } } } },
       projeto: { select: { id: true, titulo: true, deletadoEm: true, pipeline: { select: { chave: true } } } },
       timeline: {
         orderBy: [{ em: "asc" }, { id: "asc" }],
@@ -231,9 +239,9 @@ async function moverUmaVez(
     await tx.timeline.create({
       data: { oportunidadeId: id, tipo: "MOVIMENTACAO", payload: { deFaseId: op.faseId, paraFaseId: destino.id }, usuarioId: por.id, em: agora },
     });
-    // Sai antes de entrar: ganho → perdido limpa o ganho e grava o motivo.
+    // Sai antes de entrar: ganho → perdido avisa o projeto e depois grava o motivo.
     if (origem.isTerminal) {
-      await aoSairDeTerminal({ tx, oportunidadeId: id, pipelineChave: alvo.pipeline.chave, origem, porUsuarioId: por.id, em: agora, instante });
+      await aoSairDeTerminal({ tx, oportunidadeId: id, pipelineChave: alvo.pipeline.chave, origem, destino, porUsuarioId: por.id, em: agora, instante });
     }
     if (destino.isTerminal) {
       await aoEntrarEmTerminal({

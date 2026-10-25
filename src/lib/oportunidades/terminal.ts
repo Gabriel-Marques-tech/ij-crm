@@ -13,10 +13,10 @@
  *   máximo UM por venda, para sempre: `origem_oportunidade_id` é único no
  *   banco; re-ganho (ou ganho com projeto soft-deletado) só registra o vínculo.
  * - GANHO em outro quadro (ex.: "Finalizado" em projetos) → nada além do movimento.
- * Sair (reabrir, ou ganho ↔ perdido): limpa os campos do terminal de origem
- * (`data_ganho`/`valor_fechado` ou `motivo_perda`), que descrevem o estado
- * ATUAL; o valor antigo fica na Timeline (`CAMPO_ALTERADO`). O projeto criado
- * por um ganho anterior continua existindo.
+ * Sair (reabrir, ou ganho ↔ perdido): MANTÉM `data_ganho`/`valor_fechado` e
+ * `motivo_perda` (último fechamento; re-ganho sobrescreve a data, o diálogo
+ * vem pré-preenchido). O projeto de um ganho anterior continua existindo e
+ * recebe na Timeline o aviso de que a venda foi reaberta/perdida.
  *
  * LOCKS: quando o gancho roda, `moverCard` já travou (via `travarPipelines`,
  * ordem crescente de id) o quadro do card + todos os quadros devolvidos por
@@ -24,7 +24,7 @@
  * pipeline (nem `travarPipeline`/`travarPipelines` de novo): se precisar
  * escrever em outro quadro, inclua a chave dele em `pipelinesExtrasDoTerminal`.
  * Lock tomado fora dessa ordem abre caminho para deadlock entre operações
- * que cruzam quadros. Sair de terminal não escreve em outro quadro.
+ * que cruzam quadros. Sair de terminal só escreve Timeline no projeto (sem lock).
  */
 import type { Fase, Prisma, TipoTerminal } from "@prisma/client";
 import { ErroDeRegra } from "./erros";
@@ -50,7 +50,7 @@ export type ContextoTerminal = Base & {
   dados?: unknown;
 };
 
-export type ContextoSaidaTerminal = Base & { origem: Fase };
+export type ContextoSaidaTerminal = Base & { origem: Fase; destino: Fase };
 
 /**
  * Chaves dos quadros (além do próprio) que o gancho escreve ao entrar num
@@ -111,15 +111,29 @@ async function gravarCampos(ctx: Base, novos: [CampoTerminal, string | Date | nu
   }
 }
 
+/**
+ * Sair de terminal (reabrir, ou ganho ↔ perdido) NÃO limpa campos: data_ganho,
+ * valor_fechado e motivo_perda ficam como registro do último fechamento (o
+ * diálogo do próximo ganho/perda vem pré-preenchido com eles). Se a venda
+ * deixa o GANHO e já gerou projeto, o projeto NÃO é movido nem apagado: só
+ * ganha uma entrada na Timeline (e o card mostra o aviso enquanto a venda não
+ * voltar a ganho). Escrever Timeline do projeto não exige o lock de projetos:
+ * é append-only e não depende de fase.
+ */
 export async function aoSairDeTerminal(ctx: ContextoSaidaTerminal): Promise<void> {
-  if (ctx.origem.tipoTerminal === "GANHO") {
-    await gravarCampos(ctx, [
-      ["valorFechado", null],
-      ["dataGanho", null],
-    ]);
-  } else if (ctx.origem.tipoTerminal === "PERDIDO") {
-    await gravarCampos(ctx, [["motivoPerda", null]]);
-  }
+  if (ctx.origem.tipoTerminal !== "GANHO" || ctx.pipelineChave !== PIPELINE_VENDAS) return;
+  if (ctx.destino.tipoTerminal === "GANHO") return; // ganho → outro ganho: continua ganha
+  const projeto = await ctx.tx.oportunidade.findUnique({ where: { origemOportunidadeId: ctx.oportunidadeId }, select: { id: true } });
+  if (!projeto) return;
+  await ctx.tx.timeline.create({
+    data: {
+      oportunidadeId: projeto.id,
+      tipo: "VINCULO_PROJETO",
+      payload: { vendaId: ctx.oportunidadeId, evento: ctx.destino.tipoTerminal === "PERDIDO" ? "perdida" : "reaberta", paraFaseId: ctx.destino.id },
+      usuarioId: ctx.porUsuarioId,
+      em: ctx.em,
+    },
+  });
 }
 
 export async function aoEntrarEmTerminal(ctx: ContextoTerminal): Promise<void> {

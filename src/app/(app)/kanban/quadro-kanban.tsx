@@ -178,7 +178,14 @@ export function QuadroKanban({ pipelineId, fases, cards: cardsServidor, agoraMs,
     // Terminal sem dados (ex.: "Finalizado" em projetos) move direto.
     const tipo = dialogoTerminal(pipelineChave, destino.tipoTerminal);
     if (tipo) {
-      setPedido({ cardId, faseId: paraFaseId, titulo: card.titulo, faseNome: destino.nome, tipo });
+      setPedido({
+        cardId,
+        faseId: paraFaseId,
+        titulo: card.titulo,
+        faseNome: destino.nome,
+        tipo,
+        inicial: { valorFechado: card.valorFechado, motivoPerda: card.motivoPerda },
+      });
       return;
     }
     mover(cardId, paraFaseId);

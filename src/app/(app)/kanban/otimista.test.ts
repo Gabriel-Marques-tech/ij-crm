@@ -15,6 +15,9 @@ const card = (id: string, faseId: string, faseDesdeMs = 1): CardCliente => ({
   empresaNome: null,
   origem: null,
   estado: null,
+  valorFechado: null,
+  motivoPerda: null,
+  alertaVenda: null,
 });
 
 describe("desfazerMovimento", () => {

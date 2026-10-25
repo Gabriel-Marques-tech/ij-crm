@@ -74,3 +74,20 @@ describe("DialogoTerminal — fechado", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 });
+
+describe("DialogoTerminal — pré-preenchido com o último fechamento", () => {
+  it("re-ganho traz o valor guardado", async () => {
+    const { onConfirmar } = montar({ ...ganho, inicial: { valorFechado: "10000.00", motivoPerda: null } });
+    expect(await screen.findByLabelText("Valor fechado (opcional)")).toHaveValue("10.000,00");
+    fireEvent.click(screen.getByRole("button", { name: "Marcar como ganho" }));
+    expect(onConfirmar).toHaveBeenCalledWith({ valorFechado: "10.000,00" });
+  });
+
+  it("re-perda traz motivo e detalhe guardados", async () => {
+    const { onConfirmar } = montar({ ...perdido, inicial: { valorFechado: null, motivoPerda: "Concorrente: fechou com a X" } });
+    expect(await screen.findByLabelText("Concorrente")).toBeChecked();
+    expect(screen.getByLabelText("Detalhe (opcional)")).toHaveValue("fechou com a X");
+    fireEvent.click(screen.getByRole("button", { name: "Marcar como perdido" }));
+    expect(onConfirmar).toHaveBeenCalledWith({ motivo: "concorrente", detalhe: "fechou com a X" });
+  });
+});

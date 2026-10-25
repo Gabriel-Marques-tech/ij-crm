@@ -78,6 +78,20 @@ function Descricao({
           </>
         );
       }
+      if (p.evento === "reaberta" || p.evento === "perdida") {
+        return (
+          <>
+            {p.evento === "perdida" ? "marcou como perdida" : "reabriu"} a venda de origem <LinkCard id={p.vendaId} relacionados={relacionados} rotulo="venda" />
+            {p.evento === "reaberta" ? (
+              <>
+                {" "}
+                (foi para <b className="font-medium text-foreground">{fase(p.paraFaseId)}</b>)
+              </>
+            ) : null}
+            ; este projeto não foi mexido
+          </>
+        );
+      }
       return (
         <>
           ganhou de novo a venda <LinkCard id={p.vendaId} relacionados={relacionados} rotulo="venda" /> (este projeto segue o mesmo)
