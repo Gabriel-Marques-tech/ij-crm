@@ -12,7 +12,8 @@ import { listarResponsaveis, nomesDeUsuarios, obterCard } from "@/lib/oportunida
 import { CampoInline, RevisarSwitch } from "./campo-inline";
 import { MoverFase } from "./mover-fase";
 import { NotaForm } from "./nota-form";
-import { Timeline } from "./timeline";
+import { ResultadoTerminal } from "./resultado-terminal";
+import { Timeline, type CardRelacionado } from "./timeline";
 
 export const metadata = { title: "Card" };
 
@@ -38,6 +39,11 @@ export default async function CardPage({ params }: { params: Promise<{ id: strin
   const todasFases = pipelines.flatMap((p) => p.fases);
   const nomesFases = new Map(todasFases.map((f) => [f.id, f.nome]));
   const fasesDoQuadro = (pipelines.find((p) => p.id === card.pipelineId)?.fases ?? []).filter((f) => f.arquivadaEm === null || f.id === card.faseId);
+
+  // Venda ↔ projeto (GAB-32): links da Timeline. Soft-deletado fica de fora → "removido".
+  const relacionados = new Map<string, CardRelacionado>(
+    [card.projeto, card.origemOportunidade].flatMap((c) => (c && !c.deletadoEm ? [[c.id, { titulo: c.titulo, quadro: c.pipeline.chave }] as const] : [])),
+  );
 
   const agora = new Date();
   const dias = diasNaFase(card.faseDesde, agora);
@@ -84,6 +90,8 @@ export default async function CardPage({ params }: { params: Promise<{ id: strin
         </div>
       </header>
 
+      <ResultadoTerminal card={card} />
+
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <div className="space-y-6">
           <section className="rounded-xl border border-border bg-surface p-4">
@@ -93,6 +101,7 @@ export default async function CardPage({ params }: { params: Promise<{ id: strin
                 cardId={card.id}
                 titulo={card.titulo}
                 faseAtualId={card.faseId}
+                pipelineChave={card.pipeline.chave}
                 fases={fasesDoQuadro.map((f) => ({
                   id: f.id,
                   chave: f.chave,
@@ -161,7 +170,7 @@ export default async function CardPage({ params }: { params: Promise<{ id: strin
 
         <section className="rounded-xl border border-border bg-surface p-4">
           <h2 className="mb-4 text-sm font-medium">Timeline</h2>
-          <Timeline entradas={card.timeline} fases={nomesFases} nomes={nomes} />
+          <Timeline entradas={card.timeline} fases={nomesFases} nomes={nomes} relacionados={relacionados} />
         </section>
       </div>
     </>

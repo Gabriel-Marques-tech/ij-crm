@@ -1,7 +1,8 @@
-import { ArrowRightLeft, MessageSquareText, Pencil, Plus, Download, MessageCircle } from "lucide-react";
+import Link from "next/link";
+import { ArrowRightLeft, MessageSquareText, Pencil, Plus, Download, MessageCircle, Link2 } from "lucide-react";
 import type { TipoTimeline } from "@prisma/client";
 import { ehCampoEditavel, ROTULO_CAMPO } from "@/lib/oportunidades/campos";
-import { formatarDataHora, formatarValorCampo } from "@/lib/oportunidades/formatar";
+import { ROTULO_CAMPO_TERMINAL, ehCampoTerminal, formatarCampoTerminal, formatarDataHora, formatarValorCampo } from "@/lib/oportunidades/formatar";
 import type { DetalheCard } from "@/lib/oportunidades/oportunidades";
 
 type Entrada = DetalheCard["timeline"][number];
@@ -14,7 +15,11 @@ const ICONE: Record<TipoTimeline, typeof Plus> = {
   NOTA: MessageSquareText,
   MENSAGEM_WHATSAPP: MessageCircle,
   IMPORT: Download,
+  VINCULO_PROJETO: Link2,
 };
+
+/** Card ligado a este (venda ↔ projeto), para os links da Timeline. */
+export type CardRelacionado = { titulo: string; quadro: string };
 
 const VIA: Record<string, string> = { UI: "pelo app", WHATSAPP: "pelo WhatsApp", IMPORT: "pela importação" };
 
@@ -22,15 +27,60 @@ function obj(p: unknown): Payload {
   return p && typeof p === "object" && !Array.isArray(p) ? (p as Payload) : {};
 }
 
-function Descricao({ e, fases, nomes }: { e: Entrada; fases: ReadonlyMap<string, string>; nomes: ReadonlyMap<string, string> }) {
+function LinkCard({ id, relacionados, rotulo }: { id: unknown; relacionados: ReadonlyMap<string, CardRelacionado>; rotulo: string }) {
+  const c = typeof id === "string" ? relacionados.get(id) : undefined;
+  if (!c || typeof id !== "string") return <>{rotulo} (removido)</>;
+  return (
+    <Link href={`/kanban/${id}?quadro=${c.quadro}`} className="font-medium text-foreground underline decoration-fg-faint underline-offset-2 hover:decoration-foreground">
+      {c.titulo}
+    </Link>
+  );
+}
+
+function Descricao({
+  e,
+  fases,
+  nomes,
+  relacionados,
+}: {
+  e: Entrada;
+  fases: ReadonlyMap<string, string>;
+  nomes: ReadonlyMap<string, string>;
+  relacionados: ReadonlyMap<string, CardRelacionado>;
+}) {
   const p = obj(e.payload);
   const fase = (id: unknown) => (typeof id === "string" ? (fases.get(id) ?? "fase removida") : "—");
   switch (e.tipo) {
     case "CRIACAO":
+      if (p.via === "GANHO") {
+        return (
+          <>
+            criou o projeto em <b className="font-medium text-foreground">{fase(p.faseId)}</b> pelo ganho de{" "}
+            <LinkCard id={p.origemOportunidadeId} relacionados={relacionados} rotulo="venda" />
+          </>
+        );
+      }
       return (
         <>
           criou o card em <b className="font-medium text-foreground">{fase(p.faseId)}</b>
           {typeof p.via === "string" && VIA[p.via] ? ` ${VIA[p.via]}` : ""}
+        </>
+      );
+    case "VINCULO_PROJETO":
+      if (typeof p.projetoId === "string") {
+        return p.criado === true ? (
+          <>
+            gerou o card de projeto <LinkCard id={p.projetoId} relacionados={relacionados} rotulo="projeto" />
+          </>
+        ) : (
+          <>
+            ganhou de novo; o projeto <LinkCard id={p.projetoId} relacionados={relacionados} rotulo="projeto" /> já existia (nada duplicado)
+          </>
+        );
+      }
+      return (
+        <>
+          ganhou de novo a venda <LinkCard id={p.vendaId} relacionados={relacionados} rotulo="venda" /> (este projeto segue o mesmo)
         </>
       );
     case "MOVIMENTACAO":
@@ -41,6 +91,21 @@ function Descricao({ e, fases, nomes }: { e: Entrada; fases: ReadonlyMap<string,
         </>
       );
     case "CAMPO_ALTERADO": {
+      if (typeof p.campo === "string" && ehCampoTerminal(p.campo)) {
+        const c = p.campo;
+        return (
+          <>
+            {p.depois === null ? "limpou" : "registrou"} <b className="font-medium text-foreground">{ROTULO_CAMPO_TERMINAL[c]}</b>:{" "}
+            {p.antes !== null ? (
+              <>
+                <span className="text-fg-mute line-through decoration-fg-faint">{formatarCampoTerminal(c, p.antes)}</span>
+                {p.depois !== null ? " → " : null}
+              </>
+            ) : null}
+            {p.depois !== null ? <span className="text-foreground">{formatarCampoTerminal(c, p.depois)}</span> : null}
+          </>
+        );
+      }
       const campo = typeof p.campo === "string" && ehCampoEditavel(p.campo) ? p.campo : null;
       if (!campo) return <>alterou um campo</>;
       return (
@@ -60,8 +125,18 @@ function Descricao({ e, fases, nomes }: { e: Entrada; fases: ReadonlyMap<string,
   }
 }
 
-/** Timeline cronológica (mais antiga primeiro): criação, movimentos, campos, notas. */
-export function Timeline({ entradas, fases, nomes }: { entradas: Entrada[]; fases: ReadonlyMap<string, string>; nomes: ReadonlyMap<string, string> }) {
+/** Timeline cronológica (mais antiga primeiro): criação, movimentos, campos, notas, vínculo venda ↔ projeto. */
+export function Timeline({
+  entradas,
+  fases,
+  nomes,
+  relacionados = new Map(),
+}: {
+  entradas: Entrada[];
+  fases: ReadonlyMap<string, string>;
+  nomes: ReadonlyMap<string, string>;
+  relacionados?: ReadonlyMap<string, CardRelacionado>;
+}) {
   if (entradas.length === 0) return <p className="text-sm text-fg-faint">Sem histórico.</p>;
   return (
     <ol className="relative space-y-4 border-l border-border pl-5">
@@ -74,7 +149,7 @@ export function Timeline({ entradas, fases, nomes }: { entradas: Entrada[]; fase
               <Icone className="size-2.5" aria-hidden />
             </span>
             <p className="text-sm text-fg-soft">
-              <span className="text-foreground">{e.usuario?.nome ?? "Sistema"}</span> <Descricao e={e} fases={fases} nomes={nomes} />
+              <span className="text-foreground">{e.usuario?.nome ?? "Sistema"}</span> <Descricao e={e} fases={fases} nomes={nomes} relacionados={relacionados} />
             </p>
             {(e.tipo === "NOTA" || e.tipo === "MENSAGEM_WHATSAPP") && typeof p.texto === "string" ? (
               <p className="mt-1 rounded-lg border border-border bg-surface px-3 py-2 text-sm whitespace-pre-wrap text-foreground">{p.texto}</p>

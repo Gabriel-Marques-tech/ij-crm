@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatarDataHora, formatarValorCampo } from "./formatar";
+import { ROTULO_CAMPO_TERMINAL, ehCampoTerminal, formatarCampoTerminal, formatarDataHora, formatarValorCampo } from "./formatar";
 
 describe("formatarValorCampo", () => {
   const nomes = new Map([["u1", "Ana Vendas"]]);
@@ -24,5 +24,19 @@ describe("formatarValorCampo", () => {
 describe("formatarDataHora", () => {
   it("dd/mm/aaaa hh:mm no fuso de SP", () => {
     expect(formatarDataHora(new Date("2026-10-24T15:05:00Z"))).toBe("24/10/2026 12:05");
+  });
+});
+
+describe("campos de ganho/perdido (GAB-32)", () => {
+  it("rótulos e valores como na Timeline", () => {
+    expect(ehCampoTerminal("valorFechado")).toBe(true);
+    expect(ehCampoTerminal("dor")).toBe(false);
+    expect(ehCampoTerminal("toString")).toBe(false);
+    expect(ROTULO_CAMPO_TERMINAL.dataGanho).toBe("Data do ganho");
+    expect(formatarCampoTerminal("valorFechado", "45000.50")).toBe("R$ 45.000,50");
+    expect(formatarCampoTerminal("dataGanho", "2026-10-24T15:05:00.000Z")).toBe("24/10/2026 12:05");
+    expect(formatarCampoTerminal("dataGanho", "lixo")).toBe("lixo");
+    expect(formatarCampoTerminal("motivoPerda", "Preço")).toBe("Preço");
+    expect(formatarCampoTerminal("motivoPerda", null)).toBe("—");
   });
 });

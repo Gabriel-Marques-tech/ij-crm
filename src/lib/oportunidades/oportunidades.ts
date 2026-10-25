@@ -108,6 +108,9 @@ export async function obterCard(id: string) {
       responsavel: { select: { id: true, nome: true } },
       empresa: { select: { id: true, nome: true } },
       contato: { select: { id: true, nome: true } },
+      // Venda ↔ projeto (GAB-32). Inclui soft-deletado: a UI mostra "removido".
+      origemOportunidade: { select: { id: true, titulo: true, deletadoEm: true, pipeline: { select: { chave: true } } } },
+      projeto: { select: { id: true, titulo: true, deletadoEm: true, pipeline: { select: { chave: true } } } },
       timeline: {
         orderBy: [{ em: "asc" }, { id: "asc" }],
         include: { usuario: { select: { id: true, nome: true } } },
