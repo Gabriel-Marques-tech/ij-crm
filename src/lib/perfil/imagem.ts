@@ -10,6 +10,12 @@
  * - dimensões lidas do cabeçalho do bitstream (VP8/VP8L/VP8X; SOFn no JPEG)
  *   e iguais a 256×256.
  *
+ * Depois de validar, `limparMetadados` reescreve o arquivo só com o que é
+ * imagem: no JPEG saem COM e todos os APPn (JFIF/EXIF/XMP/ICC…); no WebP saem
+ * ICCP/EXIF/XMP e chunks desconhecidos (fica VP8X com as flags zeradas, ALPH e
+ * VP8/VP8L). Esses segmentos aceitam bytes arbitrários (poliglota com
+ * `<script>`). Sem re-encode: `sharp` não existe na imagem de produção (GAB-30).
+ *
  * Não decodifica pixels: um bitstream malformado depois do cabeçalho só
  * vira uma imagem quebrada no `<img>` (servida com o mime validado + nosniff),
  * e o cliente cai para as iniciais.
@@ -156,4 +162,69 @@ export function validarFoto(bytes: Uint8Array): ResultadoFoto {
   }
   if (dim.largura !== FOTO_LADO || dim.altura !== FOTO_LADO) return { ok: false, erro: "DIMENSOES_INVALIDAS" };
   return { ok: true, mime, largura: dim.largura, altura: dim.altura };
+}
+
+/** Flags do VP8X que ainda valem depois da limpeza: só alpha (0x10). */
+const VP8X_FLAG_ALPHA = 0x10;
+
+function limparWebp(b: Uint8Array): Uint8Array {
+  const partes: Uint8Array[] = [];
+  let i = 12;
+  while (i < b.length) {
+    const tipo = fourcc(b, i);
+    const tam = u32le(b, i + 4);
+    const fim = i + 8 + tam + (tam % 2);
+    if (tipo === "VP8X") {
+      const c = b.slice(i, fim);
+      c[8] &= VP8X_FLAG_ALPHA;
+      c[9] = c[10] = c[11] = 0; // reservado
+      partes.push(c);
+    } else if (tipo === "ALPH" || tipo === "VP8 " || tipo === "VP8L") {
+      partes.push(b.subarray(i, fim));
+    }
+    i = fim;
+  }
+  const corpo = 4 + partes.reduce((n, p) => n + p.length, 0);
+  const out = new Uint8Array(8 + corpo);
+  out.set(b.subarray(0, 4), 0); // "RIFF"
+  out.set([corpo & 0xff, (corpo >>> 8) & 0xff, (corpo >>> 16) & 0xff, (corpo >>> 24) & 0xff], 4);
+  out.set(b.subarray(8, 12), 8); // "WEBP"
+  let o = 12;
+  for (const p of partes) {
+    out.set(p, o);
+    o += p.length;
+  }
+  return out;
+}
+
+function limparJpeg(b: Uint8Array): Uint8Array {
+  const partes: Uint8Array[] = [b.subarray(0, 2)]; // SOI
+  let i = 2;
+  for (;;) {
+    while (b[i + 1] === 0xff) i++; // bytes de preenchimento entre marcadores
+    const marcador = b[i + 1];
+    if (marcador === 0xda) {
+      partes.push(b.subarray(i)); // SOS + entropia + EOI, intactos
+      break;
+    }
+    const fim = i + 2 + u16be(b, i + 2);
+    const metadado = marcador === 0xfe || (marcador >= 0xe0 && marcador <= 0xef);
+    if (!metadado) partes.push(b.subarray(i, fim));
+    i = fim;
+  }
+  const out = new Uint8Array(partes.reduce((n, p) => n + p.length, 0));
+  let o = 0;
+  for (const p of partes) {
+    out.set(p, o);
+    o += p.length;
+  }
+  return out;
+}
+
+/**
+ * Reescreve uma foto JÁ VALIDADA por `validarFoto` sem metadados (que podem
+ * carregar bytes arbitrários). Chamar só depois de `validarFoto(...).ok`.
+ */
+export function limparMetadados(bytes: Uint8Array, mime: MimeFoto): Uint8Array {
+  return mime === "image/webp" ? limparWebp(bytes) : limparJpeg(bytes);
 }

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { FOTO_LADO, FOTO_MAX_BYTES, validarFoto } from "./imagem";
+import { FOTO_LADO, FOTO_MAX_BYTES, limparMetadados, validarFoto } from "./imagem";
 
 // ---------------------------------------------------------------- construtores de bytes
 
@@ -148,5 +148,67 @@ describe("validarFoto — recusa", () => {
 
   it("lado esperado é 256", () => {
     expect(FOTO_LADO).toBe(256);
+  });
+});
+
+describe("limparMetadados — tira bytes arbitrários (COM/APPn, EXIF/XMP/ICCP)", () => {
+  const PAYLOAD = "<script>alert(1)</script>";
+  const contem = (b: Uint8Array, s: string) => Buffer.from(b).includes(Buffer.from(s));
+  const ler = (nome: string) => new Uint8Array(readFileSync(path.join(import.meta.dirname, "../../test/fixtures/fotos", nome)));
+
+  /** Insere segmentos logo depois do SOI. */
+  function jpegCom(segmentos: number[][]): Uint8Array {
+    const j = jpeg(256, 256);
+    return new Uint8Array([0xff, 0xd8, ...segmentos.flat(), ...j.slice(2)]);
+  }
+  function seg(marcador: number, dados: number[]): number[] {
+    const tam = dados.length + 2;
+    return [0xff, marcador, tam >> 8, tam & 0xff, ...dados];
+  }
+
+  it("JPEG com <script> num COM passa na validação, mas o payload não sobrevive à limpeza", () => {
+    const sujo = jpegCom([seg(0xfe, ascii(PAYLOAD)), seg(0xe1, [...ascii("Exif\0\0"), ...ascii(PAYLOAD)])]);
+    expect(validarFoto(sujo)).toMatchObject({ ok: true, mime: "image/jpeg" });
+    const limpo = limparMetadados(sujo, "image/jpeg");
+    expect(contem(limpo, PAYLOAD)).toBe(false);
+    expect(contem(limpo, "JFIF")).toBe(false); // APP0 também sai
+    expect(validarFoto(limpo)).toEqual({ ok: true, mime: "image/jpeg", largura: 256, altura: 256 });
+    // SOF, SOS e entropia ficam intactos.
+    const j = jpeg(256, 256);
+    const semApp0 = new Uint8Array([0xff, 0xd8, ...j.slice(2 + 18)]);
+    expect(Buffer.from(limpo).equals(Buffer.from(semApp0))).toBe(true);
+  });
+
+  it("WebP com EXIF/XMP/ICCP: chunks removidos, flags do VP8X zeradas, ALPH mantido", () => {
+    const alph = chunk("ALPH", [0, 1, 2, 3]);
+    const sujo = riff([
+      vp8x(256, 256, 0x20 | 0x10 | 0x08 | 0x04),
+      chunk("ICCP", ascii(PAYLOAD)),
+      alph,
+      vp8(256, 256),
+      chunk("EXIF", ascii(PAYLOAD)),
+      chunk("XMP ", ascii(PAYLOAD)),
+      chunk("ABCD", ascii(PAYLOAD)),
+    ]);
+    expect(validarFoto(sujo)).toMatchObject({ ok: true });
+    const limpo = limparMetadados(sujo, "image/webp");
+    expect(contem(limpo, PAYLOAD)).toBe(false);
+    expect(validarFoto(limpo)).toEqual({ ok: true, mime: "image/webp", largura: 256, altura: 256 });
+    expect(Buffer.from(limpo).equals(Buffer.from(riff([vp8x(256, 256, 0x10), alph, vp8(256, 256)])))).toBe(true);
+  });
+
+  it("WebP simples e arquivos reais continuam válidos (e idempotente)", () => {
+    const simples = riff([vp8l(256, 256)]);
+    expect(Buffer.from(limparMetadados(simples, "image/webp")).equals(Buffer.from(simples))).toBe(true);
+    for (const [nome, mime] of [
+      ["real-256.webp", "image/webp"],
+      ["real-256-alpha.webp", "image/webp"],
+      ["real-256-lossless.webp", "image/webp"],
+      ["real-256.jpg", "image/jpeg"],
+    ] as const) {
+      const uma = limparMetadados(ler(nome), mime);
+      expect(validarFoto(uma), nome).toMatchObject({ ok: true, mime });
+      expect(Buffer.from(limparMetadados(uma, mime)).equals(Buffer.from(uma)), nome).toBe(true);
+    }
   });
 });

@@ -77,6 +77,24 @@ describe("salvarFoto", () => {
     expect(await db.usuarioFoto.count()).toBe(0);
   });
 
+  it("JPEG com <script> num segmento COM: aceito, mas o payload não chega ao banco nem à resposta", async () => {
+    const { ana } = await semear();
+    const jpg = readFileSync(path.join(import.meta.dirname, "../../../../../test/fixtures/fotos/real-256.jpg"));
+    const payload = Buffer.from("<script>alert(document.cookie)</script>");
+    const com = Buffer.concat([Buffer.from([0xff, 0xfe, (payload.length + 2) >> 8, (payload.length + 2) & 0xff]), payload]);
+    const sujo = new Uint8Array(Buffer.concat([jpg.subarray(0, 2), com, jpg.subarray(2)]));
+    const r = await salvarFoto(ana.id, sujo);
+    expect(r.ok).toBe(true);
+    const gravada = await db.usuarioFoto.findUniqueOrThrow({ where: { usuarioId: ana.id } });
+    expect(Buffer.from(gravada.bytes).includes(payload)).toBe(false);
+    expect(gravada.mime).toBe("image/jpeg");
+    const res = await chamar(ana.id);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-security-policy")).toContain("sandbox");
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(Buffer.from(await res.arrayBuffer()).includes(payload)).toBe(false);
+  });
+
   it("o banco recusa mime fora da lista mesmo por fora do serviço (CHECK)", async () => {
     const { ana } = await semear();
     await expect(db.usuarioFoto.create({ data: { usuarioId: ana.id, bytes: Buffer.from(WEBP), mime: "text/html" } })).rejects.toThrow();

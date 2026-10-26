@@ -1,6 +1,6 @@
 /** Foto de perfil do PRÓPRIO usuário (GAB-43). Bytes validados em `imagem.ts` antes de gravar. */
 import { db } from "@/lib/db";
-import { FOTO_MAX_BYTES, FOTO_MIMES, validarFoto, type ErroFoto } from "./imagem";
+import { FOTO_MAX_BYTES, FOTO_MIMES, limparMetadados, validarFoto, type ErroFoto } from "./imagem";
 
 export async function salvarFoto(
   usuarioId: string,
@@ -9,7 +9,8 @@ export async function salvarFoto(
 ): Promise<{ ok: true; atualizadoEm: Date } | { ok: false; erro: ErroFoto }> {
   const v = validarFoto(bytes);
   if (!v.ok) return v;
-  const dados = { bytes: Buffer.from(bytes), mime: v.mime, atualizadoEm: agora };
+  // Grava sem COM/APPn/EXIF/XMP/ICCP: o que fica no banco é só imagem.
+  const dados = { bytes: Buffer.from(limparMetadados(bytes, v.mime)), mime: v.mime, atualizadoEm: agora };
   await db.usuarioFoto.upsert({ where: { usuarioId }, create: { usuarioId, ...dados }, update: dados });
   return { ok: true, atualizadoEm: agora };
 }
