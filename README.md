@@ -150,6 +150,13 @@ sem próxima ação — com a mais urgente em destaque. As faixas vêm de `faixa
 (ou "sem próxima ação", só por escolha explícita) como `CAMPO_ALTERADO`. `?vendedor=<id>` só vale
 para gestor/admin e usuário ativo; para os demais o servidor ignora e mostra a própria semana.
 
+## Tabela
+
+`/tabela`: todas as oportunidades vivas (qualquer responsável e quadro: carteira é filtro, não parede), 50 por página, com filtro, ordenação e busca feitos no banco (`src/lib/tabela/`).
+
+- **Estado na URL** (`src/lib/tabela/params.ts`), compartilhável e igual ao Kanban onde coincide: `quadro` (chaves de pipeline), `fase` (ids), `resp`, `origem` (`SEM` = sem origem), `revisar` e `terminais` (`sim`/`nao`), `acao` (`vencida,hoje,semana,sem`, mesmas faixas da Minha Semana), `de`/`ate` (criação, `YYYY-MM-DD` em SP, inclusivo), `q` (título, empresa ou contato; `%`/`_` literais), `ordem`/`dir` (lista branca, desempate por id) e `pagina`. Valor inválido é ignorado.
+- **CSV**: `GET /tabela/csv?<mesmos parâmetros>` exporta todas as linhas filtradas (sem limite de página), em streaming: UTF-8 com BOM, `;`, vírgula decimal e datas dd/mm/aaaa (abre direto no Excel pt-BR). Texto que começa com `= + - @` ganha `'` (anti formula injection). Erro → 500 com `ref`.
+
 ## Preferências de visualização
 
 Opções de visualização de cada usuário (ex.: no Kanban, "mostrar colunas vazias" e colunas abertas à mão, por quadro) ficam em `usuario.preferencias` (JSONB versionado, validado com zod em `src/lib/preferencias/`); cada um só grava as próprias, e JSON inválido vira o padrão.
