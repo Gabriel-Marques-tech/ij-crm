@@ -64,6 +64,7 @@ enum TipoTimeline {
 
 enum StatusMensagem {
   RECEBIDA
+  PROCESSANDO // GAB-34: reivindicada por `processarMensagem` (LLM em andamento)
   CLASSIFICADA_IRRELEVANTE
   PROCESSADA
   FALHA
