@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { PREFERENCIAS_PADRAO, VISUALIZACAO_PADRAO, comVisualizacaoKanban, lerPreferencias, visualizacaoKanban } from "./preferencias";
+import {
+  PREFERENCIAS_PADRAO,
+  VISUALIZACAO_PADRAO,
+  comInicio,
+  comVisualizacaoKanban,
+  destinoInicio,
+  inicioSchema,
+  lerPreferencias,
+  paginaInicial,
+  visualizacaoKanban,
+} from "./preferencias";
 
 describe("lerPreferencias", () => {
   it("válido → mesmo conteúdo", () => {
@@ -24,6 +34,40 @@ describe("lerPreferencias", () => {
 
   it("kanban inválido → vazio, mantendo v", () => {
     expect(lerPreferencias({ v: 1, kanban: "x" })).toEqual(PREFERENCIAS_PADRAO);
+  });
+});
+
+describe("página inicial (GAB-43)", () => {
+  it("sem preferência → Minha Semana", () => {
+    expect(paginaInicial(PREFERENCIAS_PADRAO)).toBe("semana");
+    expect(destinoInicio(PREFERENCIAS_PADRAO)).toBe("/semana");
+  });
+
+  it.each([
+    ["semana", "/semana"],
+    ["vendas", "/kanban"],
+    ["projetos", "/kanban?quadro=projetos"],
+  ] as const)("%s → %s", (inicio, destino) => {
+    const p = lerPreferencias({ v: 1, kanban: {}, inicio });
+    expect(p.inicio).toBe(inicio);
+    expect(destinoInicio(p)).toBe(destino);
+  });
+
+  it("valor inválido em `inicio` vira o padrão sem derrubar o kanban", () => {
+    const p = lerPreferencias({ v: 1, inicio: "tabela", kanban: { vendas: { mostrarVazias: true, abertas: [] } } });
+    expect(paginaInicial(p)).toBe("semana");
+    expect(p.kanban.vendas).toEqual({ mostrarVazias: true, abertas: [] });
+  });
+
+  it("comInicio troca só a página inicial", () => {
+    const original = lerPreferencias({ v: 1, kanban: { vendas: { mostrarVazias: true, abertas: [] } } });
+    expect(comInicio(original, "projetos")).toEqual({ v: 1, inicio: "projetos", kanban: { vendas: { mostrarVazias: true, abertas: [] } } });
+    expect(original.inicio).toBeUndefined();
+  });
+
+  it("schema estrito de entrada recusa valor fora da lista", () => {
+    expect(inicioSchema.safeParse("vendas").success).toBe(true);
+    expect(inicioSchema.safeParse("/admin").success).toBe(false);
   });
 });
 
