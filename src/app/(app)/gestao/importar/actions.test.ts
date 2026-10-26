@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const exigirPapel = vi.fn(async () => ({ id: "u1", papel: "GESTOR" }));
+const exigirPapel = vi.fn<(papel: string) => Promise<{ id: string; papel: string }>>(async () => ({ id: "u1", papel: "GESTOR" }));
 const criarPrevia = vi.fn();
 const confirmarPrevia = vi.fn();
 const remapearPrevia = vi.fn();

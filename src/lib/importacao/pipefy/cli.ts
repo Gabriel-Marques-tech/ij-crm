@@ -63,7 +63,9 @@ export function validarColunas(bruto: unknown): { ok: true; extras: Partial<Reco
 }
 
 async function quemImporta(email: string | undefined) {
-  const where = email ? { email: normalizarEmail(email) } : { papel: "ADMIN" as const, ativo: true };
+  const normalizado = email ? normalizarEmail(email) : null;
+  if (email && !normalizado) return { ok: false as const, erro: `Email inválido: ${email}` };
+  const where = normalizado ? { email: normalizado } : { papel: "ADMIN" as const, ativo: true };
   const u = await db.usuario.findFirst({ where, orderBy: { criadoEm: "asc" }, select: { id: true, email: true, papel: true, ativo: true } });
   if (!u) return { ok: false as const, erro: email ? `Usuário ${email} não encontrado.` : "Nenhum ADMIN ativo. Use --usuario <email>." };
   if (!u.ativo || u.papel === "VENDEDOR") return { ok: false as const, erro: `${u.email} precisa ser ADMIN ou GESTOR ativo.` };
