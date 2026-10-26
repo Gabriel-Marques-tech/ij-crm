@@ -11,18 +11,16 @@
  * identidade do remetente), só soma no contador do dia — vale também para
  * número desconhecido (design doc §2: nada de conteúdo fora de venda).
  *
- * GAB-34 (classificador/LLM): roda DEPOIS do commit, como passo separado
- * disparado por `MensagemBruta.status = RECEBIDA` — nunca dentro desta
- * transação. Motivos: a tx interativa do Prisma expira em 5s, e um retry da
- * Evolution não pode cobrar a LLM duas vezes.
+ * GAB-34 (LLM): roda DEPOIS do commit, em `processar.ts`, disparado pelo
+ * webhook em `after()` e chaveado em `MensagemBruta.status = RECEBIDA` —
+ * nunca dentro desta transação. Motivos: a tx interativa do Prisma expira em
+ * 5s, e um retry da Evolution não pode cobrar a LLM duas vezes.
  */
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { mascararJid, mascararTelefone } from "./mascarar";
 import type { MensagemRecebida, Remetente } from "./payload";
 import { temTagCrm } from "./payload";
-
-export const TEXTO_CONFIRMACAO = "📥 recebido";
 
 export type ResultadoIngestao =
   | { tipo: "DUPLICADO" }

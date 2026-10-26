@@ -1,0 +1,238 @@
+/**
+ * Processamento de uma MensagemBruta `RECEBIDA` pela LLM (design doc §4.3
+ * passos 6–10). Disparo e garantias:
+ *
+ * - O webhook comita a ingestão e agenda `processarMensagem(id)` em
+ *   `after()` (mesmo request, depois do 200). O cron de reprocessamento
+ *   (GAB-41) chama a MESMA função para linhas que ficaram para trás.
+ * - Reivindicação atômica: `UPDATE … SET status = 'PROCESSANDO' WHERE id = $1
+ *   AND status = 'RECEBIDA'`. Só quem muda a linha segue; retry/concorrência
+ *   viram no-op (`IGNORADA`) e nunca cobram a LLM duas vezes. Linha presa em
+ *   PROCESSANDO (processo morreu no meio) é assunto do GAB-41 (devolver a
+ *   RECEBIDA depois de N minutos).
+ * - A LLM roda FORA de qualquer transação (a tx interativa do Prisma expira
+ *   em 5s); a aplicação (Empresa/Contato/Oportunidade/Timeline + status) roda
+ *   numa transação só.
+ * - Falha da LLM ou da aplicação → `FALHA`, `erro` = código + ref,
+ *   `registrarErro` loga a causa com a mesma ref (nunca o texto), e o grupo
+ *   recebe "❌ … (ref: …)". `resultado_llm` guarda o que deu para guardar.
+ * - Uma resposta por mensagem: a confirmação real substitui o "recebido".
+ */
+import { Prisma } from "@prisma/client";
+import { modeloExtracao, limiarConfianca } from "@/lib/config/env";
+import { encontrarContatoPorIdentificador, encontrarEmpresa } from "@/lib/contatos/match";
+import { db } from "@/lib/db";
+import { registrarErro } from "@/lib/erros/registrar";
+import { ErroLlm, extrairAtualizacao, type ContextoExtracao, type ResultadoExtracao } from "@/lib/llm/extracao";
+import type { ContatoCandidato, EmpresaCandidata } from "@/lib/llm/prompts/extracao.v1";
+import { VERSAO_EXTRACAO } from "@/lib/llm/prompts/extracao.v1";
+import { ErroDeRegra } from "@/lib/oportunidades/erros";
+import { PIPELINE_VENDAS } from "@/lib/oportunidades/terminal-regras";
+import { aplicarExtracao, type Desfecho } from "./aplicar";
+import { textoCriado, textoFalha, textoPendente } from "./confirmacao";
+import { enviarWhatsApp } from "./enviar";
+import { extrairIdentificadores } from "./identificadores";
+
+export type ResultadoProcessamento =
+  | { tipo: "IGNORADA" }
+  | { tipo: "PROCESSADA"; oportunidadeId: string; confirmacao: string }
+  | { tipo: "PENDENTE_REVISAO"; confirmacao: string }
+  | { tipo: "FALHA"; ref: string; codigo: string; confirmacao: string };
+
+type Bruta = NonNullable<Awaited<ReturnType<typeof carregar>>>;
+
+function carregar(id: string) {
+  return db.mensagemBruta.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      eventoId: true,
+      grupoJid: true,
+      texto: true,
+      recebidaEm: true,
+      respondendoEventoId: true,
+      remetenteTelefone: true,
+      remetenteLid: true,
+      remetenteUsuarioId: true,
+      remetenteUsuario: { select: { nome: true } },
+    },
+  });
+}
+
+/** Contexto do passo 6: remetente, msg respondida, fases de vendas, candidatos por identificador exato. */
+export async function montarContexto(m: Pick<Bruta, "texto" | "recebidaEm" | "respondendoEventoId" | "remetenteUsuario">): Promise<ContextoExtracao> {
+  let respondendoA: string | null = null;
+  if (m.respondendoEventoId) {
+    const anterior =
+      (await db.mensagemBruta.findUnique({ where: { eventoId: m.respondendoEventoId }, select: { texto: true } })) ??
+      (await db.mensagemEnviada.findUnique({ where: { eventoId: m.respondendoEventoId }, select: { texto: true } }));
+    respondendoA = anterior?.texto ?? null;
+  }
+  const fases = await db.fase.findMany({
+    where: { pipeline: { chave: PIPELINE_VENDAS }, arquivadaEm: null },
+    orderBy: [{ ordem: "asc" }, { criadoEm: "asc" }],
+    select: { chave: true, nome: true, isTerminal: true },
+  });
+
+  const ids = extrairIdentificadores(m.texto);
+  const contatos: ContatoCandidato[] = [];
+  for (const [valor, via] of [...ids.telefones.map((v) => [v, "telefone"] as const), ...ids.emails.map((v) => [v, "email"] as const)]) {
+    const r = await encontrarContatoPorIdentificador(valor);
+    if (r.tipo !== "ENCONTRADO" || contatos.some((c) => c.id === r.contato.id)) continue;
+    const empresa = r.contato.empresaId ? await db.empresa.findUnique({ where: { id: r.contato.empresaId }, select: { nome: true } }) : null;
+    contatos.push({ id: r.contato.id, nome: r.contato.nome, empresa: empresa?.nome ?? null, via });
+  }
+  const empresas: EmpresaCandidata[] = [];
+  for (const valor of [...ids.cnpjs, ...ids.emails]) {
+    const r = await encontrarEmpresa(valor);
+    if (r && !empresas.some((e) => e.id === r.empresa.id)) empresas.push({ id: r.empresa.id, nome: r.empresa.nome, via: r.via });
+  }
+
+  return {
+    remetente: m.remetenteUsuario?.nome ?? "vendedor",
+    recebidaEm: m.recebidaEm,
+    respondendoA,
+    fases: fases.map((f) => ({ chave: f.chave, nome: f.nome, terminal: f.isTerminal })),
+    contatos,
+    empresas,
+  };
+}
+
+/** Código curto e seguro (sem texto) para a coluna `erro` e a resposta. */
+function codigoDe(e: unknown): string {
+  if (e instanceof ErroLlm) return `LLM_${e.codigo}`;
+  if (e instanceof ErroDeRegra) return `REGRA_${e.erro}`;
+  if (e instanceof Prisma.PrismaClientKnownRequestError) return `PRISMA_${e.code}`;
+  return "INESPERADO";
+}
+
+/**
+ * Erro que pode ir para `registrarErro` sem vazar texto: ErroLlm/ErroDeRegra
+ * têm mensagem só de código; Prisma conhecido é descrito por código. Qualquer
+ * outro (ex.: PrismaClientValidationError, que ecoa os argumentos) perde a
+ * mensagem e mantém nome + frames.
+ */
+function erroSeguro(e: unknown): unknown {
+  if (e instanceof ErroLlm || e instanceof ErroDeRegra || e instanceof Prisma.PrismaClientKnownRequestError) return e;
+  const s = new Error("(mensagem omitida)");
+  s.name = e instanceof Error ? e.name : typeof e;
+  if (e instanceof Error && e.stack) s.stack = e.stack;
+  return s;
+}
+
+function registroLlm(r: ResultadoExtracao | null, bruto?: unknown, uso?: ResultadoExtracao["uso"]) {
+  const u = r?.uso ?? uso;
+  return {
+    versao: VERSAO_EXTRACAO,
+    provedor: u?.provedor ?? null,
+    modelo: u?.modelo ?? modeloExtracao(),
+    uso: u ? { tokensEntrada: u.tokensEntrada, tokensSaida: u.tokensSaida, ms: u.ms } : null,
+    saida: (r?.bruto ?? bruto ?? null) as Prisma.InputJsonValue | null,
+  };
+}
+
+function resumoDesfecho(d: Desfecho) {
+  if (d.tipo === "PENDENTE") return { tipo: d.tipo, motivo: d.motivo };
+  return {
+    tipo: d.tipo,
+    oportunidadeId: d.oportunidadeId,
+    contato: d.contato,
+    empresa: d.empresa,
+    revisar: d.revisar,
+    motivosRevisar: d.motivosRevisar,
+    sugestoes: d.sugestoes,
+  };
+}
+
+/** JID do remetente para a citação: o do webhook quando houver, senão reconstruído do que foi gravado. */
+function participantDe(m: Bruta, participantJid?: string | null): string | undefined {
+  if (participantJid) return participantJid;
+  if (m.remetenteLid) return m.remetenteLid;
+  if (m.remetenteTelefone) return `${m.remetenteTelefone.replace(/\D/g, "")}@s.whatsapp.net`;
+  return undefined;
+}
+
+async function responder(m: Bruta, texto: string, oportunidadeId: string | null, participantJid?: string | null) {
+  try {
+    await enviarWhatsApp({
+      para: m.grupoJid,
+      texto,
+      citar: { eventoId: m.eventoId, participant: participantDe(m, participantJid), texto: m.texto },
+      oportunidadeId,
+    });
+  } catch (e) {
+    console.error(`[processar] confirmação da mensagem ${m.id} não enviada: ${e instanceof Error ? e.name : typeof e}`);
+  }
+}
+
+async function falhar(m: Bruta, e: unknown, llm: ReturnType<typeof registroLlm>, participantJid?: string | null): Promise<ResultadoProcessamento> {
+  const ref = registrarErro("processar", erroSeguro(e));
+  const codigo = codigoDe(e);
+  const motivo = e instanceof ErroLlm ? e.message : codigo;
+  await db.mensagemBruta.update({
+    where: { id: m.id },
+    data: { status: "FALHA", erro: `${motivo} ref=${ref}`, resultadoLlm: { ...llm, aplicacao: { tipo: "FALHA", codigo, ref } } as Prisma.InputJsonValue },
+  });
+  const confirmacao = textoFalha(ref);
+  await responder(m, confirmacao, null, participantJid);
+  return { tipo: "FALHA", ref, codigo, confirmacao };
+}
+
+/**
+ * Idempotente e seguro para chamar de qualquer lugar (after() do webhook,
+ * cron): só processa se conseguir reivindicar a linha. Nunca lança por erro
+ * de LLM/aplicação — vira `FALHA`.
+ */
+export async function processarMensagem(id: string, opts: { participantJid?: string | null } = {}): Promise<ResultadoProcessamento> {
+  const reivindicadas = await db.$executeRaw`
+    UPDATE mensagem_bruta
+       SET status = 'PROCESSANDO', tentativas = tentativas + 1, atualizado_em = now()
+     WHERE id = ${id} AND status = 'RECEBIDA'`;
+  if (reivindicadas !== 1) return { tipo: "IGNORADA" };
+  const m = (await carregar(id))!;
+
+  if (!m.remetenteUsuarioId) return falhar(m, new ErroDeRegra("RESPONSAVEL_INVALIDO"), registroLlm(null), opts.participantJid);
+
+  let r: ResultadoExtracao;
+  try {
+    r = await extrairAtualizacao(m.texto, await montarContexto(m), { ref: m.id });
+  } catch (e) {
+    return falhar(m, e, registroLlm(null, e instanceof ErroLlm ? e.bruto : undefined, e instanceof ErroLlm ? e.uso : undefined), opts.participantJid);
+  }
+  const llm = registroLlm(r);
+
+  let desfecho: Desfecho;
+  try {
+    desfecho = await db.$transaction(
+      async (tx) => {
+        const d = await aplicarExtracao(tx, {
+          mensagem: { id: m.id, texto: m.texto, recebidaEm: m.recebidaEm, remetenteUsuarioId: m.remetenteUsuarioId! },
+          extracao: r.extracao,
+          limiar: limiarConfianca(),
+          registroLlm: llm,
+        });
+        await tx.mensagemBruta.update({
+          where: { id: m.id },
+          data: {
+            status: d.tipo === "CRIADO" ? "PROCESSADA" : "PENDENTE_REVISAO",
+            erro: null,
+            resultadoLlm: { ...llm, aplicacao: resumoDesfecho(d) } as Prisma.InputJsonValue,
+          },
+        });
+        return d;
+      },
+      { timeout: 15_000 },
+    );
+  } catch (e) {
+    return falhar(m, e, llm, opts.participantJid);
+  }
+
+  if (desfecho.tipo === "PENDENTE") {
+    const confirmacao = textoPendente(desfecho.motivo);
+    await responder(m, confirmacao, null, opts.participantJid);
+    return { tipo: "PENDENTE_REVISAO", confirmacao };
+  }
+  const confirmacao = textoCriado(desfecho);
+  await responder(m, confirmacao, desfecho.oportunidadeId, opts.participantJid);
+  return { tipo: "PROCESSADA", oportunidadeId: desfecho.oportunidadeId, confirmacao };
+}

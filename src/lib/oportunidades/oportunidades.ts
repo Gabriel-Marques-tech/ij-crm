@@ -156,23 +156,55 @@ export async function criarCard(
   try {
     const id = await db.$transaction(async (tx) => {
       if (!(await travarPipelines(tx, [dados.pipelineId]))) throw new ErroDeRegra("PIPELINE_NAO_ENCONTRADO");
-      const f = await faseDestino(tx, dados.faseId, dados.pipelineId);
-      // Ganho/perdido só por movimento: é ele que passa por `aoEntrarEmTerminal`.
-      if (f.isTerminal) throw new ErroDeRegra("FASE_TERMINAL");
-      const agora = new Date();
-      const op = await tx.oportunidade.create({
-        data: { pipelineId: dados.pipelineId, faseId: f.id, titulo, responsavelId: por.id, criadoVia: "UI", faseDesde: agora, criadoEm: agora },
-        select: { id: true },
-      });
-      // Entrada no funil: de_fase_id null. Base das métricas de tempo por fase.
-      await tx.transicaoFase.create({ data: { oportunidadeId: op.id, deFaseId: null, paraFaseId: f.id, usuarioId: por.id, origem: "UI", em: agora } });
-      await tx.timeline.create({ data: { oportunidadeId: op.id, tipo: "CRIACAO", payload: { faseId: f.id, via: "UI" }, usuarioId: por.id, em: agora } });
-      return op.id;
+      return criarCardTravado(tx, { ...dados, titulo, responsavelId: por.id, via: "UI" }, por);
     });
     return { ok: true, id };
   } catch (e) {
     return traduzir(e);
   }
+}
+
+export type NovoCard = {
+  pipelineId: string;
+  faseId: string;
+  titulo: string;
+  responsavelId: string;
+  via: "UI" | "WHATSAPP";
+  /** Campos já interpretados (ingestão do WhatsApp, GAB-34). */
+  campos?: Omit<Prisma.OportunidadeUncheckedCreateInput, "id" | "pipelineId" | "faseId" | "titulo" | "responsavelId" | "criadoVia" | "faseDesde" | "criadoEm">;
+  agora?: Date;
+};
+
+/**
+ * Corpo de `criarCard` numa transação que JÁ tem o lock do pipeline
+ * (`travarPipelines`). Relê a fase depois do lock e recusa terminal
+ * (`FASE_TERMINAL`). Lança `ErroDeRegra`. Usado pela ingestão do WhatsApp
+ * (GAB-34), que cria Empresa/Contato na mesma transação.
+ */
+export async function criarCardTravado(tx: Tx, dados: NovoCard, por: Ator): Promise<string> {
+  const titulo = validarTitulo(dados.titulo);
+  if (!titulo) throw new ErroDeRegra("TITULO_INVALIDO");
+  const f = await faseDestino(tx, dados.faseId, dados.pipelineId);
+  // Ganho/perdido só por movimento: é ele que passa por `aoEntrarEmTerminal`.
+  if (f.isTerminal) throw new ErroDeRegra("FASE_TERMINAL");
+  const agora = dados.agora ?? new Date();
+  const op = await tx.oportunidade.create({
+    data: {
+      ...dados.campos,
+      pipelineId: dados.pipelineId,
+      faseId: f.id,
+      titulo,
+      responsavelId: dados.responsavelId,
+      criadoVia: dados.via,
+      faseDesde: agora,
+      criadoEm: agora,
+    },
+    select: { id: true },
+  });
+  // Entrada no funil: de_fase_id null. Base das métricas de tempo por fase.
+  await tx.transicaoFase.create({ data: { oportunidadeId: op.id, deFaseId: null, paraFaseId: f.id, usuarioId: por.id, origem: dados.via, em: agora } });
+  await tx.timeline.create({ data: { oportunidadeId: op.id, tipo: "CRIACAO", payload: { faseId: f.id, via: dados.via }, usuarioId: por.id, em: agora } });
+  return op.id;
 }
 
 /**
