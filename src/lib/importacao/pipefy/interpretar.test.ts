@@ -1,0 +1,124 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { describe, expect, it } from "vitest";
+import { decodificarArquivo } from "./csv";
+import { interpretarCsv, type Interpretacao } from "./interpretar";
+
+const FIX = path.resolve(import.meta.dirname, "../../../test/fixtures/pipefy");
+const ler = (nome: string) => decodificarArquivo(readFileSync(path.join(FIX, nome)));
+
+function ok(texto: string): Interpretacao {
+  const r = interpretarCsv(texto);
+  if (!r.ok) throw new Error(r.erro);
+  return r;
+}
+
+describe("interpretarCsv — fixture pt-BR (; + BOM + multilinha)", () => {
+  const r = ok(ler("export-exemplo.csv"));
+  const card = (id: string) => r.cards.find((c) => c.pipefyId === id)!;
+
+  it("lê o separador, conta linhas, deduplica e reporta a linha sem ID", () => {
+    expect(r.separador).toBe(";");
+    expect(r.totalLinhas).toBe(13);
+    expect(r.cards.map((c) => c.pipefyId)).toEqual(["900001", "900002", "900003", "900004", "900005", "900006", "900007", "900008", "900009", "900010"]);
+    expect(r.duplicadas).toBe(2);
+    expect(r.erros).toEqual([{ linha: 14, pipefyId: null, mensagem: "Sem ID do card." }]);
+  });
+
+  it("repetido com conteúdo diferente: fica o atualizado por último, o outro vira aviso", () => {
+    expect(card("900002").titulo).toBe("App de delivery Sabor Caseiro");
+    expect(r.avisos).toContainEqual({ linha: 16, pipefyId: "900002", mensagem: "Card repetido no arquivo; mantida a linha 4 (atualizada por último)." });
+  });
+
+  it("campo multilinha com aspas e separador dentro", () => {
+    expect(card("900001").dor).toBe('Site antigo; não aparece no Google.\nQuer receber pedidos "online".');
+    expect(card("900003").titulo).toBe('Consultoria de ERP "Fase 2"');
+  });
+
+  it("normaliza CNPJ, telefone (sem DDI) e email; origem por etiqueta", () => {
+    const c = card("900001");
+    expect(c.cnpj).toBe("11222333000181");
+    expect(c.pontos).toEqual([
+      { tipo: "TELEFONE", valorNormalizado: "+5511988887777", valorOriginal: "(11) 98888-7777" },
+      { tipo: "EMAIL", valorNormalizado: "jose@padariaaurora.com.br", valorOriginal: "jose@padariaaurora.com.br" },
+    ]);
+    expect(c.origem).toBe("INDICACAO");
+    expect(card("900002").pontos[0].valorNormalizado).toBe("+552133334444");
+    expect(card("900005").origem).toBe("COLD_CALL");
+  });
+
+  it("datas dd/mm/aaaa HH:mm (SP) e ISO; histórico por fase", () => {
+    const c = card("900001");
+    expect(c.criadoEm?.toISOString()).toBe("2026-01-02T12:15:00.000Z");
+    expect(c.historico).toEqual([
+      { chave: "primeiro contato", entrada: new Date("2026-01-02T12:15:00.000Z"), ultimaEntrada: null, saida: new Date("2026-01-10T17:30:00.000Z") },
+      { chave: "reuniao diagnostica", entrada: new Date("2026-01-10T17:30:00.000Z"), ultimaEntrada: null, saida: null },
+    ]);
+    expect(card("900002").historico.map((h) => h.chave)).toEqual(["primeiro contato", "montando proposta", "contrato assinado"]);
+    expect(card("900002").finalizadoEm?.toISOString()).toBe("2026-02-01T21:00:00.000Z");
+  });
+
+  it("valores em dinheiro e 1º responsável", () => {
+    expect(card("900002")).toMatchObject({ orcamento: "50000.00", valorFechado: "45000.00", responsavel: "Bruno Lima" });
+    expect(card("900003")).toMatchObject({ orcamento: "80000.00", valorFechado: "75500.50" });
+    expect(r.avisos).toContainEqual({ linha: 4, pipefyId: "900002", mensagem: "Card com 2 responsáveis no Pipefy; o CRM usa o primeiro (Bruno Lima)." });
+  });
+
+  it("campos vazios viram null; data e CNPJ inválidos viram aviso", () => {
+    expect(card("900008")).toMatchObject({ empresa: null, cnpj: null, pontos: [], criadoEm: null, responsavel: null, historico: [] });
+    expect(card("900010")).toMatchObject({ criadoEm: null, cnpj: null });
+    const avisos10 = r.avisos.filter((a) => a.pipefyId === "900010").map((a) => a.mensagem);
+    expect(avisos10).toEqual(["CNPJ inválido (12.345.678/0001-00): ignorado.", 'Data inválida em "criadoEm" (31/02/2026 10:00): ignorada.']);
+  });
+
+  it("lista as fases do arquivo (atuais + cabeçalhos de histórico), com o nome com acento", () => {
+    expect(r.fases).toEqual([
+      { chave: "primeiro contato", nome: "Primeiro Contato", cardsAtuais: 3 },
+      { chave: "reuniao diagnostica", nome: "Reunião Diagnóstica", cardsAtuais: 1 },
+      { chave: "montando proposta", nome: "Montando Proposta", cardsAtuais: 1 },
+      { chave: "contrato assinado", nome: "Contrato assinado", cardsAtuais: 1 },
+      { chave: "em execucao", nome: "Em execução", cardsAtuais: 1 },
+      { chave: "finalizado", nome: "Finalizado", cardsAtuais: 1 },
+      { chave: "perdido", nome: "Perdido", cardsAtuais: 1 },
+      { chave: "backlog antigo", nome: "Backlog antigo", cardsAtuais: 1 },
+    ]);
+  });
+
+  it("colunas sem uso ficam listadas; tempo na fase é ignorado", () => {
+    expect(r.colunasIgnoradas).toEqual(["Campo customizado sem uso"]);
+    expect(r.colunasHistorico).toBe(9);
+  });
+});
+
+describe("interpretarCsv — variante em inglês (vírgula, ISO)", () => {
+  const r = ok(ler("export-exemplo-en.csv"));
+  it("casa os cabeçalhos em inglês e o histórico First time in / Last time out", () => {
+    expect(r.separador).toBe(",");
+    expect(r.cards).toHaveLength(2);
+    expect(r.cards[0]).toMatchObject({ pipefyId: "800001", titulo: "Portal do aluno, versão 2", faseAtual: "primeiro contato", responsavel: "Ana Souza", origem: "INDICACAO" });
+    expect(r.cards[1].historico).toEqual([
+      { chave: "primeiro contato", entrada: new Date("2026-02-01T12:00:00Z"), ultimaEntrada: null, saida: new Date("2026-02-20T12:00:00Z") },
+      { chave: "contrato assinado", entrada: new Date("2026-03-10T15:00:00Z"), ultimaEntrada: null, saida: null },
+    ]);
+  });
+});
+
+describe("interpretarCsv — erros de arquivo", () => {
+  it("sem coluna obrigatória → erro dizendo quais nomes procurou", () => {
+    const r = interpretarCsv("Nome;Valor\nx;1\n");
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.erro).toMatch(/^Colunas obrigatórias não encontradas: ID do card \("Card ID", "ID", "Card id"\); Título/);
+  });
+  it("só cabeçalho", () => {
+    expect(interpretarCsv("ID;Title;Current phase\n")).toEqual({ ok: false, erro: "O arquivo só tem o cabeçalho, nenhum card." });
+  });
+  it("limite de linhas", () => {
+    const r = interpretarCsv("ID;Title;Current phase\n1;a;b\n2;c;d\n", { maxLinhas: 1 });
+    expect(r).toEqual({ ok: false, erro: "O arquivo tem mais de 1 linhas de dados. Divida o export em partes menores." });
+  });
+  it("linha com colunas a mais → erro da linha, o resto segue", () => {
+    const r = ok("ID;Title;Current phase\n1;a;b;sobrou\n2;c;d\n");
+    expect(r.cards.map((c) => c.pipefyId)).toEqual(["2"]);
+    expect(r.erros).toEqual([{ linha: 2, pipefyId: "1", mensagem: "Linha com 4 colunas; o cabeçalho tem 3. Confira o separador/aspas." }]);
+  });
+});

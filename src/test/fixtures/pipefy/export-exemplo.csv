@@ -1,0 +1,16 @@
+﻿ID;Título;Fase atual;Criado em;Atualizado em;Finalizado em;Responsáveis;Etiquetas;Empresa;CNPJ;Nome do contato;Telefone;E-mail;Cargo;Dor;Orçamento previsto;Valor fechado;Motivo da perda;Cidade;Estado;Primeira entrada na fase Primeiro Contato;Primeira entrada na fase Reunião Diagnóstica;Primeira entrada na fase Montando Proposta;Primeira entrada na fase Contrato assinado;Primeira entrada na fase Em execução;Primeira entrada na fase Finalizado;Primeira entrada na fase Perdido;Última saída da fase Primeiro Contato;Tempo na fase Primeiro Contato (dias);Campo customizado sem uso
+900001;Site institucional Padaria Aurora;Reunião Diagnóstica;02/01/2026 09:15;10/01/2026 14:30;;Ana Souza;Indicação;Padaria Aurora;11.222.333/0001-81;José Aurora;(11) 98888-7777;jose@padariaaurora.com.br;Sócio;"Site antigo; não aparece no Google.
+Quer receber pedidos ""online"".";R$ 12.000,00;;;Campinas;SP;02/01/2026 09:15;10/01/2026 14:30;;;;;;10/01/2026 14:30;8,2;x
+900002;App de delivery Sabor Caseiro;Contrato assinado;2025-11-03T10:00:00-03:00;2026-02-01T18:00:00-03:00;2026-02-01T18:00:00-03:00;Bruno Lima, Ana Souza;RD Station;Sabor Caseiro Ltda;11.444.777/0001-61;Marta Lima;+55 (21) 3333-4444;marta@saborcaseiro.com.br;Diretora;App para pedidos;R$ 50.000,00;R$ 45.000,00;;Rio de Janeiro;RJ;2025-11-03T10:00:00-03:00;;2025-12-01T09:00:00-03:00;2026-02-01T18:00:00-03:00;;;;2025-11-20T10:00:00-03:00;17;
+900003;"Consultoria de ERP ""Fase 2""";Em execução;15/09/2025 08:00;05/01/2026 11:00;;Carla Dias;Evento;Metalúrgica Forte;;Rogério;11 97777-1234;;Gerente de TI;ERP;80.000;R$ 75.500,50;;Sorocaba;SP;15/09/2025 08:00;;;20/11/2025 16:00;01/12/2025 09:00;;;;;
+900004;E-commerce Loja Bela;Finalizado;01/06/2025;20/12/2025 17:45;20/12/2025 17:45;Ana Souza;;Loja Bela;;;;contato@lojabela.com;;;;R$ 30.000,00;;;;01/06/2025;;;01/08/2025 10:00;05/08/2025 10:00;20/12/2025 17:45;;;;
+900005;Landing page Academia Move;Perdido;10/10/2025 10:00;30/10/2025 10:00;30/10/2025 10:00;Bruno Lima;Cold call;Academia Move;;Paula;(19) 99123-4567;;;;;;Preço: achou caro;;;10/10/2025 10:00;;;;;;30/10/2025 10:00;;;
+900006;Card de fase antiga;Backlog antigo;01/01/2025 10:00;;;Ana Souza;;;;;;;;;;;;;;;;;;;;;;;
+900007;Sistema de estoque Mercadinho;Montando Proposta;05/01/2026 10:00;12/01/2026 10:00;;Fulano Sem Cadastro;;Mercadinho Bom Preço;;Seu Jorge;(11) 3555-1212;;;;;;;;;05/01/2026 10:00;;12/01/2026 10:00;;;;;;;
+900001;Site institucional Padaria Aurora;Reunião Diagnóstica;02/01/2026 09:15;10/01/2026 14:30;;Ana Souza;Indicação;Padaria Aurora;11.222.333/0001-81;José Aurora;(11) 98888-7777;jose@padariaaurora.com.br;Sócio;"Site antigo; não aparece no Google.
+Quer receber pedidos ""online"".";R$ 12.000,00;;;Campinas;SP;02/01/2026 09:15;10/01/2026 14:30;;;;;;10/01/2026 14:30;8,2;x
+900008;Card quase vazio;Primeiro Contato;;;;;;;;;;;;;;;;;;;;;;;;;;;
+900009;Lead com contato na lixeira;Primeiro Contato;20/01/2026 10:00;;;Ana Souza;;;;Ex-contato;(21) 97777-6666;;;;;;;;;;;;;;;;;;
+;Linha sem ID;Primeiro Contato;;;;;;;;;;;;;;;;;;;;;;;;;;;
+900010;Datas e CNPJ ruins;Primeiro Contato;31/02/2026 10:00;;;carla.dias@ij.test;;;12.345.678/0001-00;Gabi;;gabi@gmail.com;;;;;;;;;;;;;;;;;
+900002;App de delivery Sabor Caseiro (versão antiga);Montando Proposta;2025-11-03T10:00:00-03:00;2026-01-15T10:00:00-03:00;;Bruno Lima;;;;;;;;;;;;;;;;;;;;;;;
