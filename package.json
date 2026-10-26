@@ -16,7 +16,8 @@
     "db:seed": "prisma db seed",
     "db:studio": "prisma studio",
     "check": "pnpm lint && pnpm typecheck && pnpm test",
-    "admin:criar": "tsx scripts/criar-admin.ts"
+    "admin:criar": "tsx scripts/criar-admin.ts",
+    "import:pipefy": "tsx scripts/import-pipefy.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.9.0",
