@@ -4,6 +4,7 @@ import type { TipoTimeline } from "@prisma/client";
 import { ehCampoEditavel, ROTULO_CAMPO } from "@/lib/oportunidades/campos";
 import { ROTULO_CAMPO_TERMINAL, ehCampoTerminal, formatarCampoTerminal, formatarDataHora, formatarValorCampo } from "@/lib/oportunidades/formatar";
 import type { DetalheCard } from "@/lib/oportunidades/oportunidades";
+import { ehCampoVinculo, ROTULO_VINCULO } from "@/lib/oportunidades/vinculos";
 
 type Entrada = DetalheCard["timeline"][number];
 type Payload = Record<string, unknown>;
@@ -105,6 +106,15 @@ function Descricao({
         </>
       );
     case "CAMPO_ALTERADO": {
+      if (ehCampoVinculo(p.campo)) {
+        const nome = (v: unknown) => (typeof v === "string" && v ? v : "—");
+        return (
+          <>
+            alterou <b className="font-medium text-foreground">{ROTULO_VINCULO[p.campo]}</b>:{" "}
+            <span className="text-fg-mute line-through decoration-fg-faint">{nome(p.antes)}</span> → <span className="text-foreground">{nome(p.depois)}</span>
+          </>
+        );
+      }
       if (typeof p.campo === "string" && ehCampoTerminal(p.campo)) {
         const c = p.campo;
         return (

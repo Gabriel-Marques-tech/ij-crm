@@ -15,6 +15,7 @@ import { MoverFase } from "./mover-fase";
 import { NotaForm } from "./nota-form";
 import { ResultadoTerminal } from "./resultado-terminal";
 import { Timeline, type CardRelacionado } from "./timeline";
+import { Vinculos } from "./vinculos";
 
 export const metadata = { title: "Card" };
 
@@ -165,6 +166,8 @@ export default async function CardPage({ params }: { params: Promise<{ id: strin
               </div>
             </div>
           </section>
+
+          <Vinculos cardId={card.id} />
 
           <section className="rounded-xl border border-border bg-surface p-4">
             <h2 className="mb-3 text-sm font-medium">Nota</h2>

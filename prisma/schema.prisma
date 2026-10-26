@@ -134,6 +134,7 @@ model Empresa {
 
   @@index([nome])
   @@index([nome(ops: raw("gin_trgm_ops"))], type: Gin, map: "empresa_nome_trgm_idx")
+  @@index([dominioEmail])
   @@map("empresa")
 }
 

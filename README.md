@@ -124,6 +124,22 @@ Projetos move direto. Remover fase em Gestão só migra cards para fase do mesmo
 ganho ou perdido) — a migração não passa pelo gancho. Vendas/Projetos ficam na navegação (lista
 pelo `?quadro=`; o detalhe declara o quadro do card).
 
+## Empresas e Contatos
+
+`/empresas` e `/contatos` (lista com busca + detalhe editável); no card, a seção "Empresa e
+contato" vincula/cria inline (Timeline `CAMPO_ALTERADO { campo: "empresa"|"contato", antes,
+depois }` com nomes). Normalização única em `src/lib/normalizacao.ts`: telefone → E.164 BR
+(celular sem o 9 ganha o 9), email lowercase/trim, CNPJ alfanumérico (sem pontuação, maiúsculo,
+DV módulo 11 com ASCII−48 — **nunca `\D`**), domínio de email/URL sem `www.`. Telefone/email
+é único no sistema (`contato_ponto (tipo, valor_normalizado)`): repetir devolve o dono. Match
+automático (ingestão/import) só por identificador exato, em `src/lib/contatos/match.ts`:
+`encontrarContatoPorIdentificador(telefone|email)` (→ `ENCONTRADO | NAO_ENCONTRADO |
+BLOQUEADO_EXCLUIDO`; o último vai para revisão humana, nunca cria) e `encontrarEmpresa(cnpj|dominio)`
+(→ `{ empresa, via }`; **só `via: "cnpj"` vincula sozinho**, domínio é sugestão a confirmar).
+Busca por nome é só autocomplete (curingas do LIKE escapados), nunca vínculo. Ingestão/import
+passam `{ exigirDdi: true }` em `normalizarTelefoneBr`. Vínculo para registro excluído/mesclado
+aparece como tal (`src/lib/entidades/vinculo.ts`), nunca como link ativo.
+
 ## Minha Semana
 
 `/` lista os cards abertos (vivos, fora de fase terminal) em que o usuário é responsável, por
