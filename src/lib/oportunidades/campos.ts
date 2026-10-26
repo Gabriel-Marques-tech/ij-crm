@@ -3,6 +3,7 @@
  * formulário. Puro: o serviço grava, aqui só se decide o valor.
  */
 import { Origem } from "@prisma/client";
+import { lerDinheiro } from "./terminal-regras";
 
 export const CAMPOS_EDITAVEIS = [
   "titulo",
@@ -86,12 +87,8 @@ function textoOpcional(bruto: string, max: number, rotulo: string): ResultadoCam
 }
 
 function dinheiro(bruto: string): ResultadoCampo {
-  let t = bruto.trim().replace(/^R\$\s*/i, "").replace(/\s/g, "");
-  if (t === "") return { ok: true, valor: null };
-  // Formato BR (1.234,56): ponto é milhar, vírgula é decimal.
-  if (t.includes(",")) t = t.replace(/\./g, "").replace(",", ".");
-  if (!/^\d{1,12}(\.\d{1,2})?$/.test(t)) return { ok: false, erro: "Orçamento inválido. Ex.: 12.500,00" };
-  return { ok: true, valor: Number(t).toFixed(2) };
+  const r = lerDinheiro(bruto);
+  return r.ok ? { ok: true, valor: r.valor } : { ok: false, erro: "Orçamento inválido. Ex.: 12.500,00" };
 }
 
 export function interpretarCampo(campo: CampoEditavel, bruto: string): ResultadoCampo {

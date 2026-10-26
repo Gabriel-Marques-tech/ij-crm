@@ -18,6 +18,9 @@ const MENSAGEM: Record<ErroFase, string> = {
   TERMINAL_PERDIDO_OBRIGATORIO: "Vendas precisa manter ao menos uma fase terminal de perdido.",
   DESTINO_OBRIGATORIO: "Escolha para qual fase os cards vão.",
   DESTINO_INVALIDO: "Fase de destino inválida: precisa ser outra fase ativa do mesmo quadro.",
+  DESTINO_TERMINAL_INCOMPATIVEL:
+    "Mova esses cards pelo Kanban — fases de ganho/perdido exigem os dados do fechamento. Aqui só dá para levar cards para uma fase do mesmo tipo (aberta → aberta, ganho → ganho, perdido → perdido).",
+  FASE_COM_CARDS_TERMINAL: "Essa fase tem cards. Mova-os antes de mudar se ela é de ganho/perdido.",
   FASE_EM_USO: "A fase passou a ter cards ou histórico enquanto você removia. Tente de novo.",
 };
 

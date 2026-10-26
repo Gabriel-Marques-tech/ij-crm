@@ -20,6 +20,8 @@ const SELECT_CLASSE =
 /** Cria (fase = null) ou edita uma fase. Mesmos campos; na edição a chave aparece, fixa. */
 export function FaseForm({ pipelineId, fase, onSalvo }: { pipelineId: string; fase: FaseComUso | null; onSalvo: () => void }) {
   const acao = fase ? editarFaseAction : criarFaseAction;
+  // Com cards vivos o tipo terminal fica travado (o serviço também recusa: FASE_COM_CARDS_TERMINAL).
+  const travaTerminal = (fase?.uso.cards ?? 0) > 0;
   const [estado, action, pendente] = useActionState(async (prev: EstadoFase, form: FormData) => {
     const r = await acao(prev, form);
     if (r?.ok) onSalvo();
@@ -76,13 +78,27 @@ export function FaseForm({ pipelineId, fase, onSalvo }: { pipelineId: string; fa
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="tipoTerminal">Terminal</Label>
-          <select id="tipoTerminal" name="tipoTerminal" defaultValue={fase?.tipoTerminal ?? ""} className={SELECT_CLASSE}>
+          <select
+            id="tipoTerminal"
+            name={travaTerminal ? undefined : "tipoTerminal"}
+            defaultValue={fase?.tipoTerminal ?? ""}
+            disabled={travaTerminal}
+            aria-describedby={travaTerminal ? "tipoTerminal-dica" : undefined}
+            className={SELECT_CLASSE}
+          >
             {TERMINAIS.map((t) => (
               <option key={t.valor} value={t.valor}>
                 {t.rotulo}
               </option>
             ))}
           </select>
+          {/* Select desabilitado não é enviado: reenvia o tipo atual (= sem mudança). */}
+          {travaTerminal ? <input type="hidden" name="tipoTerminal" value={fase?.tipoTerminal ?? ""} /> : null}
+          {travaTerminal ? (
+            <p id="tipoTerminal-dica" className="text-xs text-fg-faint">
+              Essa fase tem cards. Mova-os antes de mudar se ela é de ganho/perdido.
+            </p>
+          ) : null}
         </div>
       </div>
 

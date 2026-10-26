@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { chaveDeNome, chaveUnica, inserirComChaveUnica, validarCor, validarRemocao, validarReordenacao, validarTerminais } from "./regras";
+import { chaveDeNome, chaveUnica, destinoCompativel, validarMudancaTerminal, inserirComChaveUnica, validarCor, validarRemocao, validarReordenacao, validarTerminais } from "./regras";
 
 describe("inserirComChaveUnica", () => {
   const p2002 = Object.assign(new Error("unique"), { code: "P2002", meta: { target: ["pipeline_id", "chave"] } });
@@ -88,8 +88,8 @@ describe("validarReordenacao", () => {
 });
 
 describe("validarRemocao", () => {
-  const fase = { id: "f1", pipelineId: "p1" };
-  const destino = { id: "f2", pipelineId: "p1", arquivadaEm: null };
+  const fase = { id: "f1", pipelineId: "p1", tipoTerminal: null };
+  const destino = { id: "f2", pipelineId: "p1", arquivadaEm: null, tipoTerminal: null };
 
   it("sem cards e sem histórico → EXCLUIR", () => {
     expect(validarRemocao({ fase, qtdCards: 0, qtdTransicoes: 0, destino: null })).toEqual({ ok: true, acao: "EXCLUIR" });
@@ -112,5 +112,40 @@ describe("validarRemocao", () => {
     expect(validarRemocao({ fase, qtdCards: 1, qtdTransicoes: 0, destino: { ...destino, id: "f1" } })).toEqual({ ok: false, erro: "DESTINO_INVALIDO" });
     expect(validarRemocao({ fase, qtdCards: 1, qtdTransicoes: 0, destino: { ...destino, pipelineId: "p2" } })).toEqual({ ok: false, erro: "DESTINO_INVALIDO" });
     expect(validarRemocao({ fase, qtdCards: 1, qtdTransicoes: 0, destino: { ...destino, arquivadaEm: new Date() } })).toEqual({ ok: false, erro: "DESTINO_INVALIDO" });
+  });
+
+  it("cards não atravessam a fronteira aberta ↔ terminal nem trocam ganho ↔ perdido (o gancho de terminal não roda aqui)", () => {
+    const ganho = { ...destino, tipoTerminal: "GANHO" as const };
+    const perdido = { ...destino, tipoTerminal: "PERDIDO" as const };
+    const incompativel = { ok: false, erro: "DESTINO_TERMINAL_INCOMPATIVEL" };
+    expect(validarRemocao({ fase, qtdCards: 1, qtdTransicoes: 0, destino: ganho })).toEqual(incompativel);
+    expect(validarRemocao({ fase, qtdCards: 1, qtdTransicoes: 0, destino: perdido })).toEqual(incompativel);
+    const faseGanho = { ...fase, tipoTerminal: "GANHO" as const };
+    expect(validarRemocao({ fase: faseGanho, qtdCards: 1, qtdTransicoes: 0, destino })).toEqual(incompativel);
+    expect(validarRemocao({ fase: faseGanho, qtdCards: 1, qtdTransicoes: 0, destino: perdido })).toEqual(incompativel);
+    expect(validarRemocao({ fase: faseGanho, qtdCards: 1, qtdTransicoes: 0, destino: ganho })).toEqual({ ok: true, acao: "ARQUIVAR" });
+    // Sem cards vivos não há migração: o destino nem importa.
+    expect(validarRemocao({ fase: faseGanho, qtdCards: 0, qtdTransicoes: 0, destino: null })).toEqual({ ok: true, acao: "EXCLUIR" });
+  });
+});
+
+describe("destinoCompativel", () => {
+  it("mesmo tipo terminal (ou ambos abertos)", () => {
+    expect(destinoCompativel({ tipoTerminal: null }, { tipoTerminal: null })).toBe(true);
+    expect(destinoCompativel({ tipoTerminal: "GANHO" }, { tipoTerminal: "GANHO" })).toBe(true);
+    expect(destinoCompativel({ tipoTerminal: "PERDIDO" }, { tipoTerminal: "PERDIDO" })).toBe(true);
+    expect(destinoCompativel({ tipoTerminal: null }, { tipoTerminal: "GANHO" })).toBe(false);
+    expect(destinoCompativel({ tipoTerminal: "PERDIDO" }, { tipoTerminal: null })).toBe(false);
+    expect(destinoCompativel({ tipoTerminal: "GANHO" }, { tipoTerminal: "PERDIDO" })).toBe(false);
+  });
+});
+
+describe("validarMudancaTerminal", () => {
+  it("com cards vivos o tipo terminal não muda; sem cards, ou sem mudança, passa", () => {
+    expect(validarMudancaTerminal({ de: null, para: "GANHO", qtdCards: 1 })).toBe("FASE_COM_CARDS_TERMINAL");
+    expect(validarMudancaTerminal({ de: "GANHO", para: null, qtdCards: 3 })).toBe("FASE_COM_CARDS_TERMINAL");
+    expect(validarMudancaTerminal({ de: "GANHO", para: "PERDIDO", qtdCards: 1 })).toBe("FASE_COM_CARDS_TERMINAL");
+    expect(validarMudancaTerminal({ de: "GANHO", para: "GANHO", qtdCards: 1 })).toBeNull();
+    expect(validarMudancaTerminal({ de: null, para: "PERDIDO", qtdCards: 0 })).toBeNull();
   });
 });

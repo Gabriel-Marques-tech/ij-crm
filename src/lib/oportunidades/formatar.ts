@@ -46,3 +46,26 @@ export function formatarValorCampo(campo: CampoEditavel, v: unknown, nomes: Read
       return String(v);
   }
 }
+
+/** Campos que só o movimento para ganho/perdido grava (não são editáveis inline). */
+export const ROTULO_CAMPO_TERMINAL = {
+  valorFechado: "Valor fechado",
+  dataGanho: "Data do ganho",
+  motivoPerda: "Motivo da perda",
+} as const;
+
+export type CampoTerminal = keyof typeof ROTULO_CAMPO_TERMINAL;
+
+export function ehCampoTerminal(c: string): c is CampoTerminal {
+  return Object.hasOwn(ROTULO_CAMPO_TERMINAL, c);
+}
+
+export function formatarCampoTerminal(campo: CampoTerminal, v: unknown): string {
+  if (v === null || v === undefined || v === "") return "—";
+  if (campo === "valorFechado") return formatarDinheiro(String(v));
+  if (campo === "dataGanho") {
+    const d = new Date(String(v));
+    return Number.isNaN(d.getTime()) ? String(v) : formatarDataHora(d);
+  }
+  return String(v);
+}

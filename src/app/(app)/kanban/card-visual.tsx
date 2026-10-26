@@ -3,6 +3,7 @@ import { cn } from "cn";
 import { BORDA_AGING, DiasNaFase } from "@/components/kanban/aging";
 import { Avatar } from "@/components/kanban/avatar";
 import { diasNaFase, estadoProximaAcao, nivelAging } from "@/lib/oportunidades/aging";
+import { ROTULO_ALERTA_VENDA } from "@/lib/oportunidades/terminal-regras";
 import type { CardCliente, FaseCliente } from "./tipos";
 
 /** Card do Kanban (§4.5.1): surface sobre bg, borda; aging só no dot e na borda esquerda. */
@@ -55,6 +56,14 @@ export function CardVisual({
         <DiasNaFase dias={dias} nivel={nivel} />
         {card.revisar ? (
           <span className="rounded-full border border-warn/60 px-1.5 font-mono text-[10px] leading-4 text-fg-soft uppercase">revisar</span>
+        ) : null}
+        {card.alertaVenda ? (
+          <span
+            className="rounded-full border border-danger/60 px-1.5 font-mono text-[10px] leading-4 text-fg-soft uppercase"
+            title="A venda que gerou este projeto saiu do ganho. O projeto não foi mexido: confira se ele continua."
+          >
+            {ROTULO_ALERTA_VENDA[card.alertaVenda]}
+          </span>
         ) : null}
         <span className="flex-1" />
         <Avatar nome={card.responsavelNome} />

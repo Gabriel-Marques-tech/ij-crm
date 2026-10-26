@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { DiasNaFase } from "@/components/kanban/aging";
 import { Avatar } from "@/components/kanban/avatar";
+import { MarcarQuadroAtivo } from "@/components/shell/quadro-ativo";
 import { exigirUsuario } from "@/lib/auth/atual";
 import { listarPipelines } from "@/lib/fases/fases";
 import { diaEmFuso, diasNaFase, estadoProximaAcao, nivelAging } from "@/lib/oportunidades/aging";
@@ -12,7 +13,8 @@ import { listarResponsaveis, nomesDeUsuarios, obterCard } from "@/lib/oportunida
 import { CampoInline, RevisarSwitch } from "./campo-inline";
 import { MoverFase } from "./mover-fase";
 import { NotaForm } from "./nota-form";
-import { Timeline } from "./timeline";
+import { ResultadoTerminal } from "./resultado-terminal";
+import { Timeline, type CardRelacionado } from "./timeline";
 import { Vinculos } from "./vinculos";
 
 export const metadata = { title: "Card" };
@@ -40,6 +42,11 @@ export default async function CardPage({ params }: { params: Promise<{ id: strin
   const nomesFases = new Map(todasFases.map((f) => [f.id, f.nome]));
   const fasesDoQuadro = (pipelines.find((p) => p.id === card.pipelineId)?.fases ?? []).filter((f) => f.arquivadaEm === null || f.id === card.faseId);
 
+  // Venda ↔ projeto (GAB-32): links da Timeline. Soft-deletado fica de fora → "removido".
+  const relacionados = new Map<string, CardRelacionado>(
+    [card.projeto, card.origemOportunidade].flatMap((c) => (c && !c.deletadoEm ? [[c.id, { titulo: c.titulo, quadro: c.pipeline.chave }] as const] : [])),
+  );
+
   const agora = new Date();
   const dias = diasNaFase(card.faseDesde, agora);
   const nivel = nivelAging(dias, card.fase.limiteDiasAlerta);
@@ -54,6 +61,8 @@ export default async function CardPage({ params }: { params: Promise<{ id: strin
 
   return (
     <>
+      {/* Navegação acende Vendas/Projetos pelo quadro do card (sem depender de ?quadro=). */}
+      <MarcarQuadroAtivo quadro={card.pipeline.chave} />
       <Link
         href={`/kanban?quadro=${card.pipeline.chave}`}
         className="mb-4 inline-flex items-center gap-1.5 font-mono text-xs text-fg-mute hover:text-foreground"
@@ -85,6 +94,8 @@ export default async function CardPage({ params }: { params: Promise<{ id: strin
         </div>
       </header>
 
+      <ResultadoTerminal card={card} />
+
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <div className="space-y-6">
           <section className="rounded-xl border border-border bg-surface p-4">
@@ -94,6 +105,8 @@ export default async function CardPage({ params }: { params: Promise<{ id: strin
                 cardId={card.id}
                 titulo={card.titulo}
                 faseAtualId={card.faseId}
+                pipelineChave={card.pipeline.chave}
+                fechamento={{ valorFechado: card.valorFechado?.toFixed(2) ?? null, motivoPerda: card.motivoPerda }}
                 fases={fasesDoQuadro.map((f) => ({
                   id: f.id,
                   chave: f.chave,
@@ -164,7 +177,7 @@ export default async function CardPage({ params }: { params: Promise<{ id: strin
 
         <section className="rounded-xl border border-border bg-surface p-4">
           <h2 className="mb-4 text-sm font-medium">Timeline</h2>
-          <Timeline entradas={card.timeline} fases={nomesFases} nomes={nomes} />
+          <Timeline entradas={card.timeline} fases={nomesFases} nomes={nomes} relacionados={relacionados} />
         </section>
       </div>
     </>

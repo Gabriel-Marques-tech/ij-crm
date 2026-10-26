@@ -23,10 +23,11 @@ import { CSS } from "@dnd-kit/utilities";
 import { ChevronsLeftRight, Plus } from "lucide-react";
 import { cn } from "cn";
 import { MensagemErro } from "@/components/erros/mensagem-erro";
-import { ConfirmarTerminal, type PedidoTerminal } from "@/components/kanban/confirmar-terminal";
+import { DialogoTerminal, type PedidoTerminal } from "@/components/kanban/dialogo-terminal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { FALHA_CONEXAO, executarAcao, falhaDe, type FalhaUI } from "@/lib/erros/cliente";
+import { dialogoTerminal, type DadosTerminal } from "@/lib/oportunidades/terminal-regras";
 import { criarCardAction, moverCardAction, salvarVisualizacaoKanbanAction } from "./actions";
 import { CardVisual } from "./card-visual";
 import { colunasAbertas, proximoAlvo } from "./colunas";
@@ -149,7 +150,7 @@ export function QuadroKanban({ pipelineId, fases, cards: cardsServidor, agoraMs,
     return cards.find((c) => c.id === s)?.faseId ?? null;
   };
 
-  function mover(cardId: string, paraFaseId: string) {
+  function mover(cardId: string, paraFaseId: string, dados?: DadosTerminal) {
     const original = cards.find((c) => c.id === cardId);
     if (!original || original.faseId === paraFaseId) return;
     setErro(null);
@@ -157,7 +158,7 @@ export function QuadroKanban({ pipelineId, fases, cards: cardsServidor, agoraMs,
     // Otimista: vai para o topo da coluna destino, zerando os dias na fase.
     setCards((cs) => [{ ...original, faseId: paraFaseId, faseDesdeMs: Date.now() }, ...cs.filter((c) => c.id !== cardId)]);
     startTransition(async () => {
-      const falha = await executarAcao(() => moverCardAction(cardId, paraFaseId), "mover o card");
+      const falha = await executarAcao(() => moverCardAction(cardId, paraFaseId, dados), "mover o card");
       if (falha) {
         // Reconcilia com o estado ATUAL (outros movimentos podem ter acontecido
         // nesse meio-tempo): desfaz só este movimento, e só se o card ainda está
@@ -173,8 +174,18 @@ export function QuadroKanban({ pipelineId, fases, cards: cardsServidor, agoraMs,
     const card = cards.find((c) => c.id === cardId);
     const destino = faseDe(paraFaseId);
     if (!card || !destino || card.faseId === paraFaseId) return;
-    if (destino.isTerminal) {
-      setPedido({ cardId, faseId: paraFaseId, titulo: card.titulo, faseNome: destino.nome, tipo: destino.tipoTerminal });
+    // Ganho (vendas) pede valor, perdido pede motivo: só move depois do diálogo.
+    // Terminal sem dados (ex.: "Finalizado" em projetos) move direto.
+    const tipo = dialogoTerminal(pipelineChave, destino.tipoTerminal);
+    if (tipo) {
+      setPedido({
+        cardId,
+        faseId: paraFaseId,
+        titulo: card.titulo,
+        faseNome: destino.nome,
+        tipo,
+        inicial: { valorFechado: card.valorFechado, motivoPerda: card.motivoPerda },
+      });
       return;
     }
     mover(cardId, paraFaseId);
@@ -313,11 +324,11 @@ export function QuadroKanban({ pipelineId, fases, cards: cardsServidor, agoraMs,
         </div>
         <DragOverlay>{ativo ? <CardVisual card={ativo} fase={faseDe(ativo.faseId)} agoraMs={agoraMs} arrastando /> : null}</DragOverlay>
       </DndContext>
-      <ConfirmarTerminal
+      <DialogoTerminal
         pedido={pedido}
         onCancelar={() => setPedido(null)}
-        onConfirmar={() => {
-          if (pedido) mover(pedido.cardId, pedido.faseId);
+        onConfirmar={(dados) => {
+          if (pedido) mover(pedido.cardId, pedido.faseId, dados);
           setPedido(null);
         }}
       />
@@ -375,7 +386,7 @@ function Coluna({
             <ChevronsLeftRight />
           </Button>
         ) : null}
-        {/* Terminal não recebe card novo: ganho/perdido só por movimento (gancho GAB-32). */}
+        {/* Terminal não recebe card novo: ganho/perdido só por movimento (passa pelo gancho de terminal). */}
         {!fase.isTerminal ? (
           <Button variant="ghost" size="icon-xs" aria-label={`Novo card em ${fase.nome}`} title="Novo card" onClick={() => setCriando(true)}>
             <Plus />
