@@ -1,11 +1,14 @@
+import { ErroCarregamento } from "@/components/erro-carregamento";
 import { buscarRedefinicao } from "@/lib/auth/redefinicao";
+import { comTratamento, ehInesperado } from "@/lib/erros/registrar";
 import { RedefinirForm } from "./redefinir-form";
 
 export const metadata = { title: "Nova senha", referrer: "no-referrer" as const };
 
 export default async function RedefinirPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
-  const u = await buscarRedefinicao(token);
+  const u = await comTratamento("pagina.redefinir", () => buscarRedefinicao(token));
+  if (ehInesperado(u)) return <ErroCarregamento codigo={u.ref} />;
 
   if (!u) {
     return (

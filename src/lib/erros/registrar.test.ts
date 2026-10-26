@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Prisma } from "@prisma/client";
 import { redirect, notFound } from "next/navigation";
-import { comTratamento, comTratamentoForm, descreverErro, registrarErro } from "./registrar";
+import { comTratamento, comTratamentoForm, descreverErro, ehInesperado, registrarErro } from "./registrar";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -92,5 +92,18 @@ describe("comTratamentoForm", () => {
     expect(ref).toMatch(/^[0-9a-f]{8}$/);
     expect(r.erro).toContain(`ref: ${ref}`);
     expect(r.erro).not.toContain("db caiu");
+  });
+});
+
+describe("ehInesperado (leituras de página envolvidas em comTratamento)", () => {
+  it("distingue o resultado com ref dos dados normais", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const falhou = await comTratamento("pagina.teste", async () => {
+      throw new Error("db caiu");
+    });
+    expect(ehInesperado(falhou)).toBe(true);
+    if (ehInesperado(falhou)) expect(falhou.ref).toMatch(/^[0-9a-f]{8}$/);
+    expect(ehInesperado(await comTratamento("pagina.teste", async () => ({ nome: "x" })))).toBe(false);
+    expect(ehInesperado(await comTratamento("pagina.teste", async () => null))).toBe(false);
   });
 });

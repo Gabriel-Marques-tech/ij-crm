@@ -1,8 +1,10 @@
+import { ErroCarregamento } from "@/components/erro-carregamento";
 import { PageHeader } from "@/components/shell/page-header";
 import { exigirUsuario, idSessaoAtual } from "@/lib/auth/atual";
 import { descreverDispositivo } from "@/lib/auth/dispositivo";
 import { listarSessoes } from "@/lib/auth/sessao";
 import { db } from "@/lib/db";
+import { comTratamento, ehInesperado } from "@/lib/erros/registrar";
 import { paginaInicial } from "@/lib/preferencias/preferencias";
 import { obterPreferencias } from "@/lib/preferencias/servico";
 import { EmailForm, PaginaInicialForm, SenhaForm } from "./conta-forms";
@@ -16,14 +18,18 @@ const ROTULO = { ADMIN: "Admin", GESTOR: "Gestor", VENDEDOR: "Vendedor" } as con
 
 export default async function PerfilPage() {
   const eu = await exigirUsuario();
-  const [u, prefs, sessoes] = await Promise.all([
-    db.usuario.findUniqueOrThrow({
-      where: { id: eu.id },
-      select: { nome: true, email: true, papel: true, telefoneWhatsapp: true, foto: { select: { atualizadoEm: true } } },
-    }),
-    obterPreferencias(eu.id),
-    idSessaoAtual().then((atual) => listarSessoes(eu.id, atual)),
-  ]);
+  const dados = await comTratamento("pagina.perfil", () =>
+    Promise.all([
+      db.usuario.findUniqueOrThrow({
+        where: { id: eu.id },
+        select: { nome: true, email: true, papel: true, telefoneWhatsapp: true, foto: { select: { atualizadoEm: true } } },
+      }),
+      obterPreferencias(eu.id),
+      idSessaoAtual().then((atual) => listarSessoes(eu.id, atual)),
+    ]),
+  );
+  if (ehInesperado(dados)) return <ErroCarregamento codigo={dados.ref} />;
+  const [u, prefs, sessoes] = dados;
   return (
     <>
       <PageHeader

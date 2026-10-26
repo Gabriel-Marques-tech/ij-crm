@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { Avatar } from "@/components/avatar";
+import { ErroCarregamento } from "@/components/erro-carregamento";
 import { PageHeader } from "@/components/shell/page-header";
 import { db } from "@/lib/db";
 import { exigirUsuario } from "@/lib/auth/atual";
+import { comTratamento, ehInesperado } from "@/lib/erros/registrar";
 import { diaEmFuso } from "@/lib/oportunidades/aging";
 import { carregarSemana, resolverVendedor } from "@/lib/semana/semana";
 import { Destaque, Grupo } from "../_semana/itens";
@@ -31,13 +33,18 @@ function saudacao(agora: Date): string {
 export default async function MinhaSemanaPage({ searchParams }: { searchParams: Promise<{ vendedor?: string | string[] }> }) {
   const ator = await exigirUsuario();
   const { vendedor } = await searchParams;
-  const escolha = await resolverVendedor(ator, typeof vendedor === "string" ? vendedor : undefined);
   const agora = new Date();
   const hoje = diaEmFuso(agora);
-  const [s, foto] = await Promise.all([
-    carregarSemana(escolha.alvo.id, agora),
-    db.usuarioFoto.findUnique({ where: { usuarioId: escolha.alvo.id }, select: { atualizadoEm: true } }),
-  ]);
+  const dados = await comTratamento("pagina.semana", async () => {
+    const escolha = await resolverVendedor(ator, typeof vendedor === "string" ? vendedor : undefined);
+    const [s, foto] = await Promise.all([
+      carregarSemana(escolha.alvo.id, agora),
+      db.usuarioFoto.findUnique({ where: { usuarioId: escolha.alvo.id }, select: { atualizadoEm: true } }),
+    ]);
+    return { escolha, s, foto };
+  });
+  if (ehInesperado(dados)) return <ErroCarregamento codigo={dados.ref} />;
+  const { escolha, s, foto } = dados;
   const proprio = escolha.alvo.id === ator.id;
   const primeiroNome = escolha.alvo.nome.split(" ")[0];
   const nada = s.destaque === null && s.sem.length === 0;

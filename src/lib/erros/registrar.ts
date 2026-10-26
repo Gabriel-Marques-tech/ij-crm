@@ -38,6 +38,11 @@ export function registrarErro(contexto: string, e: unknown): string {
 
 export type Inesperado = { ok: false; erro: "INESPERADO"; ref: string };
 
+/** Resultado de `comTratamento` que falhou (para páginas que envolvem leituras e mostram a ref). */
+export function ehInesperado(r: unknown): r is Inesperado {
+  return typeof r === "object" && r !== null && (r as { erro?: unknown }).erro === "INESPERADO" && typeof (r as { ref?: unknown }).ref === "string";
+}
+
 /**
  * Envolve o corpo de uma server action: exceção inesperada vira
  * `{ ok: false, erro: "INESPERADO", ref }` (e log). `redirect`/`notFound`
