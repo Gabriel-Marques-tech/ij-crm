@@ -5,6 +5,7 @@ import { ehCampoEditavel, ROTULO_CAMPO } from "@/lib/oportunidades/campos";
 import { ROTULO_CAMPO_TERMINAL, ehCampoTerminal, formatarCampoTerminal, formatarDataHora, formatarValorCampo } from "@/lib/oportunidades/formatar";
 import type { DetalheCard } from "@/lib/oportunidades/oportunidades";
 import { ehCampoVinculo, ROTULO_VINCULO } from "@/lib/oportunidades/vinculos";
+import { MensagemWhatsapp } from "./mensagem-whatsapp";
 
 type Entrada = DetalheCard["timeline"][number];
 type Payload = Record<string, unknown>;
@@ -175,7 +176,8 @@ export function Timeline({
             <p className="text-sm text-fg-soft">
               <span className="text-foreground">{e.usuario?.nome ?? "Sistema"}</span> <Descricao e={e} fases={fases} nomes={nomes} relacionados={relacionados} />
             </p>
-            {(e.tipo === "NOTA" || e.tipo === "MENSAGEM_WHATSAPP") && typeof p.texto === "string" ? (
+            {e.tipo === "MENSAGEM_WHATSAPP" ? <MensagemWhatsapp payload={p} /> : null}
+            {e.tipo === "NOTA" && typeof p.texto === "string" ? (
               <p className="mt-1 rounded-lg border border-border bg-surface px-3 py-2 text-sm whitespace-pre-wrap text-foreground">{p.texto}</p>
             ) : null}
             <time dateTime={e.em.toISOString()} className="mt-0.5 block font-mono text-[11px] text-fg-faint tabular">
