@@ -1,0 +1,39 @@
+# Reverse proxy de produção (GAB-30). Domínio e email vêm do .env via compose.
+# HTTPS automático: Let's Encrypt para domínio público; para `localhost` o
+# Caddy usa a CA interna dele (teste local, ver runbook §8).
+# Só o app é publicado. A Evolution NÃO tem rota aqui: acesso por túnel SSH (runbook §5).
+{
+	email {$ACME_EMAIL}
+}
+
+(seguranca) {
+	header {
+		# `defer`: aplica depois da resposta do upstream, sobrescrevendo o que vier dele.
+		defer
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Content-Security-Policy "frame-ancestors 'none'"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		-Server
+		-X-Powered-By
+	}
+}
+
+{$APP_DOMAIN} {
+	import seguranca
+	encode zstd gzip
+
+	# Defesa em profundidade, NÃO é controle de acesso: o único portão de
+	# /api/cron/* é o header x-cron-secret validado pelo app (GAB-41). Este filtro
+	# só corta o ruído óbvio de IP público; não é confiável (com docker-proxy, um
+	# cliente externo por IPv6 chega com IP privado da bridge).
+	@cron_externo {
+		path /api/cron/*
+		not remote_ip private_ranges
+	}
+	respond @cron_externo 404
+
+	reverse_proxy app:3000
+}
