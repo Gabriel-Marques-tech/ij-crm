@@ -13,8 +13,11 @@
  *   terminal: o tipo não muda, os dados de fechamento continuam válidos.
  * - `apagarCardDefinitivo` (admin, só o que está na lixeira, confirmação
  *   digitando o título): DELETE de verdade. TransicaoFase/Timeline do card vão
- *   junto (cascade); o vínculo venda ↔ projeto do outro lado vira null (FK
- *   SET NULL) e ganha uma entrada na Timeline dele explicando.
+ *   junto (cascade); o vínculo venda ↔ projeto do outro lado e o
+ *   `reabertaDe` dos cards reabertos a partir dele viram null (FK SET NULL) e
+ *   cada um ganha uma entrada na Timeline explicando. Mensagens enviadas ficam
+ *   (histórico), sem card. Trava os quadros de TODOS os cards envolvidos antes
+ *   da linha, como `excluirCard`/`restaurarCard`.
  */
 import type { Papel, Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
@@ -100,33 +103,66 @@ export async function restaurarCard(id: string, por: Ator, opts: { faseId?: stri
   }
 }
 
+/** Outra transação mudou os vínculos entre a leitura e o lock: tenta de novo. */
+class VinculosMudaram extends Error {}
+
 export async function apagarCardDefinitivo(id: string, por: Ator, confirmacao: string): Promise<ResultadoLixeira> {
   if (!podeApagarDeVez(por.papel)) return { ok: false, erro: "SEM_PERMISSAO" };
-  try {
-    await db.$transaction(async (tx) => {
-      if (!(await travarLinha(tx, id))) throw new Falha({ erro: "CARD_NAO_ENCONTRADO" });
-      const card = await tx.oportunidade.findUniqueOrThrow({
-        where: { id },
-        select: { titulo: true, deletadoEm: true, origemOportunidadeId: true, projeto: { select: { id: true } } },
-      });
-      if (!card.deletadoEm) throw new Falha({ erro: "NAO_ESTA_NA_LIXEIRA" });
-      if (!confirmacaoConfere(confirmacao, card.titulo)) throw new Falha({ erro: "CONFIRMACAO_NAO_CONFERE" });
-      const agora = new Date();
-      // O outro lado do vínculo venda ↔ projeto perde a FK (SET NULL): fica o registro do porquê.
-      if (card.projeto) {
-        await tx.timeline.create({
-          data: { oportunidadeId: card.projeto.id, tipo: "VINCULO_PROJETO", payload: { evento: "venda_apagada", titulo: card.titulo }, usuarioId: por.id, em: agora },
-        });
-      }
-      if (card.origemOportunidadeId) {
-        await tx.timeline.create({
-          data: { oportunidadeId: card.origemOportunidadeId, tipo: "VINCULO_PROJETO", payload: { evento: "projeto_apagado", titulo: card.titulo }, usuarioId: por.id, em: agora },
-        });
-      }
-      await tx.oportunidade.delete({ where: { id } });
-    });
-    return { ok: true };
-  } catch (e) {
-    return traduzir(e);
+  for (let tentativa = 1; ; tentativa++) {
+    try {
+      await db.$transaction((tx) => apagarCardNaTransacao(tx, id, por, confirmacao));
+      return { ok: true };
+    } catch (e) {
+      if (e instanceof VinculosMudaram && tentativa < 3) continue;
+      return traduzir(e);
+    }
   }
+}
+
+const SELECAO_LIGADOS = {
+  pipelineId: true,
+  origemOportunidade: { select: { id: true, pipelineId: true } },
+  projeto: { select: { id: true, pipelineId: true } },
+  reaberturas: { select: { id: true, pipelineId: true } },
+} as const;
+
+async function apagarCardNaTransacao(tx: Tx, id: string, por: Ator, confirmacao: string): Promise<void> {
+  // Ordem documentada: pipelines (todos os quadros envolvidos, por id) → linha.
+  // Escrevemos na Timeline dos cards ligados (venda ↔ projeto, reaberturas) e o
+  // DELETE zera as FKs deles, então os quadros deles entram no lock também.
+  const antes = await tx.oportunidade.findUnique({ where: { id }, select: SELECAO_LIGADOS });
+  if (!antes) throw new Falha({ erro: "CARD_NAO_ENCONTRADO" });
+  const quadros = new Set(pipelinesEnvolvidos(antes));
+  await travarPipelines(tx, quadros);
+  if (!(await travarLinha(tx, id))) throw new Falha({ erro: "CARD_NAO_ENCONTRADO" });
+  const card = await tx.oportunidade.findUniqueOrThrow({ where: { id }, select: { titulo: true, deletadoEm: true, ...SELECAO_LIGADOS } });
+  if (pipelinesEnvolvidos(card).some((p) => !quadros.has(p))) throw new VinculosMudaram();
+  if (!card.deletadoEm) throw new Falha({ erro: "NAO_ESTA_NA_LIXEIRA" });
+  if (!confirmacaoConfere(confirmacao, card.titulo)) throw new Falha({ erro: "CONFIRMACAO_NAO_CONFERE" });
+  const agora = new Date();
+  const nota = (oportunidadeId: string, evento: string) => ({
+    oportunidadeId,
+    tipo: "VINCULO_PROJETO" as const,
+    payload: { evento, titulo: card.titulo },
+    usuarioId: por.id,
+    em: agora,
+  });
+  // Os cards ligados perdem a FK (SET NULL) mas sobrevivem: fica o registro do porquê.
+  const notas = [
+    ...(card.projeto ? [nota(card.projeto.id, "venda_apagada")] : []),
+    ...(card.origemOportunidade ? [nota(card.origemOportunidade.id, "projeto_apagado")] : []),
+    ...card.reaberturas.map((r) => nota(r.id, "origem_reabertura_apagada")),
+  ];
+  if (notas.length > 0) await tx.timeline.createMany({ data: notas });
+  // Cascade: TransicaoFase, Timeline. SET NULL: projeto.origem, reaberturas.reabertaDe, MensagemEnviada.
+  await tx.oportunidade.delete({ where: { id } });
+}
+
+function pipelinesEnvolvidos(c: {
+  pipelineId: string;
+  origemOportunidade: { pipelineId: string } | null;
+  projeto: { pipelineId: string } | null;
+  reaberturas: { pipelineId: string }[];
+}): string[] {
+  return [c.pipelineId, c.origemOportunidade?.pipelineId, c.projeto?.pipelineId, ...c.reaberturas.map((r) => r.pipelineId)].filter((p): p is string => !!p);
 }

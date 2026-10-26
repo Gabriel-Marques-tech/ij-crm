@@ -8,9 +8,12 @@ import { criarEmpresa } from "@/lib/empresas/empresas";
 import { criarCard, moverCard, obterCard } from "@/lib/oportunidades/oportunidades";
 import { listarQuadro } from "@/lib/oportunidades/oportunidades";
 import { listarCardsDoVendedor } from "@/lib/semana/semana";
+import { travarPipelines } from "@/lib/fases/fases";
+import { vincularAoCard } from "@/lib/oportunidades/vinculos";
 import { apagarCardDefinitivo, excluirCard, restaurarCard } from "./cards";
 import { apagarEntidadeDefinitivo, excluirEntidade, restaurarEntidade } from "./entidades";
 import { listarCardsNaLixeira, listarContatosNaLixeira } from "./lixeira";
+import { mensagemLixeira } from "./regras";
 
 const db = dbTeste();
 
@@ -47,7 +50,7 @@ const fase = (p: { fases: { chave: string; id: string }[] }, chave: string) => p
 const tipos = async (id: string) => (await db.timeline.findMany({ where: { oportunidadeId: id }, orderBy: [{ em: "asc" }, { id: "asc" }] })).map((t) => t.tipo);
 
 beforeEach(async () => {
-  await limparBanco(["transicao_fase", "timeline", "oportunidade", "contato_ponto", "contato", "empresa", "fase", "pipeline", "sessao", "usuario"]);
+  await limparBanco(["mensagem_enviada", "transicao_fase", "timeline", "oportunidade", "contato_ponto", "contato", "empresa", "fase", "pipeline", "sessao", "usuario"]);
   invalidarCachePipelines();
 });
 
@@ -166,7 +169,9 @@ describe("lixeira de contatos e empresas", () => {
     const b = await criarEmpresa({ nome: "Acme Ltda" });
     if (!a.ok || !b.ok) throw new Error("setup");
     await db.empresa.update({ where: { id: b.id }, data: { mergedIntoId: a.id } });
-    await excluirEntidade("empresa", a.id, gestor);
+    // Excluir um principal com mesclados é recusado (review #12); simula dado legado já na lixeira.
+    expect(await excluirEntidade("empresa", a.id, gestor)).toMatchObject({ ok: false, erro: "EMPRESA_TEM_MESCLADOS" });
+    await db.empresa.update({ where: { id: a.id }, data: { deletadoEm: new Date() } });
     expect(await criarEmpresa({ nome: "X", cnpj: "11222333000181" })).toMatchObject({ ok: false, erro: "CNPJ_DUPLICADO" });
     expect(await apagarEntidadeDefinitivo("empresa", a.id, admin, "Acme")).toEqual({ ok: true, cardsAfetados: 0, mescladosParaLixeira: 1 });
     const bb = await db.empresa.findUniqueOrThrow({ where: { id: b.id } });
@@ -183,5 +188,114 @@ describe("lixeira de contatos e empresas", () => {
     expect(await adicionarPonto(c.id, "11 98888-7777")).toMatchObject({ ok: false, erro: "CONTATO_NAO_ENCONTRADO" });
     await restaurarEntidade("contato", c.id, gestor);
     expect(await adicionarPonto(c.id, "ana@acme.com")).toMatchObject({ ok: true, jaExistia: true });
+  });
+});
+
+describe("review do PR #12", () => {
+  it("excluir contato/empresa que recebeu merges é recusado, com contagem; depois de desfazer, exclui", async () => {
+    const { gestor } = await semear();
+    const ana = await criarContato({ nome: "Ana", pontos: ["ana@acme.com"] });
+    const dup = await criarContato({ nome: "Ana S.", pontos: ["ana.s@acme.com"] });
+    const acme = await criarEmpresa({ nome: "Acme" });
+    const e1 = await criarEmpresa({ nome: "Acme Ltda" });
+    const e2 = await criarEmpresa({ nome: "ACME SA" });
+    if (!ana.ok || !dup.ok || !acme.ok || !e1.ok || !e2.ok) throw new Error("setup");
+    await db.contato.update({ where: { id: dup.id }, data: { mergedIntoId: ana.id } });
+    await db.empresa.updateMany({ where: { id: { in: [e1.id, e2.id] } }, data: { mergedIntoId: acme.id } });
+
+    const rc = await excluirEntidade("contato", ana.id, gestor);
+    expect(rc).toEqual({ ok: false, erro: "CONTATO_TEM_MESCLADOS", mesclados: 1 });
+    const re = await excluirEntidade("empresa", acme.id, gestor);
+    expect(re).toEqual({ ok: false, erro: "EMPRESA_TEM_MESCLADOS", mesclados: 2 });
+    if (re.ok || rc.ok) throw new Error("tipo");
+    expect(mensagemLixeira(re)).toBe("Esta empresa tem 2 registros mesclados nela. Desfaça os merges antes de excluir.");
+    expect(mensagemLixeira(rc)).toBe("Este contato tem 1 registro mesclado nele. Desfaça os merges antes de excluir.");
+    expect((await db.contato.findUniqueOrThrow({ where: { id: ana.id } })).deletadoEm).toBeNull();
+    expect((await db.empresa.findUniqueOrThrow({ where: { id: acme.id } })).deletadoEm).toBeNull();
+
+    await db.contato.update({ where: { id: dup.id }, data: { mergedIntoId: null } });
+    expect(await excluirEntidade("contato", ana.id, gestor)).toEqual({ ok: true });
+  });
+
+  it("apagar card de vez espera o lock do quadro do card ligado (pipeline → linha)", async () => {
+    const { vendas, projetos, vend, admin, cardId } = await semear();
+    await moverCard(cardId, fase(vendas, "contrato_assinado").id, vend, { dadosTerminal: {} });
+    await excluirCard(cardId, vend);
+
+    let soltar!: () => void;
+    const solto = new Promise<void>((r) => (soltar = r));
+    let travou!: () => void;
+    const travado = new Promise<void>((r) => (travou = r));
+    const segurando = db.$transaction(
+      async (tx) => {
+        await travarPipelines(tx, [projetos.id]);
+        travou();
+        await solto;
+      },
+      { timeout: 20_000 },
+    );
+    await travado;
+    let terminou = false;
+    const apagando = apagarCardDefinitivo(cardId, admin, "Site da padaria").then((r) => ((terminou = true), r));
+    try {
+      await new Promise((r) => setTimeout(r, 400));
+      expect(terminou).toBe(false);
+    } finally {
+      soltar();
+      await segurando;
+    }
+    expect(await apagando).toEqual({ ok: true });
+  });
+
+  it("apagar card de vez em paralelo com troca de vínculo no card ligado: os dois terminam", async () => {
+    const { vendas, vend, admin } = await semear();
+    const empresas = await Promise.all(["E0", "E1", "E2", "E3", "E4"].map((nome) => criarEmpresa({ nome })));
+    for (let i = 0; i < 5; i++) {
+      const c = await criarCard({ pipelineId: vendas.id, faseId: fase(vendas, "proposta").id, titulo: `Venda ${i}` }, vend);
+      if (!c.ok) throw new Error(c.erro);
+      await moverCard(c.id, fase(vendas, "contrato_assinado").id, vend, { dadosTerminal: {} });
+      const projeto = await db.oportunidade.findFirstOrThrow({ where: { origemOportunidadeId: c.id } });
+      await excluirCard(projeto.id, vend);
+      const e = empresas[i];
+      if (!e.ok) throw new Error("setup");
+      const [apagado, vinculado] = await Promise.all([
+        apagarCardDefinitivo(projeto.id, admin, projeto.titulo),
+        vincularAoCard(c.id, "empresa", e.id, vend),
+      ]);
+      expect(apagado).toEqual({ ok: true });
+      expect(vinculado).toEqual({ ok: true, mudou: true });
+    }
+  });
+
+  it("card reaberto a partir do apagado sobrevive, perde o ponteiro e ganha nota; mensagens enviadas ficam", async () => {
+    const { vendas, vend, admin, cardId } = await semear();
+    const r = await criarCard({ pipelineId: vendas.id, faseId: fase(vendas, "primeiro_contato").id, titulo: "Site da padaria (reaberto)" }, vend);
+    if (!r.ok) throw new Error(r.erro);
+    await db.oportunidade.update({ where: { id: r.id }, data: { reabertaDeId: cardId } });
+    await db.mensagemEnviada.create({ data: { eventoId: "ev-1", oportunidadeId: cardId, grupoJid: "g@g.us", texto: "oi" } });
+    await excluirCard(cardId, vend);
+    const [lix] = await listarCardsNaLixeira();
+    expect(lix).toMatchObject({ id: cardId, mensagensEnviadas: 1, reaberturas: 1 });
+
+    expect(await apagarCardDefinitivo(cardId, admin, "Site da padaria")).toEqual({ ok: true });
+    expect((await db.oportunidade.findUniqueOrThrow({ where: { id: r.id } })).reabertaDeId).toBeNull();
+    const nota = await db.timeline.findFirstOrThrow({ where: { oportunidadeId: r.id, tipo: "VINCULO_PROJETO" } });
+    expect(nota.payload).toEqual({ evento: "origem_reabertura_apagada", titulo: "Site da padaria" });
+    expect(nota.usuarioId).toBe(admin.id);
+    expect((await db.mensagemEnviada.findUniqueOrThrow({ where: { eventoId: "ev-1" } })).oportunidadeId).toBeNull();
+  });
+
+  it("Kanban e Minha Semana: principal excluído não empresta o nome; mesclado mostra o próprio", async () => {
+    const { vend, cardId } = await semear();
+    const acme = await criarEmpresa({ nome: "Acme" });
+    const dup = await criarEmpresa({ nome: "Acme Ltda" });
+    if (!acme.ok || !dup.ok) throw new Error("setup");
+    await db.empresa.update({ where: { id: dup.id }, data: { mergedIntoId: acme.id } });
+    await db.oportunidade.update({ where: { id: cardId }, data: { empresaId: dup.id } });
+    const nomes = async () => [(await listarQuadro("vendas"))!.cards[0].empresa?.nome, (await listarCardsDoVendedor(vend.id))[0].empresa?.nome];
+
+    expect(await nomes()).toEqual(["Acme", "Acme"]);
+    await db.empresa.update({ where: { id: acme.id }, data: { deletadoEm: new Date() } });
+    expect(await nomes()).toEqual(["Acme Ltda", "Acme Ltda"]);
   });
 });

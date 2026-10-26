@@ -39,6 +39,13 @@ function Quando({ em, por }: { em: Date; por?: string | null }) {
   );
 }
 
+function descricaoApagarCard(c: { mensagensEnviadas: number; reaberturas: number }): string {
+  const partes = ["O card, a Timeline e o histórico de fases somem para sempre. O card ligado (venda ↔ projeto) perde o vínculo e ganha uma nota."];
+  if (c.reaberturas > 0) partes.push(`${c.reaberturas === 1 ? "1 card reaberto" : `${c.reaberturas} cards reabertos`} a partir dele perde a origem (com nota).`);
+  if (c.mensagensEnviadas > 0) partes.push(`${c.mensagensEnviadas === 1 ? "1 mensagem enviada fica" : `${c.mensagensEnviadas} mensagens enviadas ficam`} no histórico, sem card.`);
+  return partes.join(" ");
+}
+
 const AVISO_APAGAR = "Apaga de verdade, sem volta. Telefones, emails e CNPJ ficam livres para reuso.";
 
 export default async function LixeiraPage({ searchParams }: { searchParams: Promise<{ aba?: string; q?: string }> }) {
@@ -62,7 +69,7 @@ export default async function LixeiraPage({ searchParams }: { searchParams: Prom
                 rotulo="Apagar de vez"
                 variante="destructive"
                 titulo="Apagar o card definitivamente?"
-                descricao="O card, a Timeline e o histórico de fases somem para sempre. O card ligado (venda ↔ projeto) perde o vínculo e ganha uma nota."
+                descricao={descricaoApagarCard(c)}
                 digitar={c.titulo}
                 confirmar="Apagar de vez"
                 rotuloAcao="apagar o card"

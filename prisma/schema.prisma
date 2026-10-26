@@ -259,7 +259,8 @@ model Oportunidade {
   responsavel           Usuario    @relation("responsavel", fields: [responsavelId], references: [id])
   origemOportunidade    Oportunidade?  @relation("projetoDeVenda", fields: [origemOportunidadeId], references: [id])
   projeto               Oportunidade?  @relation("projetoDeVenda")
-  reabertaDe            Oportunidade?  @relation("reabertura", fields: [reabertaDeId], references: [id])
+  // SET NULL explícito: card reaberto é histórico e sobrevive à deleção definitiva da origem (GAB-36).
+  reabertaDe            Oportunidade?  @relation("reabertura", fields: [reabertaDeId], references: [id], onDelete: SetNull)
   reaberturas           Oportunidade[] @relation("reabertura")
   transicoes            TransicaoFase[]
   timeline              Timeline[]
@@ -358,7 +359,8 @@ model MensagemEnviada {
   texto          String
   em             DateTime     @default(now())
 
-  oportunidade   Oportunidade? @relation(fields: [oportunidadeId], references: [id])
+  // SET NULL explícito: mensagem enviada é histórico e sobrevive à deleção definitiva do card (GAB-36).
+  oportunidade   Oportunidade? @relation(fields: [oportunidadeId], references: [id], onDelete: SetNull)
 
   @@index([oportunidadeId])
   @@map("mensagem_enviada")

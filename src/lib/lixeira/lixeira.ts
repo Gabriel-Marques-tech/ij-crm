@@ -20,6 +20,9 @@ export type CardNaLixeira = {
   pipeline: { chave: string; nome: string };
   fase: { id: string; nome: string; arquivada: boolean };
   empresa: string | null;
+  /** Ficam sem card ao apagar de vez (FK SET NULL): para avisar na confirmação. */
+  mensagensEnviadas: number;
+  reaberturas: number;
   /** Fase original arquivada: fases ativas do mesmo quadro e tipo para escolher. Vazio = volta para a original. */
   opcoesFase: { id: string; nome: string }[];
 };
@@ -38,6 +41,7 @@ export async function listarCardsNaLixeira(busca?: string): Promise<CardNaLixeir
       fase: { select: { id: true, nome: true, arquivadaEm: true, tipoTerminal: true, pipelineId: true } },
       empresa: { select: { nome: true } },
       timeline: { where: { tipo: "EXCLUSAO" }, orderBy: [{ em: "desc" }, { id: "desc" }], take: 1, select: { usuario: { select: { nome: true } } } },
+      _count: { select: { mensagensEnviadas: true, reaberturas: true } },
     },
   });
   const ativas = cards.some((c) => c.fase.arquivadaEm) ? (await listarPipelines()).flatMap((p) => p.fases) : [];
@@ -49,6 +53,8 @@ export async function listarCardsNaLixeira(busca?: string): Promise<CardNaLixeir
     pipeline: c.pipeline,
     fase: { id: c.fase.id, nome: c.fase.nome, arquivada: c.fase.arquivadaEm !== null },
     empresa: c.empresa?.nome ?? null,
+    mensagensEnviadas: c._count.mensagensEnviadas,
+    reaberturas: c._count.reaberturas,
     opcoesFase: c.fase.arquivadaEm
       ? ativas.filter((f) => f.pipelineId === c.fase.pipelineId && destinoCompativel(c.fase, f)).map((f) => ({ id: f.id, nome: f.nome }))
       : [],

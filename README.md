@@ -147,11 +147,15 @@ some do Kanban, da Tabela, da Minha Semana e das Empresas/Contatos. **Gestão �
 action e serviço recusam vendedor) lista cards, contatos e empresas excluídos, com busca, e
 restaura: o card volta para a mesma fase; se ela foi arquivada nesse meio-tempo, é preciso
 escolher uma fase ativa do mesmo tipo (aberta/ganho/perdido), gravada como movimento. Contatos e
-empresas são excluídos por gestor+ no próprio detalhe. Na lixeira, telefone/email/CNPJ **seguem
+empresas são excluídos por gestor+ no próprio detalhe (recusado se outros registros estão
+mesclados nele: desfaça os merges antes). Na lixeira, telefone/email/CNPJ **seguem
 bloqueados** (unique global; match devolve `BLOQUEADO_EXCLUIDO`). **Apagar de vez** é só admin,
 só para o que já está na lixeira, digitando o título/nome: libera os identificadores, leva a
 Timeline/histórico do card (cascade), deixa cards sem empresa/contato (FK `SET NULL`, com nota na
-Timeline) e manda para a lixeira o que estava mesclado no registro apagado.
+Timeline) e manda para a lixeira o que estava mesclado no registro apagado (só dado legado). Card
+apagado: o card ligado (venda ↔ projeto) e os cards reabertos a partir dele sobrevivem sem o
+ponteiro (`SET NULL` explícito no schema), com nota; mensagens enviadas ficam, sem card. Trava os
+quadros de todos os cards envolvidos (`travarPipelines`) antes da linha.
 
 Merge (gestor+, nunca automático) fica na seção "Duplicados" do detalhe de contato/empresa:
 escolhe o outro registro e qual fica como principal, vê a prévia (quantos pontos/contatos/

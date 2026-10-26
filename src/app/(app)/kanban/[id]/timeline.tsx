@@ -81,8 +81,8 @@ function Descricao({
           </>
         );
       }
-      if (p.evento === "venda_apagada" || p.evento === "projeto_apagado") {
-        const quem = p.evento === "venda_apagada" ? "a venda de origem" : "o card de projeto";
+      if (p.evento === "venda_apagada" || p.evento === "projeto_apagado" || p.evento === "origem_reabertura_apagada") {
+        const quem = p.evento === "venda_apagada" ? "a venda de origem" : p.evento === "projeto_apagado" ? "o card de projeto" : "o card de origem (do qual este foi reaberto)";
         return (
           <>
             apagou definitivamente {quem}
