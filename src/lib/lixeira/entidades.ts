@@ -2,7 +2,7 @@
  * Lixeira de Contatos e Empresas (GAB-36). Mesmo contrato para os dois.
  *
  * - Excluir/restaurar: gestor+. Excluir só registro vivo (nem excluído nem
- *   mesclado). Enquanto está na lixeira, telefone/email/CNPJ continuam
+ *   mesclado) e que não recebeu merges (desfaça-os antes). Enquanto está na lixeira, telefone/email/CNPJ continuam
  *   BLOQUEADOS (unique global; `match.ts` devolve `BLOQUEADO_EXCLUIDO`): pode
  *   ser restaurado a qualquer momento, com tudo de volta.
  * - Apagar de vez: admin, só o que está na lixeira, confirmação digitando o
@@ -11,7 +11,8 @@
  *   SET NULL), cada um com uma Timeline `CAMPO_ALTERADO` explicando. Contatos
  *   da empresa ficam sem empresa. Quem estava mesclado NELE vai para a lixeira
  *   (ponteiro limpo): era a mesma pessoa/empresa, então segue a intenção de
- *   apagar — mas nada se perde sem uma segunda decisão.
+ *   apagar — mas nada se perde sem uma segunda decisão. (Hoje só acontece com
+ *   dado legado: `excluirEntidade` recusa principal com mesclados.)
  */
 import { Prisma, type Papel } from "@prisma/client";
 import { db } from "@/lib/db";
@@ -23,10 +24,12 @@ type Ator = { id: string; papel: Papel };
 export type TipoEntidade = "contato" | "empresa";
 
 const NAO_ENCONTRADO: Record<TipoEntidade, ErroLixeira> = { contato: "CONTATO_NAO_ENCONTRADO", empresa: "EMPRESA_NAO_ENCONTRADA" };
-const VIVO = { deletadoEm: null, mergedIntoId: null } as const;
 
 class Falha extends Error {
-  constructor(readonly erro: ErroLixeira) {
+  constructor(
+    readonly erro: ErroLixeira,
+    readonly mesclados?: number,
+  ) {
     super(erro);
   }
 }
@@ -36,16 +39,35 @@ function tabela(tx: Tx, tipo: TipoEntidade) {
   return (tipo === "contato" ? tx.contato : tx.empresa) as unknown as Prisma.ContatoDelegate;
 }
 
-async function travar(tx: Tx, tipo: TipoEntidade, id: string): Promise<{ nome: string; deletadoEm: Date | null } | null> {
+async function travar(tx: Tx, tipo: TipoEntidade, id: string): Promise<{ nome: string; deletadoEm: Date | null; mergedIntoId: string | null } | null> {
   const nomeTabela = Prisma.raw(tipo === "contato" ? "contato" : "empresa");
-  const r = await tx.$queryRaw<{ nome: string; deletado_em: Date | null }[]>`SELECT nome, deletado_em FROM ${nomeTabela} WHERE id = ${id} FOR UPDATE`;
-  return r[0] ? { nome: r[0].nome, deletadoEm: r[0].deletado_em } : null;
+  const r = await tx.$queryRaw<{ nome: string; deletado_em: Date | null; merged_into_id: string | null }[]>`SELECT nome, deletado_em, merged_into_id FROM ${nomeTabela} WHERE id = ${id} FOR UPDATE`;
+  return r[0] ? { nome: r[0].nome, deletadoEm: r[0].deletado_em, mergedIntoId: r[0].merged_into_id } : null;
 }
 
+const TEM_MESCLADOS: Record<TipoEntidade, ErroLixeira> = { contato: "CONTATO_TEM_MESCLADOS", empresa: "EMPRESA_TEM_MESCLADOS" };
+
+/**
+ * Recusa quem recebeu merges: os mesclados não são vivos nem estão na lixeira,
+ * então sumiriam de todas as telas (link deles redireciona para um principal
+ * excluído → 404). A trava da linha serializa com `mesclar` (que trava as duas
+ * linhas antes de validar): ninguém mescla nele no meio da exclusão.
+ */
 export async function excluirEntidade(tipo: TipoEntidade, id: string, por: Ator): Promise<ResultadoLixeira> {
   if (!podeExcluirEntidade(por.papel)) return { ok: false, erro: "SEM_PERMISSAO" };
-  const r = await tabela(db, tipo).updateMany({ where: { id, ...VIVO }, data: { deletadoEm: new Date() } });
-  return r.count === 1 ? { ok: true } : { ok: false, erro: NAO_ENCONTRADO[tipo] };
+  try {
+    await db.$transaction(async (tx) => {
+      const alvo = await travar(tx, tipo, id);
+      if (!alvo || alvo.deletadoEm || alvo.mergedIntoId) throw new Falha(NAO_ENCONTRADO[tipo]);
+      const mesclados = await tabela(tx, tipo).count({ where: { mergedIntoId: id } });
+      if (mesclados > 0) throw new Falha(TEM_MESCLADOS[tipo], mesclados);
+      await tabela(tx, tipo).update({ where: { id }, data: { deletadoEm: new Date() } });
+    });
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof Falha) return { ok: false, erro: e.erro, ...(e.mesclados !== undefined ? { mesclados: e.mesclados } : {}) };
+    throw e;
+  }
 }
 
 export async function restaurarEntidade(tipo: TipoEntidade, id: string, por: Ator): Promise<ResultadoLixeira> {

@@ -48,4 +48,8 @@ describe("mensagemLixeira", () => {
     expect(mensagemLixeira({ erro: "SEM_PERMISSAO" })).toMatch(/permissão/);
     expect(mensagemLixeira({ erro: "PERDEDOR_TEM_MESCLADOS" })).toMatch(/desfaça/i);
   });
+  it("principal com mesclados: cita a contagem, no singular e no plural", () => {
+    expect(mensagemLixeira({ erro: "EMPRESA_TEM_MESCLADOS", mesclados: 3 })).toBe("Esta empresa tem 3 registros mesclados nela. Desfaça os merges antes de excluir.");
+    expect(mensagemLixeira({ erro: "CONTATO_TEM_MESCLADOS", mesclados: 1 })).toBe("Este contato tem 1 registro mesclado nele. Desfaça os merges antes de excluir.");
+  });
 });

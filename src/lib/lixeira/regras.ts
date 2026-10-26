@@ -15,11 +15,13 @@ export type ErroLixeira =
   | "FASE_INVALIDA"
   | "FASE_INCOMPATIVEL"
   | "CONFIRMACAO_NAO_CONFERE"
+  | "CONTATO_TEM_MESCLADOS"
+  | "EMPRESA_TEM_MESCLADOS"
   | ErroMerge;
 
 export type ErroMerge = "MESMO_REGISTRO" | "PRINCIPAL_INVALIDO" | "PERDEDOR_INVALIDO" | "PERDEDOR_TEM_MESCLADOS" | "NAO_MESCLADO";
 
-export type FalhaLixeira = { erro: ErroLixeira; fase?: { id: string; nome: string } };
+export type FalhaLixeira = { erro: ErroLixeira; fase?: { id: string; nome: string }; mesclados?: number };
 
 /** Soft-delete de card: qualquer usuário. Restaurar (cards, contatos, empresas) e excluir contato/empresa: gestor+. */
 export const podeRestaurar = (papel: Papel) => temPapelMinimo(papel, "GESTOR");
@@ -72,6 +74,13 @@ export function mensagemLixeira(f: FalhaLixeira): string {
       return "A fase escolhida precisa ser do mesmo tipo da original (aberta, ganho ou perdido).";
     case "CONFIRMACAO_NAO_CONFERE":
       return "O texto digitado não confere com o título. Nada foi apagado.";
+    case "CONTATO_TEM_MESCLADOS":
+    case "EMPRESA_TEM_MESCLADOS": {
+      const n = f.mesclados ?? 0;
+      const registros = n === 1 ? "1 registro mesclado" : `${n} registros mesclados`;
+      const alvo = f.erro === "EMPRESA_TEM_MESCLADOS" ? `Esta empresa tem ${registros} nela` : `Este contato tem ${registros} nele`;
+      return `${alvo}. Desfaça os merges antes de excluir.`;
+    }
     case "MESMO_REGISTRO":
       return "Escolha dois registros diferentes.";
     case "PRINCIPAL_INVALIDO":
