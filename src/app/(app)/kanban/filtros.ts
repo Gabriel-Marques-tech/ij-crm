@@ -8,8 +8,9 @@
  *   quadro inteiro cabe na memória).
  */
 import type { Origem } from "@prisma/client";
-import { diaEmFuso, diasNaFase, estadoProximaAcao, nivelAging, type NivelAging } from "@/lib/oportunidades/aging";
+import { diasNaFase, nivelAging, type NivelAging } from "@/lib/oportunidades/aging";
 import { ROTULO_ORIGEM, UFS } from "@/lib/oportunidades/campos";
+import { faixaProximaAcao } from "@/lib/oportunidades/proxima-acao";
 import type { CardCliente, FaseCliente } from "./tipos";
 
 /** `semana` = próximos 7 dias civis, sem contar hoje (hoje tem opção própria). */
@@ -48,7 +49,6 @@ export const OPCOES_ORIGEM: { valor: FiltroOrigem; rotulo: string }[] = [
 ];
 
 const MAX_BUSCA = 100;
-const DIA_MS = 24 * 60 * 60 * 1000;
 
 type LeitorParams = { get(chave: string): string | null };
 
@@ -107,12 +107,9 @@ export function normalizarBusca(s: string): string {
   return s.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase().replace(/\s+/g, " ").trim();
 }
 
-function categoriaAcao(card: CardCliente, agora: Date, limiteSemana: string): FiltroAcao | "depois" {
-  if (card.proximaAcaoEmMs === null) return "sem";
-  const quando = new Date(card.proximaAcaoEmMs);
-  const estado = estadoProximaAcao(quando, agora);
-  if (estado === "vencida" || estado === "hoje") return estado;
-  return diaEmFuso(quando) <= limiteSemana ? "semana" : "depois";
+/** Mesma faixa da Minha Semana (`faixaProximaAcao`): as duas telas concordam. */
+function categoriaAcao(card: CardCliente, agora: Date): FiltroAcao | "depois" {
+  return faixaProximaAcao(card.proximaAcaoEmMs === null ? null : new Date(card.proximaAcaoEmMs), agora);
 }
 
 export type ContextoFiltro = {
@@ -125,7 +122,6 @@ export type ContextoFiltro = {
 export function filtrarCards(cards: CardCliente[], f: Filtros, ctx: ContextoFiltro): CardCliente[] {
   if (contarAtivos(f) === 0) return cards;
   const agora = new Date(ctx.agoraMs);
-  const limiteSemana = diaEmFuso(new Date(ctx.agoraMs + 7 * DIA_MS));
   const limites = new Map(ctx.fases.map((x) => [x.id, x.limiteDiasAlerta]));
   const busca = normalizarBusca(f.q);
 
@@ -134,7 +130,7 @@ export function filtrarCards(cards: CardCliente[], f: Filtros, ctx: ContextoFilt
     if (f.resp.length && !f.resp.includes(c.responsavelId)) return false;
     if (busca && !normalizarBusca(`${c.titulo} ${c.empresaNome ?? ""}`).includes(busca)) return false;
     if (f.revisar && c.revisar !== (f.revisar === "sim")) return false;
-    if (f.acao.length && !(f.acao as string[]).includes(categoriaAcao(c, agora, limiteSemana))) return false;
+    if (f.acao.length && !(f.acao as string[]).includes(categoriaAcao(c, agora))) return false;
     if (f.aging.length) {
       const dias = diasNaFase(new Date(Math.min(c.faseDesdeMs, ctx.agoraMs)), agora);
       if (!f.aging.includes(nivelAging(dias, limites.get(c.faseId) ?? null))) return false;
