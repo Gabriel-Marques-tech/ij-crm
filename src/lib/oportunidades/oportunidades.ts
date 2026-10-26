@@ -19,6 +19,9 @@ import { listarPipelines, travarPipelines } from "@/lib/fases/fases";
 import { diaEmFuso } from "./aging";
 import { validarTitulo, type CampoEditavel, type ValorCampo } from "./campos";
 import { ErroDeRegra, type ErroOportunidade } from "./erros";
+
+// Reexport: `feita.ts` (Minha Semana) importa daqui.
+export { ErroDeRegra };
 import { aoEntrarEmTerminal, aoSairDeTerminal, ehConflitoDeProjetoDaVenda, pipelinesExtrasDoTerminal } from "./terminal";
 import type { DadosTerminal } from "./terminal-regras";
 
@@ -280,60 +283,68 @@ export async function editarCard(id: string, patch: PatchCard, por: Ator): Promi
   if ("titulo" in patch && (typeof patch.titulo !== "string" || !validarTitulo(patch.titulo))) {
     return { ok: false, erro: "TITULO_INVALIDO" };
   }
-  const campos = Object.keys(patch) as CampoEditavel[];
   try {
-    const alterados = await db.$transaction(async (tx) => {
-      const travado = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM oportunidade WHERE id = ${id} AND deletado_em IS NULL FOR UPDATE`;
-      if (travado.length === 0) throw new ErroDeRegra("CARD_NAO_ENCONTRADO");
-      const atual = await tx.oportunidade.findUniqueOrThrow({ where: { id } });
-
-      const mudancas: { campo: CampoEditavel; antes: string | boolean | null; depois: string | boolean | null }[] = [];
-      for (const campo of campos) {
-        const antes = serializar(campo, atual[campo]);
-        const depois = serializar(campo, patch[campo]);
-        if (antes !== depois) mudancas.push({ campo, antes, depois });
-      }
-      if (mudancas.length === 0) return [];
-
-      const data: Prisma.OportunidadeUncheckedUpdateInput = {};
-      for (const { campo } of mudancas) {
-        const v = patch[campo] ?? null;
-        if (campo === "responsavelId") {
-          const u = await tx.usuario.findUnique({ where: { id: String(v) }, select: { ativo: true } });
-          if (!u?.ativo) throw new ErroDeRegra("RESPONSAVEL_INVALIDO");
-          data.responsavelId = String(v);
-        } else if (campo === "titulo") {
-          data.titulo = validarTitulo(String(v))!;
-        } else if (campo === "revisar") {
-          data.revisar = v === true;
-        } else if (campo === "origem") {
-          data.origem = v as Origem | null;
-        } else if (campo === "proximaAcaoEm") {
-          data.proximaAcaoEm = v as Date | null;
-        } else {
-          (data as Record<string, unknown>)[campo] = v;
-        }
-      }
-      await tx.oportunidade.update({ where: { id }, data });
-
-      // `em` estritamente crescente: a Timeline ordena por `em` e as entradas
-      // de um mesmo patch precisam manter a ordem.
-      const base = Date.now();
-      await tx.timeline.createMany({
-        data: mudancas.map((m, i) => ({
-          oportunidadeId: id,
-          tipo: "CAMPO_ALTERADO" as TipoTimeline,
-          payload: m,
-          usuarioId: por.id,
-          em: new Date(base + i),
-        })),
-      });
-      return mudancas.map((m) => m.campo);
-    });
+    const alterados = await db.$transaction((tx) => aplicarPatch(tx, id, patch, por));
     return { ok: true, alterados };
   } catch (e) {
     return traduzir(e);
   }
+}
+
+/**
+ * Corpo de `editarCard` dentro de uma transação já aberta (ex.: "marcar
+ * feita" da Minha Semana grava a NOTA e o patch juntos). Lança `ErroDeRegra`;
+ * o chamador traduz com `traduzir`. `aPartirDe` = `em` da 1ª Timeline (as
+ * seguintes somam 1 ms cada), para ordenar depois de algo já gravado na tx.
+ */
+export async function aplicarPatch(tx: Tx, id: string, patch: PatchCard, por: Ator, aPartirDe?: number): Promise<CampoEditavel[]> {
+  const campos = Object.keys(patch) as CampoEditavel[];
+  const travado = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM oportunidade WHERE id = ${id} AND deletado_em IS NULL FOR UPDATE`;
+  if (travado.length === 0) throw new ErroDeRegra("CARD_NAO_ENCONTRADO");
+  const atual = await tx.oportunidade.findUniqueOrThrow({ where: { id } });
+
+  const mudancas: { campo: CampoEditavel; antes: string | boolean | null; depois: string | boolean | null }[] = [];
+  for (const campo of campos) {
+    const antes = serializar(campo, atual[campo]);
+    const depois = serializar(campo, patch[campo]);
+    if (antes !== depois) mudancas.push({ campo, antes, depois });
+  }
+  if (mudancas.length === 0) return [];
+
+  const data: Prisma.OportunidadeUncheckedUpdateInput = {};
+  for (const { campo } of mudancas) {
+    const v = patch[campo] ?? null;
+    if (campo === "responsavelId") {
+      const u = await tx.usuario.findUnique({ where: { id: String(v) }, select: { ativo: true } });
+      if (!u?.ativo) throw new ErroDeRegra("RESPONSAVEL_INVALIDO");
+      data.responsavelId = String(v);
+    } else if (campo === "titulo") {
+      data.titulo = validarTitulo(String(v))!;
+    } else if (campo === "revisar") {
+      data.revisar = v === true;
+    } else if (campo === "origem") {
+      data.origem = v as Origem | null;
+    } else if (campo === "proximaAcaoEm") {
+      data.proximaAcaoEm = v as Date | null;
+    } else {
+      (data as Record<string, unknown>)[campo] = v;
+    }
+  }
+  await tx.oportunidade.update({ where: { id }, data });
+
+  // `em` estritamente crescente: a Timeline ordena por `em` e as entradas
+  // de um mesmo patch precisam manter a ordem.
+  const base = aPartirDe ?? Date.now();
+  await tx.timeline.createMany({
+    data: mudancas.map((m, i) => ({
+      oportunidadeId: id,
+      tipo: "CAMPO_ALTERADO" as TipoTimeline,
+      payload: m,
+      usuarioId: por.id,
+      em: new Date(base + i),
+    })),
+  });
+  return mudancas.map((m) => m.campo);
 }
 
 export const NOTA_MAX = 5000;

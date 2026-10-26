@@ -3,10 +3,21 @@
 node_modules
 .next
 coverage
+.vitest
+.claude
+.code-review-graph
+graphify-out
 .env
 .env.*
 !.env.example
 *.log
 docs
 README.md
-.claude
+# Infra de deploy não entra na imagem
+Dockerfile
+.dockerignore
+compose*.yml
+Caddyfile
+deploy
+backups
+.deploy

@@ -124,6 +124,16 @@ Projetos move direto. Remover fase em Gestão só migra cards para fase do mesmo
 ganho ou perdido) — a migração não passa pelo gancho. Vendas/Projetos ficam na navegação (lista
 pelo `?quadro=`; o detalhe declara o quadro do card).
 
+## Minha Semana
+
+`/` lista os cards abertos (vivos, fora de fase terminal) em que o usuário é responsável, por
+faixa da próxima ação em dias civis de São Paulo — vencidas, hoje, próximos 7 dias (sem hoje),
+sem próxima ação — com a mais urgente em destaque. As faixas vêm de `faixaProximaAcao`
+(`src/lib/oportunidades/proxima-acao.ts`), a mesma do filtro do Kanban. "Marcar feita"
+(`src/lib/oportunidades/feita.ts`) grava, numa transação, a NOTA "Feito: …" e a próxima ação
+(ou "sem próxima ação", só por escolha explícita) como `CAMPO_ALTERADO`. `?vendedor=<id>` só vale
+para gestor/admin e usuário ativo; para os demais o servidor ignora e mostra a própria semana.
+
 ## Preferências de visualização
 
 Opções de visualização de cada usuário (ex.: no Kanban, "mostrar colunas vazias" e colunas abertas à mão, por quadro) ficam em `usuario.preferencias` (JSONB versionado, validado com zod em `src/lib/preferencias/`); cada um só grava as próprias, e JSON inválido vira o padrão.
@@ -137,6 +147,11 @@ Exceção inesperada numa server action não vira tela de erro: a action devolve
 erro do Prisma só loga `code` + `target`/`modelName` (a mensagem ecoa dados da query).
 "Sem conexão com o servidor" = a chamada nem chegou (rede/servidor fora). Helper:
 `src/lib/erros/registrar.ts` (`comTratamento` / `comTratamentoForm`).
+
+## Produção
+
+Deploy, rollback, backup/restore, QR da Evolution e troca do número do bot:
+[`docs/runbook.md`](docs/runbook.md) (`compose.prod.yml` + `scripts/deploy.sh`).
 
 ## Testes
 

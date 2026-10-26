@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 const COOKIE_SESSAO = "ij_sessao";
-const PUBLICAS = ["/login", "/convite", "/403", "/api/webhooks", "/api/cron"];
+const PUBLICAS = ["/login", "/convite", "/403", "/api/webhooks", "/api/cron", "/api/health"];
 
 /**
  * Só checa a PRESENÇA do cookie (edge, sem banco). A validade da sessão é
