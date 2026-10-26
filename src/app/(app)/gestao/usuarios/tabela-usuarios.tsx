@@ -2,7 +2,8 @@
 
 import { useActionState, useState, useTransition } from "react";
 import type { Papel } from "@prisma/client";
-import { Pencil, RefreshCw } from "lucide-react";
+import { KeyRound, Pencil, RefreshCw } from "lucide-react";
+import { Avatar } from "@/components/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -10,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { podeAtribuirPapel } from "@/lib/auth/papeis";
-import { alternarAtivoAction, editarUsuarioAction, reemitirConviteAction, type EstadoConvite } from "./actions";
+import { alternarAtivoAction, editarUsuarioAction, gerarLinkRedefinicaoAction, reemitirConviteAction, type EstadoConvite } from "./actions";
 import { LinkGerado } from "./convidar-dialog";
 import { SelectPapel } from "./select-papel";
 
@@ -23,6 +24,9 @@ type Usuario = {
   ativo: boolean;
   convitePendente: boolean;
   conviteExpiraEm: Date | null;
+  redefinicaoPedidaEm: Date | null;
+  redefinicaoLinkAtivo: boolean;
+  fotoEm: number | null;
 };
 
 type Ator = { id: string; papel: Papel };
@@ -32,6 +36,7 @@ const ROTULO: Record<Papel, string> = { ADMIN: "Admin", GESTOR: "Gestor", VENDED
 export function TabelaUsuarios({ usuarios, ator }: { usuarios: Usuario[]; ator: Ator }) {
   const [editando, setEditando] = useState<Usuario | null>(null);
   const [reemitido, setReemitido] = useState<EstadoConvite>(undefined);
+  const [redefinicao, setRedefinicao] = useState<(EstadoConvite & { nome?: string }) | undefined>(undefined);
   const [erroLinha, setErroLinha] = useState<string | null>(null);
   const [pendente, startTransition] = useTransition();
 
@@ -54,6 +59,20 @@ export function TabelaUsuarios({ usuarios, ator }: { usuarios: Usuario[]; ator: 
       if (r?.erro) setErroLinha(r.erro);
       else setReemitido(r);
     });
+  }
+
+  function gerarRedefinicao(u: Usuario) {
+    setErroLinha(null);
+    startTransition(async () => {
+      const r = await gerarLinkRedefinicaoAction(u.id);
+      if (r?.erro) setErroLinha(r.erro);
+      else setRedefinicao({ ...r, nome: u.nome });
+    });
+  }
+
+  // Gestor não gera para admin (podeMexer); ninguém para si (usa Meu perfil); só conta ativa com senha.
+  function podeRedefinir(u: Usuario) {
+    return podeMexer(u) && u.id !== ator.id && u.ativo && !u.convitePendente;
   }
 
   return (
@@ -79,13 +98,27 @@ export function TabelaUsuarios({ usuarios, ator }: { usuarios: Usuario[]; ator: 
             {usuarios.map((u) => (
               <tr key={u.id} className={`border-b border-border last:border-0 ${u.ativo ? "" : "opacity-50"}`}>
                 <td className="px-4 py-3">
-                  <div className="font-medium">{u.nome}</div>
-                  <div className="text-xs text-fg-faint md:hidden">{u.email}</div>
-                  {u.convitePendente ? (
-                    <Badge variant="outline" className="mt-1 border-warn/50 text-warn">
-                      convite pendente
-                    </Badge>
-                  ) : null}
+                  <div className="flex items-center gap-3">
+                    <Avatar nome={u.nome} usuarioId={u.id} fotoEm={u.fotoEm} tamanho="sm" />
+                    <div className="min-w-0">
+                      <div className="font-medium">{u.nome}</div>
+                      <div className="text-xs text-fg-faint md:hidden">{u.email}</div>
+                      {u.convitePendente ? (
+                        <Badge variant="outline" className="mt-1 border-warn/50 text-warn">
+                          convite pendente
+                        </Badge>
+                      ) : null}
+                      {u.redefinicaoPedidaEm ? (
+                        <Badge variant="outline" className="mt-1 border-danger/50 text-danger">
+                          pediu nova senha
+                        </Badge>
+                      ) : u.redefinicaoLinkAtivo ? (
+                        <Badge variant="outline" className="mt-1 text-fg-soft">
+                          link de senha ativo
+                        </Badge>
+                      ) : null}
+                    </div>
+                  </div>
                 </td>
                 <td className="hidden px-4 py-3 font-mono text-xs text-fg-soft md:table-cell">{u.email}</td>
                 <td className="hidden px-4 py-3 font-mono text-xs text-fg-soft sm:table-cell">
@@ -105,6 +138,18 @@ export function TabelaUsuarios({ usuarios, ator }: { usuarios: Usuario[]; ator: 
                     {u.convitePendente && podeMexer(u) ? (
                       <Button variant="ghost" size="icon" title="Reemitir convite" aria-label="Reemitir convite" disabled={pendente} onClick={() => reemitir(u)}>
                         <RefreshCw className="h-4 w-4" />
+                      </Button>
+                    ) : null}
+                    {podeRedefinir(u) ? (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        title="Gerar link de redefinição"
+                        aria-label="Gerar link de redefinição"
+                        disabled={pendente}
+                        onClick={() => gerarRedefinicao(u)}
+                      >
+                        <KeyRound className="h-4 w-4" />
                       </Button>
                     ) : null}
                     {podeMexer(u) ? (
@@ -133,6 +178,23 @@ export function TabelaUsuarios({ usuarios, ator }: { usuarios: Usuario[]; ator: 
             <DialogTitle>Convite reemitido</DialogTitle>
           </DialogHeader>
           {reemitido?.link ? <LinkGerado link={reemitido.link} expiraEm={reemitido.expiraEm} onFechar={() => setReemitido(undefined)} /> : null}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={redefinicao?.link !== undefined} onOpenChange={(o) => !o && setRedefinicao(undefined)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Link de redefinição de senha{redefinicao?.nome ? ` · ${redefinicao.nome}` : ""}</DialogTitle>
+          </DialogHeader>
+          {redefinicao?.link ? (
+            <LinkGerado
+              link={redefinicao.link}
+              expiraEm={redefinicao.expiraEm}
+              rotulo="link de redefinição"
+              aviso="Vale 1 hora e uma única vez; mostrado só agora — se perder, gere outro (o anterior deixa de valer)."
+              onFechar={() => setRedefinicao(undefined)}
+            />
+          ) : null}
         </DialogContent>
       </Dialog>
 

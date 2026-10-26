@@ -73,7 +73,19 @@ function CorpoConvite({ papelAtor, onFechar }: { papelAtor: Papel; onFechar: () 
   );
 }
 
-export function LinkGerado({ link, expiraEm, onFechar }: { link: string; expiraEm?: string; onFechar: () => void }) {
+export function LinkGerado({
+  link,
+  expiraEm,
+  onFechar,
+  rotulo = "link do convite",
+  aviso = "Mostrado só uma vez — se perder, reemita.",
+}: {
+  link: string;
+  expiraEm?: string;
+  onFechar: () => void;
+  rotulo?: string;
+  aviso?: string;
+}) {
   const [copiado, setCopiado] = useState<"nao" | "sim" | "manual">("nao");
   const campo = useRef<HTMLInputElement>(null);
 
@@ -94,12 +106,12 @@ export function LinkGerado({ link, expiraEm, onFechar }: { link: string; expiraE
   return (
     <div className="space-y-4">
       <div className="rounded-lg border border-border bg-muted p-3">
-        <p className="eyebrow mb-1">link do convite</p>
+        <p className="eyebrow mb-1">{rotulo}</p>
         <input
           ref={campo}
           readOnly
           value={link}
-          aria-label="Link do convite"
+          aria-label={rotulo}
           onFocus={(e) => e.currentTarget.select()}
           className="w-full bg-transparent font-mono text-xs text-fg-soft outline-none"
         />
@@ -110,7 +122,7 @@ export function LinkGerado({ link, expiraEm, onFechar }: { link: string; expiraE
           <span className="font-mono">
             {new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short", timeZone: "America/Sao_Paulo" }).format(new Date(expiraEm))}
           </span>
-          . Mostrado só uma vez — se perder, reemita.
+          . {aviso}
         </p>
       ) : null}
       {copiado === "manual" ? <p className="text-xs text-warn">Não deu pra copiar automaticamente: o link está selecionado, use Ctrl+C.</p> : null}
