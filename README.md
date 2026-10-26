@@ -255,9 +255,12 @@ Em **Meu perfil** cada um mexe só na própria conta:
   `/` redireciona no servidor.
 
 **Esqueci a senha** (`/esqueci`, link no login): resposta sempre igual (sem enumerar contas),
-limite em memória de 10 pedidos por IP em 15 min e 3 por email por hora. O pedido aparece em
+limite em memória de 10 pedidos por IP em 15 min e 3 por IP+email por hora (IP = último hop do
+`X-Forwarded-For`, posto pelo Caddy — runbook §9). O pedido aparece em
 Gestão → Usuários; gestor/admin gera o link (`/redefinir/<token>`: só o hash fica no banco, 1 h,
-uso único, consumo atômico, encerra todas as sessões do usuário). Gestor não gera para admin.
+uso único, consumo atômico, encerra todas as sessões do usuário). Gestor só gera para vendedor;
+admin gera para qualquer um, menos para si. Metadados da foto (COM/APPn, EXIF/XMP/ICCP) são
+removidos antes de gravar.
 
 ## Erros e debug
 
