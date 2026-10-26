@@ -173,6 +173,36 @@ describe("listarTabela", () => {
     expect(await busca("_")).toEqual(["Desconto 100_000"]);
   });
 
+  it("busca como a do Kanban: sem acento, sem caixa, espaços colapsados (nos dois lados)", async () => {
+    const s = await semear();
+    const joao = await db.contato.create({ data: { nome: "João  Pereira" } });
+    const sa = await db.empresa.create({ data: { nome: "Acme SA" } });
+    await card(s, "Reunião técnica");
+    await card(s, "Com João", { contatoId: joao.id });
+    await card(s, "Da SA", { empresaId: sa.id });
+    await card(s, "Outro");
+    const busca = (q: string) => titulos(estado({ q }, { ordem: { coluna: "titulo", dir: "asc" } }));
+    expect(await busca("joao")).toEqual(["Com João"]);
+    expect(await busca("JOÃO pereira")).toEqual(["Com João"]);
+    expect(await busca("reuniao TECNICA")).toEqual(["Reunião técnica"]);
+    expect(await busca("acme  sa")).toEqual(["Da SA"]);
+    expect(await busca("%")).toEqual([]);
+  });
+
+  it("busca por nome só casa empresa/contato vivos (excluído ou mesclado não)", async () => {
+    const s = await semear();
+    const morto = await db.contato.create({ data: { nome: "Zeca Morto", deletadoEm: new Date() } });
+    await card(s, "x", { empresaId: s.velha.id });
+    await card(s, "y", { empresaId: s.dup.id });
+    await card(s, "z", { contatoId: morto.id });
+    await card(s, "w", { empresaId: s.acme.id });
+    const busca = (q: string) => titulos(estado({ q }, { ordem: { coluna: "titulo", dir: "asc" } }));
+    expect(await busca("velha")).toEqual([]);
+    expect(await busca("dup")).toEqual([]);
+    expect(await busca("zeca")).toEqual([]);
+    expect(await busca("acme")).toEqual(["w"]);
+  });
+
   it("empresa excluída/mesclada descrita via vinculo.ts", async () => {
     const s = await semear();
     await card(s, "x", { empresaId: s.velha.id });
@@ -245,6 +275,23 @@ describe("exportarCsv", () => {
       "12500,50",
       expect.stringMatching(/^\d{2}\/10\/2026 \d{2}:\d{2}$/),
     ]);
+  });
+
+  it("cada lote reaplica os filtros: card que deixou de bater (ou foi apagado) no meio da exportação some", async () => {
+    const s = await semear();
+    const cards = [];
+    for (let i = 0; i < 6; i++) cards.push(await card(s, `c${i}`, { revisar: true }));
+    const gen = exportarCsv({ ...FILTROS_TABELA_VAZIOS, revisar: "sim", q: "c" }, { coluna: "titulo", dir: "asc" }, AGORA, 2);
+    const cabecalho = await gen.next();
+    expect(cabecalho.value).toContain("Título");
+    // Depois de lidos os ids: c1 deixa de bater no filtro, c4 é apagado, c5 deixa de bater na busca.
+    await db.oportunidade.update({ where: { id: cards[1].id }, data: { revisar: false } });
+    await db.oportunidade.update({ where: { id: cards[4].id }, data: { deletadoEm: new Date() } });
+    await db.oportunidade.update({ where: { id: cards[5].id }, data: { titulo: "zz" } });
+    let resto = "";
+    for await (const p of gen) resto += p;
+    const titulosCsv = resto.split("\r\n").filter(Boolean).map((l) => l.split(";")[1]);
+    expect(titulosCsv).toEqual(["c0", "c2", "c3"]);
   });
 
   it("sem resultados → só cabeçalho", async () => {

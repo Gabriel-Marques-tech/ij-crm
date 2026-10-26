@@ -10,9 +10,9 @@
  * - Faixas da próxima ação = `faixaProximaAcao` (Kanban e Minha Semana),
  *   traduzidas para intervalos de `proxima_acao_em` em dias civis de SP.
  */
-import type { Origem, Prisma, TipoTerminal } from "@prisma/client";
+import { Prisma, type Origem, type TipoTerminal } from "@prisma/client";
 import { db } from "@/lib/db";
-import { termoDeBusca } from "@/lib/entidades/busca";
+import { BUSCA_MAX, escaparLike } from "@/lib/entidades/busca";
 import { descreverVinculos, SELECAO_REF, textoVinculo, type Vinculo } from "@/lib/entidades/vinculo";
 import { diaEmFuso, diasNaFase, nivelAging, type NivelAging } from "@/lib/oportunidades/aging";
 import { inicioDoDia, ROTULO_ORIGEM } from "@/lib/oportunidades/campos";
@@ -52,8 +52,51 @@ function whereAcao(faixas: FiltroAcao[], agora: Date): Where {
   return { OR: ou };
 }
 
-/** Filtros → `where` do Prisma. Exportado para os testes. */
-export function montarWhere(f: FiltrosTabela, agora: Date): Where {
+/**
+ * Termo da busca normalizado como no Kanban (`normalizarBusca`): sem acento,
+ * minúsculo, espaços colapsados. Vazio → null.
+ */
+export function normalizarTermo(q: string): string | null {
+  const t = q
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, BUSCA_MAX);
+  return t || null;
+}
+
+/** Mesma normalização do lado do banco (o `unaccent` vem da migration 20261024174500). */
+function normalizarColuna(coluna: string): Prisma.Sql {
+  return Prisma.sql`public.unaccent(lower(regexp_replace(${Prisma.raw(coluna)}, ${"\\s+"}, ' ', 'g')))`;
+}
+
+/**
+ * Ids que batem na busca: título, ou nome de empresa/contato VIVOS (excluído
+ * ou mesclado não conta; o card ligado a uma empresa mesclada não é achado
+ * pelo nome da principal: resolver a cadeia de merge aqui custaria uma CTE
+ * recursiva por busca). `%`, `_` e `\` do termo são literais (`escaparLike`,
+ * ESCAPE `\`). `restrito` limita a um lote de ids (CSV).
+ */
+async function idsDaBusca(termo: string, restrito?: string[]): Promise<string[]> {
+  const padrao = `%${escaparLike(termo)}%`;
+  const casa = (coluna: string) => Prisma.sql`${normalizarColuna(coluna)} LIKE public.unaccent(lower(${padrao})) ESCAPE ${"\\"}`;
+  const linhas = await db.$queryRaw<{ id: string }[]>`
+    SELECT o.id FROM oportunidade o
+    LEFT JOIN empresa e ON e.id = o.empresa_id AND e.deletado_em IS NULL AND e.merged_into_id IS NULL
+    LEFT JOIN contato c ON c.id = o.contato_id AND c.deletado_em IS NULL AND c.merged_into_id IS NULL
+    WHERE o.deletado_em IS NULL
+      ${restrito ? Prisma.sql`AND o.id = ANY(${restrito})` : Prisma.empty}
+      AND (${casa("o.titulo")} OR ${casa("e.nome")} OR ${casa("c.nome")})`;
+  return linhas.map((l) => l.id);
+}
+
+/**
+ * Filtros → `where` do Prisma. A busca não cabe no Prisma (unaccent): roda
+ * antes em SQL e entra aqui como `id IN (...)`. Exportado para os testes.
+ */
+export async function montarWhere(f: FiltrosTabela, agora: Date, restrito?: string[]): Promise<Where> {
   const e: Where[] = [{ deletadoEm: null }];
   if (f.quadro.length) e.push({ pipeline: { chave: { in: f.quadro } } });
   if (f.fase.length) e.push({ faseId: { in: f.fase } });
@@ -71,17 +114,9 @@ export function montarWhere(f: FiltrosTabela, agora: Date): Where {
   // Período inclusivo nas duas pontas, em dias civis de SP.
   if (f.de) e.push({ criadoEm: { gte: meiaNoite(f.de) } });
   if (f.ate) e.push({ criadoEm: { lt: meiaNoite(somarDias(f.ate, 1)) } });
-  const q = termoDeBusca(f.q);
-  if (q) {
-    // `termoDeBusca` já escapou `%`, `_` e `\`: o ILIKE procura o texto literal.
-    e.push({
-      OR: [
-        { titulo: { contains: q, mode: "insensitive" } },
-        { empresa: { nome: { contains: q, mode: "insensitive" } } },
-        { contato: { nome: { contains: q, mode: "insensitive" } } },
-      ],
-    });
-  }
+  const termo = normalizarTermo(f.q);
+  if (termo) e.push({ id: { in: await idsDaBusca(termo, restrito) } });
+  if (restrito) e.push({ id: { in: restrito } });
   return { AND: e };
 }
 
@@ -179,7 +214,7 @@ export type PaginaTabela = { linhas: LinhaTabela[]; total: number; pagina: numbe
 
 /** Uma página. Página além do fim cai na última (link velho não mostra vazio). */
 export async function listarTabela(e: EstadoTabela, agora: Date): Promise<PaginaTabela> {
-  const where = montarWhere(e.filtros, agora);
+  const where = await montarWhere(e.filtros, agora);
   const total = await db.oportunidade.count({ where });
   const paginas = Math.max(1, Math.ceil(total / POR_PAGINA));
   const pagina = Math.min(e.pagina, paginas);
@@ -234,20 +269,23 @@ function linhaParaCsv(l: LinhaTabela): string {
 
 /**
  * CSV inteiro com os filtros e a ordem da tela (ignora a página), em pedaços
- * de texto para streaming. Primeiro lê só os ids, na ordem final (um retrato
- * consistente: escrita concorrente não duplica nem pula linha entre lotes);
- * depois busca os dados de `lote` em `lote`. Card apagado no meio do caminho
- * simplesmente some.
+ * de texto para streaming. Primeiro lê só os ids, na ordem final; depois
+ * busca os dados de `lote` em `lote`, REAPLICANDO os mesmos filtros (e a
+ * busca) a cada lote. Garantia: cada linha exportada ainda batia nos filtros
+ * no momento do seu lote, e nenhum card sai duas vezes. Não é um retrato
+ * único no tempo (sem transação longa): card que deixou de bater ou foi
+ * apagado no meio some; card que passou a bater depois da leitura dos ids
+ * não entra.
  *
  * O primeiro `next()` já faz a query dos ids: quem chama pode aguardá-lo
  * antes de começar a resposta e transformar falha em erro 500 com ref.
  */
 export async function* exportarCsv(f: FiltrosTabela, ordem: OrdemTabela, agora: Date, lote: number = LOTE_CSV): AsyncGenerator<string> {
-  const ids = (await db.oportunidade.findMany({ where: montarWhere(f, agora), orderBy: montarOrderBy(ordem), select: { id: true } })).map((r) => r.id);
+  const ids = (await db.oportunidade.findMany({ where: await montarWhere(f, agora), orderBy: montarOrderBy(ordem), select: { id: true } })).map((r) => r.id);
   yield BOM + linhaCsv(CABECALHO.map(celulaTexto));
   for (let i = 0; i < ids.length; i += lote) {
     const fatia = ids.slice(i, i + lote);
-    const brutas = await db.oportunidade.findMany({ where: { id: { in: fatia }, deletadoEm: null }, select: SELECAO });
+    const brutas = await db.oportunidade.findMany({ where: await montarWhere(f, agora, fatia), select: SELECAO });
     const porId = new Map(brutas.map((b) => [b.id, b]));
     const ordenadas = fatia.map((id) => porId.get(id)).filter((b): b is Bruta => !!b);
     yield (await paraLinhas(ordenadas, agora)).map(linhaParaCsv).join("");
