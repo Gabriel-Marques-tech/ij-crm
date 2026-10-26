@@ -60,6 +60,8 @@ enum TipoTimeline {
   MENSAGEM_WHATSAPP
   IMPORT
   VINCULO_PROJETO
+  EXCLUSAO     // card foi para a lixeira (GAB-36)
+  RESTAURACAO  // card voltou da lixeira (GAB-36)
 }
 
 enum StatusMensagem {
@@ -135,6 +137,7 @@ model Empresa {
   @@index([nome])
   @@index([nome(ops: raw("gin_trgm_ops"))], type: Gin, map: "empresa_nome_trgm_idx")
   @@index([dominioEmail])
+  @@index([mergedIntoId])
   @@map("empresa")
 }
 
@@ -158,6 +161,7 @@ model Contato {
   @@index([nome])
   @@index([nome(ops: raw("gin_trgm_ops"))], type: Gin, map: "contato_nome_trgm_idx")
   @@index([empresaId])
+  @@index([mergedIntoId])
   @@map("contato")
 }
 

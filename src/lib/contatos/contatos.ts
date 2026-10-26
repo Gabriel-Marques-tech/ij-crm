@@ -10,7 +10,8 @@
  * vira a mesma resposta.
  *
  * Leitura nunca mostra contato soft-deletado ou mesclado, nem oportunidade
- * soft-deletada.
+ * soft-deletada. Merge (GAB-36) é soft-pointer: o principal mostra os pontos
+ * e as oportunidades dos mesclados nele (consulta pelo grupo, nada copiado).
  */
 import { Prisma, type TipoContatoPonto } from "@prisma/client";
 import { db } from "@/lib/db";
@@ -18,6 +19,7 @@ import { normalizarPonto, type PontoNormalizado } from "@/lib/normalizacao";
 import { interpretarCampoContato, validarNome, type CampoContato } from "@/lib/entidades/campos";
 import { prefixoPrimeiro, termoDeBusca } from "@/lib/entidades/busca";
 import { SELECAO_REF, descreverVinculos } from "@/lib/entidades/vinculo";
+import { idsDoGrupo } from "@/lib/merge/merge";
 import { resolverContatos } from "./match";
 
 type Cliente = Prisma.TransactionClient;
@@ -139,7 +141,8 @@ export async function adicionarPonto(contatoId: string, bruto: string, tipo?: Ti
       const c = await tx.contato.findFirst({ where: { id: contatoId, ...VIVO }, select: { id: true } });
       if (!c) throw new Falha({ ok: false, erro: "CONTATO_NAO_ENCONTRADO" });
       const existente = await pontoExistente(tx, p);
-      if (existente?.contatoId === contatoId) return { ok: true as const, pontoId: existente.id, jaExistia: true };
+      // Já é dele, direto ou de um contato mesclado nele (o dono resolvido é ele).
+      if (existente && (existente.contatoId === contatoId || existente.dono.id === contatoId)) return { ok: true as const, pontoId: existente.id, jaExistia: true };
       if (existente) throw new Falha(duplicado(p, existente.dono));
       const novo = await tx.contatoPonto.create({ data: { contatoId, ...p, valorOriginal: original }, select: { id: true } });
       return { ok: true as const, pontoId: novo.id, jaExistia: false };
@@ -149,16 +152,21 @@ export async function adicionarPonto(contatoId: string, bruto: string, tipo?: Ti
     if (ehPontoDuplicadoNoBanco(e)) {
       const existente = await pontoExistente(db, p);
       // Duplo envio do mesmo formulário: o outro insert foi deste contato.
-      if (existente?.contatoId === contatoId) return { ok: true, pontoId: existente.id, jaExistia: true };
+      if (existente && (existente.contatoId === contatoId || existente.dono.id === contatoId)) return { ok: true, pontoId: existente.id, jaExistia: true };
       if (existente) return duplicado(p, existente.dono);
     }
     throw e;
   }
 }
 
-/** Remove um ponto do contato (não apaga o contato: deleção é GAB-36). */
+/** Remove um ponto do contato — inclusive um que veio de contato mesclado nele (aparece no principal). */
 export async function removerPonto(contatoId: string, pontoId: string): Promise<ResultadoContato> {
-  const r = await db.contatoPonto.deleteMany({ where: { id: pontoId, contatoId, contato: VIVO } });
+  const r = await db.contatoPonto.deleteMany({
+    where: {
+      id: pontoId,
+      OR: [{ contatoId, contato: VIVO }, { contato: { mergedIntoId: contatoId, deletadoEm: null, mergedInto: VIVO } }],
+    },
+  });
   return r.count === 1 ? { ok: true } : { ok: false, erro: "PONTO_NAO_ENCONTRADO" };
 }
 
@@ -192,7 +200,13 @@ export async function listarContatos(busca?: string) {
     ? {
         OR: [
           { nome: { contains: q, mode: "insensitive" } },
-          ...(ponto ? [{ pontos: { some: { tipo: ponto.tipo, valorNormalizado: ponto.valorNormalizado } } }] : []),
+          ...(ponto
+            ? [
+                { pontos: { some: { tipo: ponto.tipo, valorNormalizado: ponto.valorNormalizado } } },
+                // Ponto de um mesclado: acha o principal.
+                { mergedFrom: { some: { deletadoEm: null, pontos: { some: { tipo: ponto.tipo, valorNormalizado: ponto.valorNormalizado } } } } },
+              ]
+            : []),
         ],
       }
     : {};
@@ -207,20 +221,37 @@ export async function listarContatos(busca?: string) {
       empresa: { select: SELECAO_REF },
       pontos: { orderBy: { criadoEm: "asc" }, select: { id: true, tipo: true, valorNormalizado: true } },
       _count: { select: { oportunidades: { where: { deletadoEm: null } } } },
+      // Mesclados neste: pontos e oportunidades aparecem aqui (soft-pointer).
+      mergedFrom: {
+        where: { deletadoEm: null },
+        select: {
+          pontos: { orderBy: { criadoEm: "asc" }, select: { id: true, tipo: true, valorNormalizado: true } },
+          _count: { select: { oportunidades: { where: { deletadoEm: null } } } },
+        },
+      },
     },
   });
   const empresas = await descreverVinculos("empresa", lista.map((c) => c.empresa));
-  return lista.map((c) => ({ ...c, empresa: c.empresa ? (empresas.get(c.empresa.id) ?? null) : null }));
+  return lista.map(({ mergedFrom, ...c }) => ({
+    ...c,
+    pontos: [...c.pontos, ...mergedFrom.flatMap((m) => m.pontos)],
+    _count: { oportunidades: c._count.oportunidades + mergedFrom.reduce((s, m) => s + m._count.oportunidades, 0) },
+    empresa: c.empresa ? (empresas.get(c.empresa.id) ?? null) : null,
+  }));
 }
 
 export async function obterContato(id: string) {
   const c = await db.contato.findFirst({
     where: { id, ...VIVO },
-    include: {
-      empresa: { select: SELECAO_REF },
-      pontos: { orderBy: [{ tipo: "asc" }, { criadoEm: "asc" }] },
-      oportunidades: {
-        where: { deletadoEm: null },
+    include: { empresa: { select: SELECAO_REF } },
+  });
+  if (!c) return null;
+  // Grupo de merge: o próprio + os mesclados nele. Pontos e oportunidades são lidos pelo grupo.
+  const grupo = await idsDoGrupo("contato", id);
+  const [pontos, oportunidades] = await Promise.all([
+    db.contatoPonto.findMany({ where: { contatoId: { in: grupo } }, orderBy: [{ tipo: "asc" }, { criadoEm: "asc" }, { id: "asc" }] }),
+    db.oportunidade.findMany({
+        where: { contatoId: { in: grupo }, deletadoEm: null },
         orderBy: [{ atualizadoEm: "desc" }, { id: "asc" }],
         select: {
           id: true,
@@ -230,13 +261,11 @@ export async function obterContato(id: string) {
           responsavel: { select: { nome: true } },
           empresa: { select: SELECAO_REF },
         },
-      },
-    },
-  });
-  if (!c) return null;
-  const empresas = await descreverVinculos("empresa", [c.empresa, ...c.oportunidades.map((o) => o.empresa)]);
+      }),
+  ]);
+  const empresas = await descreverVinculos("empresa", [c.empresa, ...oportunidades.map((o) => o.empresa)]);
   const desc = (r: { id: string } | null) => (r ? (empresas.get(r.id) ?? null) : null);
-  return { ...c, empresa: desc(c.empresa), oportunidades: c.oportunidades.map((o) => ({ ...o, empresa: desc(o.empresa) })) };
+  return { ...c, pontos, empresa: desc(c.empresa), oportunidades: oportunidades.map((o) => ({ ...o, empresa: desc(o.empresa) })) };
 }
 
 export type DetalheContato = NonNullable<Awaited<ReturnType<typeof obterContato>>>;
