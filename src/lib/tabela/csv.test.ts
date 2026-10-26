@@ -23,6 +23,14 @@ describe("celulaTexto", () => {
     expect(celulaTexto("\tcmd")).toBe("'\tcmd");
     expect(celulaTexto("\r=1")).toBe("\"'\r=1\"");
     expect(celulaTexto("a=b")).toBe("a=b");
+    expect(celulaTexto(" a")).toBe(" a");
+  });
+
+  it("anti formula injection também com espaço/tab antes do sinal", () => {
+    expect(celulaTexto(' =HYPERLINK("x")')).toBe(`"' =HYPERLINK(""x"")"`);
+    expect(celulaTexto("\t=1")).toBe("'\t=1");
+    expect(celulaTexto("   -2")).toBe("'   -2");
+    expect(celulaTexto("\n@x")).toBe(`"'\n@x"`);
   });
 });
 

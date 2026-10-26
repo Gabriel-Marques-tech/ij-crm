@@ -5,7 +5,7 @@
  *
  * Texto vindo do usuário/WhatsApp passa por `celulaTexto`, que neutraliza
  * formula injection (OWASP "CSV Injection"): célula que começa com
- * `= + - @`, tab ou CR ganha um `'` na frente e o Excel a trata como texto.
+ * `= + - @`, tab ou CR (mesmo depois de espaços) ganha um `'` na frente e o Excel a trata como texto.
  * Números e datas são formatados aqui mesmo, então não passam pela guarda
  * (um "-" legítimo de número não vira texto).
  */
@@ -15,7 +15,7 @@ export const BOM = "﻿";
 export const SEPARADOR = ";";
 const FIM_LINHA = "\r\n";
 
-const INICIO_PERIGOSO = /^[=+\-@\t\r]/;
+const INICIO_PERIGOSO = /^\s*[=+\-@\t\r]/;
 const PRECISA_ASPAS = /[;"\r\n]/;
 
 function aspas(v: string): string {
