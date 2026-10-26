@@ -29,5 +29,9 @@ export class Limitador {
 }
 
 // Singleton do processo (sobrevive ao hot reload do Next em dev).
-const g = globalThis as unknown as { limitadorLogin?: Limitador };
+const g = globalThis as unknown as { limitadorLogin?: Limitador; limitadorEsqueciIp?: Limitador; limitadorEsqueciEmail?: Limitador };
 export const limitadorLogin = (g.limitadorLogin ??= new Limitador({ maxFalhas: 5, janelaMs: 15 * 60 * 1000 }));
+// "Esqueci a senha" (GAB-43): todo pedido conta como tentativa. 10 por IP em 15 min,
+// 3 por email por hora. Acima disso a resposta é a mesma, mas nada é gravado.
+export const limitadorEsqueciIp = (g.limitadorEsqueciIp ??= new Limitador({ maxFalhas: 10, janelaMs: 15 * 60 * 1000 }));
+export const limitadorEsqueciEmail = (g.limitadorEsqueciEmail ??= new Limitador({ maxFalhas: 3, janelaMs: 60 * 60 * 1000 }));

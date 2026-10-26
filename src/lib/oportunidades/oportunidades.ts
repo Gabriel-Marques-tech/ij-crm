@@ -65,7 +65,7 @@ export type CardDoQuadro = {
   proximaAcaoEm: Date | null;
   origem: Origem | null;
   estado: string | null;
-  responsavel: { id: string; nome: string };
+  responsavel: { id: string; nome: string; foto?: { atualizadoEm: Date } | null };
   empresa: { nome: string } | null;
   /** Último fechamento (mantido ao reabrir): pré-preenche o diálogo de ganho/perda. */
   valorFechado: { toFixed(n: number): string } | null;
@@ -101,7 +101,7 @@ export async function listarQuadro(pipelineChave: string): Promise<Quadro | null
       proximaAcaoEm: true,
       origem: true,
       estado: true,
-      responsavel: { select: { id: true, nome: true } },
+      responsavel: { select: { id: true, nome: true, foto: { select: { atualizadoEm: true } } } },
       // Empresa mesclada aparece com o nome da principal (merge 1 nível, GAB-36).
       empresa: { select: SELECAO_NOME_EXIBIDO },
       valorFechado: true,
@@ -122,7 +122,7 @@ export async function obterCard(id: string) {
     include: {
       pipeline: { select: { id: true, chave: true, nome: true } },
       fase: true,
-      responsavel: { select: { id: true, nome: true } },
+      responsavel: { select: { id: true, nome: true, foto: { select: { atualizadoEm: true } } } },
       empresa: { select: { id: true, nome: true } },
       contato: { select: { id: true, nome: true } },
       // Venda ↔ projeto (GAB-32). Inclui soft-deletado: a UI mostra "removido".

@@ -80,7 +80,7 @@ export default async function CardPage({ params }: { params: Promise<{ id: strin
         <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-fg-mute">
           <DiasNaFase dias={dias} nivel={nivel} />
           <span className="inline-flex items-center gap-2">
-            <Avatar nome={card.responsavel.nome} /> {card.responsavel.nome}
+            <Avatar nome={card.responsavel.nome} usuarioId={card.responsavel.id} fotoEm={card.responsavel.foto?.atualizadoEm.getTime() ?? null} /> {card.responsavel.nome}
           </span>
           {card.revisar ? (
             <span className="rounded-full border border-warn/60 px-1.5 font-mono text-[10px] leading-4 text-fg-soft uppercase">revisar</span>

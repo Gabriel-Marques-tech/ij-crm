@@ -12,6 +12,7 @@ const card = (id: string, faseId: string, faseDesdeMs = 1): CardCliente => ({
   proximaAcaoEmMs: null,
   responsavelId: "u-ana",
   responsavelNome: "Ana",
+  responsavelFotoEm: null,
   empresaNome: null,
   origem: null,
   estado: null,

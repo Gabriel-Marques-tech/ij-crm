@@ -66,7 +66,7 @@ export function CardVisual({
           </span>
         ) : null}
         <span className="flex-1" />
-        <Avatar nome={card.responsavelNome} />
+        <Avatar nome={card.responsavelNome} usuarioId={card.responsavelId} fotoEm={card.responsavelFotoEm} />
       </div>
     </article>
   );

@@ -1,16 +1,12 @@
 import Link from "next/link";
 import { LogOut } from "lucide-react";
+import { Avatar } from "@/components/avatar";
 import { Button } from "@/components/ui/button";
 import { logoutAction } from "@/lib/auth/actions";
 import type { UsuarioSessao } from "@/lib/auth/sessao";
 import { Wordmark } from "./wordmark";
 
 const ROTULO_PAPEL = { ADMIN: "admin", GESTOR: "gestor", VENDEDOR: "vendedor" } as const;
-
-function iniciais(nome: string): string {
-  const partes = nome.trim().split(/\s+/);
-  return ((partes[0]?.[0] ?? "") + (partes.length > 1 ? partes[partes.length - 1][0] : "")).toUpperCase();
-}
 
 export function Topbar({ usuario }: { usuario: UsuarioSessao }) {
   return (
@@ -25,12 +21,7 @@ export function Topbar({ usuario }: { usuario: UsuarioSessao }) {
             <p className="text-sm leading-tight text-fg-soft">{usuario.nome}</p>
             <p className="eyebrow">{ROTULO_PAPEL[usuario.papel]}</p>
           </div>
-          <div
-            className="flex h-8 w-8 items-center justify-center rounded-full border border-border-strong bg-surface font-mono text-xs text-fg-soft"
-            aria-hidden
-          >
-            {iniciais(usuario.nome)}
-          </div>
+          <Avatar nome={usuario.nome} usuarioId={usuario.id} fotoEm={usuario.fotoEm} tamanho="sm" />
         </Link>
         <form action={logoutAction}>
           <Button type="submit" variant="ghost" size="icon" aria-label="Sair" title="Sair">

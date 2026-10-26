@@ -18,6 +18,12 @@ describe("proxy", () => {
     expect(res.headers.get("location")).toBe("http://localhost:3000/login");
   });
 
+  it("esqueci a senha e /redefinir/[token] são públicos (GAB-43); a foto não", () => {
+    expect(proxy(req("/esqueci")).headers.get("location")).toBeNull();
+    expect(proxy(req(`/redefinir/${"a".repeat(64)}`)).headers.get("location")).toBeNull();
+    expect(proxy(req("/api/usuarios/x/foto")).headers.get("location")).toBe("http://localhost:3000/login");
+  });
+
   it("não libera prefixo parecido (/api/healthz)", () => {
     const res = proxy(req("/api/healthz"));
     expect(res.headers.get("location")).toBe("http://localhost:3000/login");
