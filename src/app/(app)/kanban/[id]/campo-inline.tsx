@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { MensagemErro } from "@/components/erros/mensagem-erro";
 import { executarAcao, type FalhaUI } from "@/lib/erros/cliente";
+import { hrefSeguro } from "@/lib/href";
 import type { CampoEditavel } from "@/lib/oportunidades/campos";
 import { editarCampoAction } from "../actions";
 
@@ -153,8 +154,8 @@ export function CampoInline({
         {rotulo}
       </label>
       {controle}
-      {tipo === "url" && !editando && valor ? (
-        <a href={valor} target="_blank" rel="noopener noreferrer" className="mt-0.5 inline-block font-mono text-[11px] text-fg-mute hover:text-foreground hover:underline">
+      {tipo === "url" && !editando && hrefSeguro(valor) ? (
+        <a href={hrefSeguro(valor)!} target="_blank" rel="noopener noreferrer" className="mt-0.5 inline-block font-mono text-[11px] text-fg-mute hover:text-foreground hover:underline">
           abrir link ↗
         </a>
       ) : null}
