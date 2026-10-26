@@ -86,6 +86,10 @@ model Usuario {
   ativo             Boolean   @default(true)
   conviteTokenHash  String?   @unique @map("convite_token_hash") // sha256 do token; nunca o token em claro
   conviteExpiraEm   DateTime? @map("convite_expira_em")
+  // Esqueci a senha (GAB-43): pedido visível ao gestor; link gerado por ele (só o hash, 1 h, uso único).
+  redefinicaoPedidaEm   DateTime? @map("redefinicao_pedida_em")
+  redefinicaoTokenHash  String?   @unique @map("redefinicao_token_hash")
+  redefinicaoExpiraEm   DateTime? @map("redefinicao_expira_em")
   // Preferências de visualização do próprio usuário (JSON versionado; ver src/lib/preferencias).
   preferencias      Json?
   criadoEm          DateTime  @default(now()) @map("criado_em")
@@ -96,8 +100,22 @@ model Usuario {
   timeline          Timeline[]
   mensagensBrutas   MensagemBruta[]
   sessoes           Sessao[]
+  foto              UsuarioFoto?
 
   @@map("usuario")
+}
+
+// Foto de perfil 1:1 (GAB-43): fora de `usuario` para a linha seguir leve; entra no pg_dump.
+// Só WebP/JPEG 256×256 validados no servidor (src/lib/perfil/imagem.ts).
+model UsuarioFoto {
+  usuarioId    String   @id @map("usuario_id")
+  bytes        Bytes
+  mime         String
+  atualizadoEm DateTime @default(now()) @map("atualizado_em")
+
+  usuario      Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  @@map("usuario_foto")
 }
 
 // Sessão no banco (não JWT): desativar usuário derruba o acesso na hora.
@@ -106,6 +124,9 @@ model Sessao {
   usuarioId String   @map("usuario_id")
   expiraEm  DateTime @map("expira_em")
   criadoEm  DateTime @default(now()) @map("criado_em")
+  // GAB-43: sessões ativas. Último uso é gravado no máximo a cada N minutos (sessao.ts).
+  userAgent   String?  @map("user_agent")
+  ultimoUsoEm DateTime @default(now()) @map("ultimo_uso_em")
 
   usuario   Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
 
