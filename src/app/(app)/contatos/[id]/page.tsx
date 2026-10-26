@@ -1,9 +1,11 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { CampoEditavel } from "@/components/entidades/campo-editavel";
 import { ListaOportunidades } from "@/components/entidades/lista-oportunidades";
 import { exigirUsuario } from "@/lib/auth/atual";
+import { SecaoGestao } from "@/components/merge/secao-gestao";
+import { destinoDeMesclado } from "@/lib/merge/merge";
 import { obterContato } from "@/lib/contatos/contatos";
 import { textoVinculo } from "@/lib/entidades/vinculo";
 import { editarContatoCampoAction } from "../actions";
@@ -13,10 +15,15 @@ import { Pontos } from "./pontos";
 export const metadata = { title: "Contato" };
 
 export default async function ContatoPage({ params }: { params: Promise<{ id: string }> }) {
-  await exigirUsuario();
+  const eu = await exigirUsuario();
   const { id } = await params;
   const c = await obterContato(id);
-  if (!c) notFound();
+  if (!c) {
+    // Mesclado: o link velho leva ao principal, que mostra tudo (GAB-36).
+    const destino = await destinoDeMesclado("contato", id);
+    if (destino) redirect(`/contatos/${destino}`);
+    notFound();
+  }
   const salvar = (campo: string) => editarContatoCampoAction.bind(null, c.id, campo);
   // Empresa excluída/mesclada aparece como tal (nunca como ativa).
   const empresa = c.empresa;
@@ -47,6 +54,8 @@ export default async function ContatoPage({ params }: { params: Promise<{ id: st
             <h2 className="mb-3 text-sm font-medium">Telefones e emails</h2>
             <Pontos contatoId={c.id} pontos={c.pontos} />
           </section>
+
+          <SecaoGestao tipo="contato" atual={{ id: c.id, nome: c.nome }} papel={eu.papel} />
         </div>
 
         <section className="rounded-xl border border-border bg-surface p-4">

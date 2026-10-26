@@ -1,9 +1,11 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { ArrowLeft, Mail, Phone } from "lucide-react";
 import { CampoEditavel } from "@/components/entidades/campo-editavel";
 import { ListaOportunidades } from "@/components/entidades/lista-oportunidades";
 import { exigirUsuario } from "@/lib/auth/atual";
+import { SecaoGestao } from "@/components/merge/secao-gestao";
+import { destinoDeMesclado } from "@/lib/merge/merge";
 import { obterEmpresa } from "@/lib/empresas/empresas";
 import { textoVinculo } from "@/lib/entidades/vinculo";
 import { hrefSeguro } from "@/lib/href";
@@ -14,10 +16,15 @@ import { editarEmpresaCampoAction } from "../actions";
 export const metadata = { title: "Empresa" };
 
 export default async function EmpresaPage({ params }: { params: Promise<{ id: string }> }) {
-  await exigirUsuario();
+  const eu = await exigirUsuario();
   const { id } = await params;
   const e = await obterEmpresa(id);
-  if (!e) notFound();
+  if (!e) {
+    // Mesclado: o link velho leva ao principal, que mostra tudo (GAB-36).
+    const destino = await destinoDeMesclado("empresa", id);
+    if (destino) redirect(`/empresas/${destino}`);
+    notFound();
+  }
   const site = hrefSeguro(e.site);
   const salvar = (campo: string) => editarEmpresaCampoAction.bind(null, e.id, campo);
 
@@ -94,6 +101,8 @@ export default async function EmpresaPage({ params }: { params: Promise<{ id: st
             </h2>
             <ListaOportunidades itens={e.oportunidades.map((o) => ({ ...o, extra: textoVinculo("contato", o.contato) }))} />
           </section>
+
+          <SecaoGestao tipo="empresa" atual={{ id: e.id, nome: e.nome }} papel={eu.papel} />
         </div>
       </div>
     </>

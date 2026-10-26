@@ -101,13 +101,18 @@ export async function listarQuadro(pipelineChave: string): Promise<Quadro | null
       origem: true,
       estado: true,
       responsavel: { select: { id: true, nome: true } },
-      empresa: { select: { nome: true } },
+      // Empresa mesclada aparece com o nome da principal (merge 1 nível, GAB-36).
+      empresa: { select: { nome: true, mergedInto: { select: { nome: true } } } },
       valorFechado: true,
       motivoPerda: true,
       origemOportunidade: { select: { deletadoEm: true, fase: { select: { tipoTerminal: true } } } },
     },
   });
-  return { pipeline: { id: p.id, chave: p.chave, nome: p.nome }, fases: p.fases, cards };
+  return {
+    pipeline: { id: p.id, chave: p.chave, nome: p.nome },
+    fases: p.fases,
+    cards: cards.map((c) => ({ ...c, empresa: c.empresa ? { nome: c.empresa.mergedInto?.nome ?? c.empresa.nome } : null })),
+  };
 }
 
 export async function obterCard(id: string) {

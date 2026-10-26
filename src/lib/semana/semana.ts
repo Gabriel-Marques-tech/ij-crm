@@ -10,7 +10,7 @@ import { listarResponsaveis } from "@/lib/oportunidades/oportunidades";
 import { agruparSemana, type Semana } from "./agrupar";
 
 export async function listarCardsDoVendedor(responsavelId: string) {
-  return db.oportunidade.findMany({
+  const cards = await db.oportunidade.findMany({
     // Aberto = vivo e fora de fase terminal (ganho/perdido), em qualquer quadro.
     where: { responsavelId, deletadoEm: null, fase: { isTerminal: false } },
     select: {
@@ -22,9 +22,11 @@ export async function listarCardsDoVendedor(responsavelId: string) {
       revisar: true,
       pipeline: { select: { chave: true, nome: true } },
       fase: { select: { nome: true, limiteDiasAlerta: true } },
-      empresa: { select: { nome: true } },
+      // Empresa mesclada aparece com o nome da principal (GAB-36).
+      empresa: { select: { nome: true, mergedInto: { select: { nome: true } } } },
     },
   });
+  return cards.map((c) => ({ ...c, empresa: c.empresa ? { nome: c.empresa.mergedInto?.nome ?? c.empresa.nome } : null }));
 }
 
 export type CardSemana = Awaited<ReturnType<typeof listarCardsDoVendedor>>[number];

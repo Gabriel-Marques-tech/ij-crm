@@ -16,6 +16,7 @@ import { NotaForm } from "./nota-form";
 import { ResultadoTerminal } from "./resultado-terminal";
 import { Timeline, type CardRelacionado } from "./timeline";
 import { Vinculos } from "./vinculos";
+import { ExcluirCard } from "@/components/lixeira/excluir-card";
 
 export const metadata = { title: "Card" };
 
@@ -91,6 +92,7 @@ export default async function CardPage({ params }: { params: Promise<{ id: strin
             </span>
           ) : null}
           <span className="font-mono text-[11px] text-fg-faint">criado {formatarDataHora(card.criadoEm)}</span>
+          <ExcluirCard cardId={card.id} titulo={card.titulo} quadro={card.pipeline.chave} />
         </div>
       </header>
 

@@ -3,9 +3,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 /** Busca da lista via querystring (`?q=`): funciona sem JS e o link é compartilhável. */
-export function FormBusca({ valor, placeholder, rotulo }: { valor: string; placeholder: string; rotulo: string }) {
+export function FormBusca({ valor, placeholder, rotulo, ocultos }: { valor: string; placeholder: string; rotulo: string; ocultos?: Record<string, string> }) {
   return (
     <form role="search" method="get" className="mb-4 flex max-w-xl gap-2">
+      {Object.entries(ocultos ?? {}).map(([k, v]) => (
+        <input key={k} type="hidden" name={k} value={v} />
+      ))}
       <label htmlFor="busca-lista" className="sr-only">
         {rotulo}
       </label>

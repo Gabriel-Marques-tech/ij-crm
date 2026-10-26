@@ -3,12 +3,15 @@ import { dbTeste, limparBanco } from "@/test/db";
 import { criarContato, listarContatos, obterContato, buscarContatosPorNome, removerPonto } from "@/lib/contatos/contatos";
 import { encontrarContatoPorIdentificador, encontrarEmpresa } from "@/lib/contatos/match";
 import { criarEmpresa, listarEmpresas, obterEmpresa } from "@/lib/empresas/empresas";
+import { invalidarCachePipelines } from "@/lib/fases/cache";
+import { listarQuadro } from "@/lib/oportunidades/oportunidades";
 import { desfazerMerge, destinoDeMesclado, mesclar, previaMerge } from "./merge";
 
 const db = dbTeste();
 
 beforeEach(async () => {
   await limparBanco(["transicao_fase", "timeline", "oportunidade", "contato_ponto", "contato", "empresa", "fase", "pipeline", "sessao", "usuario"]);
+  invalidarCachePipelines();
 });
 
 async function semear() {
@@ -122,6 +125,8 @@ describe("merge de empresas", () => {
     expect(lista.map((x) => [x.id, x._count.contatos, x._count.oportunidades])).toEqual([[a.id, 1, 2]]);
     expect((await listarEmpresas("11222333000181")).map((x) => x.id)).toEqual([a.id]);
     expect(await encontrarEmpresa("11.222.333/0001-81")).toEqual({ empresa: { id: a.id, nome: "Acme" }, via: "cnpj" });
+    // Kanban mostra o nome da principal no card da mesclada.
+    expect((await listarQuadro("vendas"))!.cards.map((c) => c.empresa?.nome)).toEqual(["Acme", "Acme"]);
 
     expect(await desfazerMerge("empresa", b.id, gestor)).toEqual({ ok: true, principalId: a.id });
     expect((await obterEmpresa(a.id))!.contatos).toHaveLength(0);
