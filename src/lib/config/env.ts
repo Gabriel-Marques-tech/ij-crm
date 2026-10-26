@@ -90,3 +90,46 @@ export function grupoJid(): string | undefined {
 export function notificacoesAtivas(): boolean {
   return process.env.NOTIFICATIONS_ENABLED === "true";
 }
+
+// ---------------------------------------------------------------- LLM (GAB-34)
+
+export type NomeProvedorLlm = "anthropic" | "mock";
+
+/**
+ * Claude Haiku 5.5: barato ($0.10/$0.50 por MTok) e suficiente para mensagens
+ * curtas de WhatsApp. Se o benchmark (GAB-40) mostrar erros, trocar por env
+ * para `claude-sonnet-5-5`.
+ */
+export const MODELO_EXTRACAO_PADRAO = "claude-haiku-5-5";
+export const LIMIAR_CONFIANCA_PADRAO = 0.7;
+
+/**
+ * `LLM_PROVEDOR`: `anthropic` (padrão) ou `mock` (dev/testes, sem rede).
+ * Qualquer outro valor → `null`: o pipeline marca a mensagem `FALHA`.
+ */
+export function provedorLlm(): NomeProvedorLlm | null {
+  const v = (ler("LLM_PROVEDOR") ?? "anthropic").toLowerCase();
+  return v === "anthropic" || v === "mock" ? v : null;
+}
+
+/** Modelo da extração. O nome da variável é o que já está no compose/.env.prod (`LLM_EXTRACAO_MODELO`). */
+export function modeloExtracao(): string {
+  return ler("LLM_EXTRACAO_MODELO") ?? MODELO_EXTRACAO_PADRAO;
+}
+
+/**
+ * Chave da API Anthropic. Não passa pela regra de segredo forte (o formato é
+ * da Anthropic). Ausente → extração falha com `SEM_CHAVE`: a mensagem vai
+ * para `FALHA` com motivo claro e nada quebra.
+ */
+export function chaveAnthropic(): string | undefined {
+  return ler("ANTHROPIC_API_KEY");
+}
+
+/** Abaixo disto o card nasce com `revisar = true`. `LLM_LIMIAR_CONFIANCA` fora de [0, 1] ou ilegível → 0.7. */
+export function limiarConfianca(): number {
+  const bruto = ler("LLM_LIMIAR_CONFIANCA");
+  if (bruto === undefined) return LIMIAR_CONFIANCA_PADRAO;
+  const n = Number(bruto.replace(",", "."));
+  return Number.isFinite(n) && n >= 0 && n <= 1 ? n : LIMIAR_CONFIANCA_PADRAO;
+}
