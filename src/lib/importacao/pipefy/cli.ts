@@ -1,15 +1,17 @@
 /**
- * `pnpm import:pipefy <arquivo.csv> [--confirmar] [--mapa mapa.json] [--usuario email]`
+ * `pnpm import:pipefy <arquivo.csv> [--confirmar] [--mapa mapa.json] [--colunas colunas.json] [--usuario email]`
  * (GAB-37, go-live). Dry-run por padrão: mostra a mesma prévia da tela e não grava.
  * `--confirmar` grava com o mapeamento padrão (ou o de `--mapa`: JSON
  * `{ "<fase do Pipefy>": "<id da fase no CRM>" | null }`, chaves como na prévia).
  * O import fica no nome de `--usuario` (ou `IMPORT_USUARIO_EMAIL`, ou o
  * primeiro ADMIN ativo); precisa ser ADMIN/GESTOR ativo. Erros e avisos vão
- * para `<arquivo>.erros.csv`.
+ * para `<arquivo>.erros.csv`. `--colunas`: JSON `{ "<campo>": ["Cabeçalho no CSV", ...] }`
+ * (campos de `CAMPOS` em colunas.ts) — aliases extras, com prioridade sobre os padrões.
  */
 import { db } from "@/lib/db";
 import { normalizarEmail } from "@/lib/normalizacao";
 import { decodificarArquivo } from "./csv";
+import { CAMPOS, combinarAliases, type Aliases, type Campo } from "./colunas";
 import { ocorrenciasParaCsv } from "./erros-csv";
 import type { Ocorrencia } from "./interpretar";
 import { calcularPrevia, importarConteudo } from "./servico";
@@ -22,29 +24,42 @@ export type IoCli = {
   env?: Record<string, string | undefined>;
 };
 
-export const USO = "uso: pnpm import:pipefy <arquivo.csv> [--confirmar] [--mapa mapa.json] [--usuario email]";
+export const USO = "uso: pnpm import:pipefy <arquivo.csv> [--confirmar] [--mapa mapa.json] [--colunas colunas.json] [--usuario email]";
 
-type Args = { arquivo: string; confirmar: boolean; mapa?: string; usuario?: string };
+type Args = { arquivo: string; confirmar: boolean; mapa?: string; colunas?: string; usuario?: string };
 
 export function lerArgs(argv: string[]): { ok: true; args: Args } | { ok: false; erro: string } {
   let arquivo: string | undefined;
   let confirmar = false;
   let mapa: string | undefined;
   let usuario: string | undefined;
+  let colunas: string | undefined;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--confirmar") confirmar = true;
-    else if (a === "--mapa" || a === "--usuario") {
+    else if (a === "--mapa" || a === "--usuario" || a === "--colunas") {
       const v = argv[++i];
       if (!v || v.startsWith("--")) return { ok: false, erro: `${a} precisa de um valor.` };
       if (a === "--mapa") mapa = v;
+      else if (a === "--colunas") colunas = v;
       else usuario = v;
     } else if (a.startsWith("--")) return { ok: false, erro: `Opção desconhecida: ${a}` };
     else if (arquivo) return { ok: false, erro: "Informe um arquivo só." };
     else arquivo = a;
   }
   if (!arquivo) return { ok: false, erro: "Informe o arquivo CSV." };
-  return { ok: true, args: { arquivo, confirmar, mapa, usuario } };
+  return { ok: true, args: { arquivo, confirmar, mapa, colunas, usuario } };
+}
+
+export function validarColunas(bruto: unknown): { ok: true; extras: Partial<Record<Campo, string[]>> } | { ok: false; erro: string } {
+  if (!bruto || typeof bruto !== "object" || Array.isArray(bruto)) return { ok: false, erro: "--colunas: o JSON precisa ser um objeto { campo: [cabeçalhos] }." };
+  const extras: Partial<Record<Campo, string[]>> = {};
+  for (const [k, v] of Object.entries(bruto)) {
+    if (!(CAMPOS as readonly string[]).includes(k)) return { ok: false, erro: `--colunas: campo desconhecido "${k}". Campos: ${CAMPOS.join(", ")}.` };
+    if (!Array.isArray(v) || !v.every((x) => typeof x === "string")) return { ok: false, erro: `--colunas: "${k}" precisa ser uma lista de textos.` };
+    extras[k as Campo] = v;
+  }
+  return { ok: true, extras };
 }
 
 async function quemImporta(email: string | undefined) {
@@ -73,11 +88,21 @@ export async function rodarCli(argv: string[], io: IoCli, agora = new Date()): P
   const { arquivo, confirmar } = a.args;
   let conteudo: string;
   let mapeamento: unknown;
+  let aliases: Aliases | undefined;
+  const lerJson = (c: string): unknown => JSON.parse(new TextDecoder().decode(io.ler(c)));
   try {
     conteudo = decodificarArquivo(io.ler(arquivo));
-    if (a.args.mapa) mapeamento = JSON.parse(new TextDecoder().decode(io.ler(a.args.mapa)));
+    if (a.args.mapa) mapeamento = lerJson(a.args.mapa);
+    if (a.args.colunas) {
+      const extras = validarColunas(lerJson(a.args.colunas));
+      if (!extras.ok) {
+        io.erro(extras.erro);
+        return 1;
+      }
+      aliases = combinarAliases(extras.extras);
+    }
   } catch (e) {
-    io.erro(`Não consegui ler ${(e as { path?: string }).path ?? a.args.mapa ?? arquivo}: ${(e as Error).message}`);
+    io.erro(`Não consegui ler ${(e as { path?: string }).path ?? arquivo}: ${(e as Error).message}`);
     return 1;
   }
   const quem = await quemImporta(a.args.usuario ?? io.env?.IMPORT_USUARIO_EMAIL);
@@ -86,7 +111,7 @@ export async function rodarCli(argv: string[], io: IoCli, agora = new Date()): P
     return 1;
   }
 
-  const r = await calcularPrevia(conteudo, { nomeArquivo: arquivo, mapeamento });
+  const r = await calcularPrevia(conteudo, { nomeArquivo: arquivo, mapeamento, aliases });
   if (!r.ok) {
     io.erro(r.erro);
     return 1;
@@ -110,7 +135,7 @@ export async function rodarCli(argv: string[], io: IoCli, agora = new Date()): P
     return 0;
   }
 
-  const imp = await importarConteudo(conteudo, r.mapeamento, quem.usuario, agora);
+  const imp = await importarConteudo(conteudo, r.mapeamento, quem.usuario, agora, aliases);
   if (!imp.ok) {
     io.erro(imp.erro);
     return 1;

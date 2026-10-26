@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { dbTeste, limparBanco } from "@/test/db";
 import { invalidarCachePipelines } from "@/lib/fases/cache";
 import { semear } from "../../../../prisma/seed";
-import { lerArgs, rodarCli, type IoCli } from "./cli";
+import { lerArgs, rodarCli, validarColunas, type IoCli } from "./cli";
 
 const db = dbTeste();
 const ARQ = path.resolve(import.meta.dirname, "../../../test/fixtures/pipefy/export-exemplo.csv");
@@ -32,10 +32,19 @@ beforeEach(async () => {
 
 describe("lerArgs", () => {
   it("arquivo + flags; erros de uso", () => {
-    expect(lerArgs(["a.csv", "--confirmar", "--usuario", "x@y.z"])).toEqual({ ok: true, args: { arquivo: "a.csv", confirmar: true, mapa: undefined, usuario: "x@y.z" } });
+    expect(lerArgs(["a.csv", "--confirmar", "--usuario", "x@y.z"])).toEqual({ ok: true, args: { arquivo: "a.csv", confirmar: true, mapa: undefined, colunas: undefined, usuario: "x@y.z" } });
     expect(lerArgs([])).toEqual({ ok: false, erro: "Informe o arquivo CSV." });
     expect(lerArgs(["a.csv", "--mapa"])).toEqual({ ok: false, erro: "--mapa precisa de um valor." });
     expect(lerArgs(["a.csv", "--forca"])).toEqual({ ok: false, erro: "Opção desconhecida: --forca" });
+  });
+});
+
+describe("validarColunas", () => {
+  it("aceita campos conhecidos com lista de textos; recusa o resto", () => {
+    expect(validarColunas({ telefone: ["Fone do lead"] })).toEqual({ ok: true, extras: { telefone: ["Fone do lead"] } });
+    expect(validarColunas({ fone: ["x"] })).toMatchObject({ ok: false, erro: expect.stringContaining('campo desconhecido "fone"') });
+    expect(validarColunas({ telefone: "x" })).toMatchObject({ ok: false });
+    expect(validarColunas([])).toMatchObject({ ok: false });
   });
 });
 
