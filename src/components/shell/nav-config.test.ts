@@ -23,6 +23,12 @@ describe("isActive", () => {
 });
 
 describe("NAV_ITEMS", () => {
+  it("Minha Semana aponta para /semana (/ redireciona pela preferência — GAB-43)", () => {
+    const semana = NAV_ITEMS.find((i) => i.label === "Minha Semana")!;
+    expect(semana.href).toBe("/semana");
+    expect(itemAtivo(semana, "/semana", null)).toBe(true);
+  });
+
   it("tem hrefs únicos", () => {
     const hrefs = NAV_ITEMS.map((i) => i.href);
     expect(new Set(hrefs).size).toBe(hrefs.length);

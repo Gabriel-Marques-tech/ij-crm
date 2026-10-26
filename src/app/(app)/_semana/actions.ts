@@ -27,7 +27,7 @@ export type Esperado = z.infer<typeof esperadoSchema>;
 export type Escolha = z.infer<typeof escolhaSchema>;
 
 function revalidar(cardId: string) {
-  revalidatePath("/");
+  revalidatePath("/semana");
   revalidatePath("/kanban");
   revalidatePath(`/kanban/${cardId}`);
 }
