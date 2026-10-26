@@ -4,7 +4,11 @@
  *
  * Qualquer usuário logado (vendedor vê tudo). Erro antes do primeiro byte →
  * 500 com `ref` (causa só no log). Erro no meio do streaming não pode mais
- * virar 500: a última linha do arquivo avisa que ficou incompleto, com a ref.
+ * virar 500 (o status 200 já saiu): a última linha do arquivo vira
+ * "EXPORTAÇÃO INCOMPLETA: erro no servidor (ref: …)". Limitação aceita para
+ * uso manual no Excel: o download "termina bem" e é essa linha final que
+ * sinaliza o arquivo truncado; quem consumir o CSV por script precisa
+ * checá-la.
  */
 import { unstable_rethrow } from "next/navigation";
 import { exigirUsuario } from "@/lib/auth/atual";
