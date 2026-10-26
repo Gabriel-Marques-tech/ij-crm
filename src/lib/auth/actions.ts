@@ -4,7 +4,8 @@ import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { COOKIE_SESSAO, opcoesCookieSessao } from "./atual";
-import { limitadorEsqueciEmail, limitadorEsqueciIp, limitadorLogin } from "./limitador";
+import { ipDoCliente } from "./ip";
+import { freioEsqueci, limitadorLogin } from "./limitador";
 import { MENSAGEM_REDEFINICAO, pedirRedefinicao, redefinirSenha } from "./redefinicao";
 import { SESSAO_DURACAO_DIAS, criarSessao, encerrarSessao } from "./sessao";
 import { aceitarConvite, autenticar } from "./usuarios";
@@ -20,8 +21,7 @@ async function abrirSessao(usuarioId: string) {
 }
 
 async function ipDoRequest(): Promise<string> {
-  const h = await headers();
-  return h.get("x-forwarded-for")?.split(",")[0]?.trim() || h.get("x-real-ip") || "local";
+  return ipDoCliente(await headers());
 }
 
 const loginSchema = z.object({ email: z.string().min(1), senha: z.string().min(1) });
@@ -87,11 +87,8 @@ export async function pedirRedefinicaoAction(_prev: EstadoEsqueci, form: FormDat
     const email = String(form.get("email") ?? "").trim().toLowerCase().slice(0, 320);
     if (!email) return { erro: "Informe seu email." };
     const ip = await ipDoRequest();
-    // Limite por IP e por email (em memória — ver limitador.ts). Bloqueado → mesma resposta, sem gravar.
-    const bloqueado = limitadorEsqueciIp.bloqueado(ip) || limitadorEsqueciEmail.bloqueado(email);
-    limitadorEsqueciIp.registrarFalha(ip);
-    limitadorEsqueciEmail.registrarFalha(email);
-    if (!bloqueado) await pedirRedefinicao(email);
+    // Limite por IP e por IP+email (em memória — ver limitador.ts). Acima dele → mesma resposta, sem gravar.
+    if (freioEsqueci.tentar(ip, email)) await pedirRedefinicao(email);
     const falta = ESQUECI_TEMPO_MINIMO_MS - (Date.now() - inicio);
     if (falta > 0) await new Promise((r) => setTimeout(r, falta));
     return { enviado: true };

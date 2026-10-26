@@ -328,3 +328,20 @@ rm -rf .deploy   # histórico de deploy do teste
 
 Cada build gera imagens `ops` de ~1,9 GB (camadas compartilhadas) e cache de
 build: no fim, `docker image rm` das tags `ijcrm-prodtest/*`.
+
+## 9. IP do cliente e limitadores (login / "esqueci a senha")
+
+Os limitadores de tentativa (`src/lib/auth/limitador.ts`) identificam o cliente
+pelo **último** item do `X-Forwarded-For` (`src/lib/auth/ip.ts`). Isso só é
+confiável porque o Caddy é a única coisa na frente do app: o `compose.prod.yml`
+publica só as portas do Caddy, e o app não é exposto. O Caddy anexa ao fim do
+header o IP de quem abriu a conexão. Tudo o que vem antes foi enviado pelo
+cliente e pode ser forjado.
+
+- **Não** publique a porta 3000 do app nem coloque o app atrás de outro proxy
+  sem passar pelo Caddy. Quem falar direto com o app escolhe o próprio "IP".
+- Se algum dia entrar um CDN/proxy **na frente** do Caddy (Cloudflare etc.), o
+  último hop passa a ser o IP desse proxy, e todos os clientes caem na mesma
+  chave. Antes disso: configure `trusted_proxies` no Caddy e revise `ipDoCliente`.
+- Os contadores ficam em memória, com teto de 10 mil chaves por limitador.
+  Reiniciar o container zera todos.
