@@ -5,7 +5,8 @@
  *    é sempre a mesma; o pedido só é gravado se o email for de um usuário ativo
  *    com senha. Nada é enviado: o pedido aparece em Gestão → Usuários.
  * 2. Gestor/admin clica "Gerar link de redefinição" → token aleatório, banco
- *    guarda só o sha256, vale 1 h, mostrado UMA vez. Gestor não gera para admin.
+ *    guarda só o sha256, vale 1 h, mostrado UMA vez. Gestor só gera para
+ *    vendedor; admin gera para qualquer um (menos ele mesmo) — `podeGerarRedefinicao`.
  * 3. `/redefinir/[token]` → `redefinirSenha`: consome o token atomicamente
  *    (hash + validade no WHERE do update) e derruba TODAS as sessões do usuário.
  */
@@ -14,13 +15,14 @@ import type { Papel } from "@prisma/client";
 import { db } from "@/lib/db";
 import { normalizarEmail } from "@/lib/normalizacao";
 import { hashToken } from "./convite";
-import { podeAtribuirPapel } from "./papeis";
+import { podeGerarRedefinicao } from "./papeis";
 import { gerarHashSenha, senhaAtendeRegras } from "./senha";
 
 export const REDEFINICAO_VALIDADE_MS = 60 * 60 * 1000;
 
 export type ErroRedefinicao =
   | "PAPEL_NAO_PERMITIDO"
+  | "SO_ADMIN_REDEFINE"
   | "NAO_PODE_ALTERAR_A_SI"
   | "USUARIO_NAO_ENCONTRADO"
   | "USUARIO_INATIVO"
@@ -31,6 +33,7 @@ export type ErroRedefinicao =
 
 export const MENSAGEM_REDEFINICAO: Record<ErroRedefinicao, string> = {
   PAPEL_NAO_PERMITIDO: "Você não pode gerar link de redefinição para esse usuário.",
+  SO_ADMIN_REDEFINE: "Só um admin pode gerar link de redefinição para gestor ou admin.",
   NAO_PODE_ALTERAR_A_SI: "Para a sua própria senha, use Meu perfil → Trocar senha.",
   USUARIO_NAO_ENCONTRADO: "Usuário não encontrado.",
   USUARIO_INATIVO: "Usuário desativado: reative antes de gerar o link.",
@@ -75,17 +78,21 @@ export async function gerarLinkRedefinicao(
 ): Promise<{ ok: true; token: string; expiraEm: Date } | { ok: false; erro: ErroRedefinicao }> {
   const alvo = await db.usuario.findUnique({ where: { id: usuarioId }, select: { id: true, papel: true, ativo: true, senhaHash: true } });
   if (!alvo) return { ok: false, erro: "USUARIO_NAO_ENCONTRADO" };
-  // Escalada de privilégio: só quem pode atribuir o papel do alvo gera o link (gestor ≠ admin).
-  if (!podeAtribuirPapel(por.papel, alvo.papel)) return { ok: false, erro: "PAPEL_NAO_PERMITIDO" };
+  // Tomada de conta: só papel estritamente inferior (gestor → vendedor); admin → qualquer um.
+  if (!podeGerarRedefinicao(por.papel, alvo.papel)) {
+    return { ok: false, erro: por.papel === "GESTOR" ? "SO_ADMIN_REDEFINE" : "PAPEL_NAO_PERMITIDO" };
+  }
   if (alvo.id === por.id) return { ok: false, erro: "NAO_PODE_ALTERAR_A_SI" };
   if (!alvo.ativo) return { ok: false, erro: "USUARIO_INATIVO" };
   if (alvo.senhaHash === null) return { ok: false, erro: "CONVITE_PENDENTE" };
 
   const token = randomBytes(32).toString("hex");
   const expiraEm = new Date(agora.getTime() + REDEFINICAO_VALIDADE_MS);
-  // `papel` no where: se o alvo foi promovido no meio, o gestor não ganha o link.
+  // `papel` no where: só grava se o alvo AINDA tem um papel que o ator pode
+  // redefinir (promovido no meio → o gestor não ganha o link).
+  const papeisPermitidos = (["VENDEDOR", "GESTOR", "ADMIN"] as const).filter((p) => podeGerarRedefinicao(por.papel, p));
   const r = await db.usuario.updateMany({
-    where: { id: alvo.id, papel: alvo.papel, ativo: true, senhaHash: { not: null } },
+    where: { id: alvo.id, papel: { in: [...papeisPermitidos] }, ativo: true, senhaHash: { not: null } },
     data: { redefinicaoTokenHash: hashToken(token), redefinicaoExpiraEm: expiraEm, redefinicaoPedidaEm: null },
   });
   if (r.count === 0) return { ok: false, erro: "PAPEL_NAO_PERMITIDO" };

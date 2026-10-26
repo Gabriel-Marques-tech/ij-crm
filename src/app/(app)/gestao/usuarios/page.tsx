@@ -1,6 +1,6 @@
 import { PageHeader } from "@/components/shell/page-header";
 import { exigirPapel } from "@/lib/auth/atual";
-import { podeAtribuirPapel } from "@/lib/auth/papeis";
+import { podeGerarRedefinicao } from "@/lib/auth/papeis";
 import { listarUsuarios } from "@/lib/auth/usuarios";
 import { ConvidarDialog } from "./convidar-dialog";
 import { TabelaUsuarios } from "./tabela-usuarios";
@@ -33,7 +33,7 @@ export default async function UsuariosPage() {
                 <span className="font-medium">{p.nome}</span>
                 <span className="font-mono text-xs text-fg-mute">{p.email}</span>
                 <span className="font-mono text-xs text-fg-faint">{fmt.format(p.redefinicaoPedidaEm!)}</span>
-                {!podeAtribuirPapel(ator.papel, p.papel) ? <span className="text-xs text-fg-faint">· só um admin pode gerar o link</span> : null}
+                {!podeGerarRedefinicao(ator.papel, p.papel) ? <span className="text-xs text-fg-faint">· só um admin pode gerar o link</span> : null}
               </li>
             ))}
           </ul>

@@ -12,3 +12,14 @@ export function podeAtribuirPapel(quem: Papel, alvo: Papel): boolean {
   if (quem === "GESTOR") return alvo !== "ADMIN";
   return true;
 }
+
+/**
+ * Quem pode gerar link de redefinição de senha para quem (GAB-43). Regra
+ * própria, mais estrita que `podeAtribuirPapel`: só para papel ESTRITAMENTE
+ * inferior (gestor → vendedor), exceto admin, que redefine qualquer um
+ * (inclusive outro admin). "A si mesmo" é barrado no serviço.
+ */
+export function podeGerarRedefinicao(quem: Papel, alvo: Papel): boolean {
+  if (quem === "ADMIN") return true;
+  return NIVEL[quem] > NIVEL[alvo] && quem !== "VENDEDOR";
+}

@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Papel } from "@prisma/client";
+import { db as dbApp } from "@/lib/db";
 import { dbTeste, limparBanco } from "@/test/db";
-import { buscarRedefinicao, gerarLinkRedefinicao, listarPedidosRedefinicao, pedirRedefinicao, redefinirSenha, REDEFINICAO_VALIDADE_MS } from "./redefinicao";
+import { MENSAGEM_REDEFINICAO, buscarRedefinicao, gerarLinkRedefinicao, listarPedidosRedefinicao, pedirRedefinicao, redefinirSenha, REDEFINICAO_VALIDADE_MS } from "./redefinicao";
 import { gerarHashSenha } from "./senha";
 import { criarSessao, obterUsuarioDaSessao } from "./sessao";
 import { autenticar } from "./usuarios";
@@ -75,10 +76,35 @@ describe("gerarLinkRedefinicao", () => {
     const a2 = await criar("Admin2", "ADMIN");
     const v = await criar("Vera", "VENDEDOR");
     const w = await criar("Wil", "VENDEDOR");
-    expect(await gerarLinkRedefinicao(a.id, g)).toEqual({ ok: false, erro: "PAPEL_NAO_PERMITIDO" });
+    expect(await gerarLinkRedefinicao(a.id, g)).toEqual({ ok: false, erro: "SO_ADMIN_REDEFINE" });
     expect((await gerarLinkRedefinicao(a2.id, a)).ok).toBe(true);
     expect(await gerarLinkRedefinicao(w.id, v)).toEqual({ ok: false, erro: "PAPEL_NAO_PERMITIDO" });
     expect((await db.usuario.findUniqueOrThrow({ where: { id: a.id } })).redefinicaoTokenHash).toBeNull();
+  });
+
+  it("gestor NÃO gera para outro gestor (tomada lateral), com mensagem específica; admin gera para gestor", async () => {
+    const g = await criar("Gestora", "GESTOR");
+    const g2 = await criar("Gil", "GESTOR");
+    const a = await criar("Admin", "ADMIN");
+    const r = await gerarLinkRedefinicao(g2.id, g);
+    expect(r).toEqual({ ok: false, erro: "SO_ADMIN_REDEFINE" });
+    if (!r.ok) expect(MENSAGEM_REDEFINICAO[r.erro]).toBe("Só um admin pode gerar link de redefinição para gestor ou admin.");
+    expect((await db.usuario.findUniqueOrThrow({ where: { id: g2.id } })).redefinicaoTokenHash).toBeNull();
+    expect((await gerarLinkRedefinicao(g2.id, a)).ok).toBe(true);
+  });
+
+  it("alvo promovido a gestor entre a leitura e a gravação → gestor não ganha o link", async () => {
+    const g = await criar("Gestora", "GESTOR");
+    const v = await criar("Vera", "VENDEDOR");
+    const original = dbApp.usuario.findUnique.bind(dbApp.usuario);
+    const espiao = vi.spyOn(dbApp.usuario, "findUnique").mockImplementationOnce((async (args: unknown) => {
+      const r = await original(args as never);
+      await db.usuario.update({ where: { id: v.id }, data: { papel: "GESTOR" } });
+      return r;
+    }) as never);
+    expect(await gerarLinkRedefinicao(v.id, g)).toMatchObject({ ok: false });
+    espiao.mockRestore();
+    expect((await db.usuario.findUniqueOrThrow({ where: { id: v.id } })).redefinicaoTokenHash).toBeNull();
   });
 
   it("não gera para si mesmo, para inativo, nem para convite pendente", async () => {

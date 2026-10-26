@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { podeAtribuirPapel } from "@/lib/auth/papeis";
+import { podeAtribuirPapel, podeGerarRedefinicao } from "@/lib/auth/papeis";
 import { alternarAtivoAction, editarUsuarioAction, gerarLinkRedefinicaoAction, reemitirConviteAction, type EstadoConvite } from "./actions";
 import { LinkGerado } from "./convidar-dialog";
 import { SelectPapel } from "./select-papel";
@@ -70,9 +70,9 @@ export function TabelaUsuarios({ usuarios, ator }: { usuarios: Usuario[]; ator: 
     });
   }
 
-  // Gestor não gera para admin (podeMexer); ninguém para si (usa Meu perfil); só conta ativa com senha.
+  // Gestor só para vendedor; admin para qualquer um; ninguém para si (usa Meu perfil); só conta ativa com senha.
   function podeRedefinir(u: Usuario) {
-    return podeMexer(u) && u.id !== ator.id && u.ativo && !u.convitePendente;
+    return podeGerarRedefinicao(ator.papel, u.papel) && u.id !== ator.id && u.ativo && !u.convitePendente;
   }
 
   return (
