@@ -3,7 +3,7 @@ import { dbTeste, limparBanco } from "@/test/db";
 import { invalidarCachePipelines } from "@/lib/fases/cache";
 import { inicioDoDia } from "@/lib/oportunidades/campos";
 import { criarPrazo, marcarPrazoFeito } from "@/lib/prazos/prazos";
-import { carregarItensDaSemana, resolverVisao } from "./calendario";
+import { carregarItens, carregarItensDaSemana, resolverVisao } from "./calendario";
 import { resolverSemana } from "./semana";
 
 const db = dbTeste();
@@ -113,6 +113,52 @@ describe("carregarItensDaSemana", () => {
     const doBruno = time.prazos.find((p) => p.titulo === "do Bruno")!;
     expect(doBruno.podeMexer).toBe(false);
     expect(time.prazos.map((p) => p.titulo)).not.toContain("no lixo");
+  });
+});
+
+describe("limites da semana (meio-aberto) e fuso da sessão", () => {
+  async function semearBordas() {
+    const s = await semear();
+    const gil = { id: (await db.usuario.create({ data: { nome: "Gil", email: "gil@ij.test", papel: "GESTOR" } })).id, papel: "GESTOR" as const };
+    for (const [titulo, dia] of [["dom antes", "2026-10-25"], ["seg", "2026-10-26"], ["dom", "2026-11-01"], ["seg depois", "2026-11-02"]] as const) {
+      await s.card(`ação ${titulo}`, dia);
+      const r = await criarPrazo(gil, { titulo: `prazo ${titulo}`, dia, responsavelId: s.ana.id });
+      if (!r.ok) throw new Error(r.erro);
+    }
+    return s;
+  }
+
+  it("prazos e ações de segunda 26/10 e domingo 01/11 entram; os vizinhos não", async () => {
+    const s = await semearBordas();
+    const r = await carregarItensDaSemana({ responsavelIds: [s.ana.id] }, SEMANA, { id: s.ana.id, papel: "VENDEDOR" });
+    expect(r.prazos.map((p) => [p.titulo, p.dia])).toEqual([
+      ["prazo seg", "2026-10-26"],
+      ["prazo dom", "2026-11-01"],
+    ]);
+    expect(r.acoes.map((a) => a.titulo)).toEqual(["ação seg", "ação dom"]);
+  });
+
+  it("com a sessão em America/Sao_Paulo (SET LOCAL TIME ZONE) nada desloca de dia", async () => {
+    const s = await semearBordas();
+    const r = await db.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe("SET LOCAL TIME ZONE 'America/Sao_Paulo'");
+      return carregarItensDaSemana({ responsavelIds: [s.ana.id] }, SEMANA, { id: s.ana.id, papel: "VENDEDOR" }, tx);
+    });
+    expect(r.prazos.map((p) => [p.titulo, p.dia])).toEqual([
+      ["prazo seg", "2026-10-26"],
+      ["prazo dom", "2026-11-01"],
+    ]);
+    expect(r.acoes.map((a) => [a.titulo, a.dia])).toEqual([
+      ["ação seg", "2026-10-26"],
+      ["ação dom", "2026-11-01"],
+    ]);
+  });
+
+  it("carregarItens cobre um intervalo arbitrário de dias (inclusivo nas duas pontas)", async () => {
+    const s = await semearBordas();
+    const r = await carregarItens({ responsavelIds: [s.ana.id] }, { primeiroDia: "2026-11-01", ultimoDia: "2026-11-02", hoje: "2026-10-27" }, { id: s.ana.id, papel: "VENDEDOR" });
+    expect(r.prazos.map((p) => p.titulo)).toEqual(["prazo dom", "prazo seg depois"]);
+    expect(r.acoes.map((a) => a.titulo)).toEqual(["ação dom", "ação seg depois"]);
   });
 });
 

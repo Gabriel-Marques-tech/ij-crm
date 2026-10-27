@@ -8,8 +8,9 @@ import { exigirUsuario } from "@/lib/auth/atual";
 import { comTratamento, ehInesperado } from "@/lib/erros/registrar";
 import { diaEmFuso } from "@/lib/oportunidades/aging";
 import { temPapelMinimo } from "@/lib/auth/papeis";
-import { carregarItensDaSemana } from "@/lib/calendario/calendario";
-import { agruparPorDia, resolverSemana } from "@/lib/calendario/semana";
+import { carregarItens } from "@/lib/calendario/calendario";
+import { resolverSemana } from "@/lib/calendario/semana";
+import { dividirSemana, fimDaJanela } from "@/lib/semana/colunas";
 import { listarResponsaveis } from "@/lib/oportunidades/oportunidades";
 import { agruparSemana } from "@/lib/semana/agrupar";
 import { listarCardsDoVendedor, resolverVendedor } from "@/lib/semana/semana";
@@ -18,6 +19,7 @@ import { carregarTop3 } from "@/lib/ranking/servico";
 import { Top3Semana } from "@/components/ranking/top3-semana";
 import { BotaoNovoPrazo, PrazosProvider } from "../_calendario/editor-prazo";
 import { Destaque, Grupo } from "../_semana/itens";
+import { ProximaSemana } from "../_semana/proxima-semana";
 import { SemanaEmColunas } from "../_semana/semana-colunas";
 import { SeletorVendedor } from "../_semana/seletor-vendedor";
 
@@ -51,13 +53,15 @@ export default async function MinhaSemanaPage({ searchParams }: { searchParams: 
   const agora = new Date();
   const hoje = diaEmFuso(agora);
   const semana = resolverSemana(undefined, agora);
+  // Uma leitura de segunda até hoje+7: colunas (seg–dom) + "Próxima semana" (o resto do antigo "Próximos 7 dias").
+  const ate = fimDaJanela(semana);
   // Top 3 em paralelo e isolado: se falhar, só o card lateral mostra a ref (GAB-44).
   const top3 = comTratamento("pagina.semana.top3", () => carregarTop3(ator, agora));
   const dados = await comTratamento("pagina.semana", async () => {
     const escolha = await resolverVendedor(ator, typeof vendedor === "string" ? vendedor : undefined);
     const [cards, itens, foto, responsaveis] = await Promise.all([
       listarCardsDoVendedor(escolha.alvo.id),
-      carregarItensDaSemana({ responsavelIds: [escolha.alvo.id] }, semana, ator),
+      carregarItens({ responsavelIds: [escolha.alvo.id] }, { primeiroDia: semana.segunda, ultimoDia: ate, hoje: semana.hoje }, ator),
       db.usuarioFoto.findUnique({ where: { usuarioId: escolha.alvo.id }, select: { atualizadoEm: true } }),
       escolha.podeTrocar ? escolha.opcoes : listarResponsaveis(),
     ]);
@@ -66,10 +70,11 @@ export default async function MinhaSemanaPage({ searchParams }: { searchParams: 
   if (ehInesperado(dados)) return <ErroCarregamento codigo={dados.ref} />;
   const ranking = await top3;
   const { escolha, s, cards, itens, foto, responsaveis } = dados;
-  const dias = agruparPorDia(semana.dias, itens.acoes, itens.prazos);
+  // O destaque já está grande no topo: não se repete nas colunas.
+  const { dias, proxima } = dividirSemana(semana, itens, s.destaque?.id ?? null);
   // Vencidas de antes desta semana não cabem nas colunas: seguem em lista (com "marcar feita").
   const vencidasAntes = s.vencidas.filter((c) => diaEmFuso(c.proximaAcaoEm!) < semana.segunda);
-  const depois = cards.filter((c) => c.proximaAcaoEm && diaEmFuso(c.proximaAcaoEm) > semana.domingo).length;
+  const depois = cards.filter((c) => c.proximaAcaoEm && diaEmFuso(c.proximaAcaoEm) > ate && c.id !== s.destaque?.id).length;
   const proprio = escolha.alvo.id === ator.id;
   const primeiroNome = escolha.alvo.nome.split(" ")[0];
   const nada = s.destaque === null && s.sem.length === 0;
@@ -145,6 +150,7 @@ export default async function MinhaSemanaPage({ searchParams }: { searchParams: 
           </div>
           <SemanaEmColunas dias={dias} hoje={semana.hoje} />
           <Legenda />
+          <ProximaSemana acoes={proxima.acoes} prazos={proxima.prazos} ate={ate} depois={depois} kanbanHref={`/kanban?resp=${encodeURIComponent(escolha.alvo.id)}`} />
         </section>
       </PrazosProvider>
 
@@ -158,15 +164,6 @@ export default async function MinhaSemanaPage({ searchParams }: { searchParams: 
           hoje={hoje}
           vazio="Todos os cards abertos têm próxima ação."
         />
-
-        {depois > 0 ? (
-          <p className="font-mono text-xs text-fg-mute">
-            +{depois} {depois === 1 ? "card" : "cards"} com próxima ação depois desta semana ·{" "}
-            <Link href={`/kanban?resp=${encodeURIComponent(escolha.alvo.id)}`} className="text-fg-soft hover:text-foreground hover:underline">
-              ver no Kanban
-            </Link>
-          </p>
-        ) : null}
       </div>
     </>
   );
