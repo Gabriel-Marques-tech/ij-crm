@@ -1,5 +1,6 @@
 // @vitest-environment node
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { db as dbApp } from "@/lib/db";
 import { dbTeste, limparBanco } from "@/test/db";
 import { invalidarCachePipelines } from "@/lib/fases/cache";
 import { inicioDoDia } from "@/lib/oportunidades/campos";
@@ -102,6 +103,10 @@ beforeEach(async () => {
   await limparBanco(["transicao_fase", "timeline", "oportunidade", "fase", "pipeline", "contato", "empresa", "sessao", "usuario"]);
   invalidarCachePipelines();
   seq = 0;
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 describe("listarTabela", () => {
@@ -317,6 +322,37 @@ describe("listarTabela", () => {
     // Com busca + filtro: a busca pelo nome exibido continua valendo junto da ordem.
     const filtrada = await listarTabela(estado({ q: "bravo" }, { ordem: { coluna: "empresa", dir: "desc" } }), AGORA);
     expect(filtrada.linhas.map((l) => l.id)).toEqual(esperado.slice(0, 27));
+  });
+
+  it("ordem por nome: a página reaplica os filtros (card apagado entre a leitura dos ids e a da página some)", async () => {
+    const s = await semear();
+    const a = await card(s, "a", { empresaId: s.acme.id });
+    await card(s, "b", { empresaId: s.acme.id });
+    const original = dbApp.$queryRaw.bind(dbApp);
+    vi.spyOn(dbApp, "$queryRaw").mockImplementationOnce((async (...args: Parameters<typeof dbApp.$queryRaw>) => {
+      const r = await original(...args);
+      await db.oportunidade.update({ where: { id: a.id }, data: { deletadoEm: new Date() } });
+      return r;
+    }) as typeof dbApp.$queryRaw);
+    const r = await listarTabela(estado({}, { ordem: { coluna: "empresa", dir: "asc" } }), AGORA);
+    expect(r.linhas.map((l) => l.titulo)).toEqual(["b"]);
+  });
+
+  it("busca que casa mais de 32.767 ids (limite de bind do Postgres) pagina por nome e por título", { timeout: 60_000 }, async () => {
+    const s = await semear();
+    const N = 33_000;
+    await db.$executeRaw`
+      INSERT INTO oportunidade (id, titulo, pipeline_id, fase_id, responsavel_id, criado_via, empresa_id, fase_desde, criado_em, atualizado_em)
+      SELECT 'massa' || lpad(g::text, 6, '0'), 'massa ' || lpad(g::text, 6, '0'), ${s.vendas.id}, ${fase(s.vendas, "primeiro_contato")},
+             ${s.ana.id}, 'UI', CASE WHEN g % 2 = 0 THEN ${s.dup.id} ELSE NULL END, now(), now(), now()
+      FROM generate_series(1, ${N}) g`;
+    const porNome = await listarTabela(estado({ q: "massa" }, { ordem: { coluna: "empresa", dir: "asc" }, pagina: 2 }), AGORA);
+    expect(porNome.total).toBe(N);
+    expect(porNome.linhas.map((l) => l.id)).toEqual(Array.from({ length: POR_PAGINA }, (_, i) => `massa${String(2 * (POR_PAGINA + i + 1)).padStart(6, "0")}`));
+    expect(porNome.linhas[0].empresa?.nome).toBe("Acme Ltda");
+    const porTitulo = await listarTabela(estado({ q: "massa" }, { ordem: { coluna: "titulo", dir: "desc" } }), AGORA);
+    expect(porTitulo.total).toBe(N);
+    expect(porTitulo.linhas[0].titulo).toBe("massa 033000");
   });
 
   it("pagina de 50 em 50 com total; página além do fim cai na última", async () => {
