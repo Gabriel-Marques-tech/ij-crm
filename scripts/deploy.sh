@@ -30,6 +30,8 @@ IMAGENS_MANTER="${IMAGENS_MANTER:-5}"
 [[ "$IMAGENS_MANTER" =~ ^[1-9][0-9]*$ ]] || falhar "IMAGENS_MANTER inválido: $IMAGENS_MANTER"
 APP_IMAGE_PADRAO=ghcr.io/gabriel-marques-tech/ij-crm-app
 OPS_IMAGE_PADRAO=ghcr.io/gabriel-marques-tech/ij-crm-ops
+# Label que o docker/metadata-action grava nas imagens do CI.
+ORIGEM_IMAGENS=https://github.com/Gabriel-Marques-tech/ij-crm
 
 # Nomes das imagens como o compose resolve (shell > .env > padrão do compose.prod.yml).
 resolver_imagens() {
@@ -154,7 +156,7 @@ resolver_tag() {
 }
 
 # Disco: apaga as imagens app/ops fora das últimas IMAGENS_MANTER tags do
-# histórico (a que roda fica sempre) e as camadas órfãs (`latest` antigo re-baixado).
+# histórico (a que roda fica sempre) e as órfãs delas (`latest` antigo re-baixado).
 limpar_imagens() {
   local manter tag repo atual
   atual="$(tag_rodando)"
@@ -167,7 +169,8 @@ limpar_imagens() {
       docker image rm "$repo:$tag" >/dev/null || true
     done < <(docker image ls "$repo" --format '{{.Tag}}')
   done
-  docker image prune -f >/dev/null || true
+  # Só órfãs das imagens deste repo (label do CI); outras do host ficam.
+  docker image prune -f --filter "label=org.opencontainers.image.source=$ORIGEM_IMAGENS" >/dev/null || true
 }
 
 # Troca só o container `app` para a imagem TAG e confere o health.
