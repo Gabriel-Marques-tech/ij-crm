@@ -1,26 +1,42 @@
 #!/usr/bin/env bash
 # Deploy de produção (GAB-30). Ver docs/runbook.md §1–§2.
 #
-#   scripts/deploy.sh [--no-pull] [--force]   checa → pull → build → backup → migrate → up → health
-#   scripts/deploy.sh rollback [TAG]          app volta para TAG (padrão: o deploy bom anterior ao que roda)
+#   scripts/deploy.sh [TAG] [--no-pull] [--force]   checa → git pull → docker pull → backup → migrate → up → health
+#   scripts/deploy.sh --build-local [--no-pull] [--force]   idem, mas builda as imagens NESTA máquina
+#   scripts/deploy.sh rollback [TAG]                app volta para TAG (padrão: o deploy bom anterior ao que roda)
 #
-#   --no-pull  deploy do commit que está no disco (sem git pull)
-#   --force    aceita árvore git suja (mudanças/arquivos não commitados entram na imagem)
+#   TAG            imagem publicada pelo CI no GHCR (.github/workflows/imagens.yml):
+#                  `sha-<commit curto>` ou `latest` (padrão). `latest` é resolvida para
+#                  o `sha-…` dela (label org.opencontainers.image.revision): histórico e
+#                  rollback sempre usam tags imutáveis.
+#   --build-local  escape: sem CI/registry, builda aqui (tag `local-<commit>`). Pesado
+#                  para uma VPS pequena (~2 GB de RAM e de disco só de build).
+#   --no-pull      não roda `git pull` (compose/scripts/Caddyfile ficam como estão no disco)
+#   --force        aceita árvore git suja
 #
-# Imagens são marcadas com o commit (`ij-crm/app:<sha>`, `ij-crm/ops:<sha>`).
+# O repo na VPS fornece só compose.prod.yml, Caddyfile e scripts; o código vem da imagem.
 # .deploy/historico = deploys que passaram no health, em ordem (um por linha; o
-# último é o "último bom"). Rollback não reescreve o histórico; `:latest` aponta
+# último é o "último bom"). Rollback não reescreve o histórico; `:latest` local aponta
 # sempre para o que está rodando depois de um deploy/rollback bem-sucedido.
 # Se o deploy falha no up/health, o app volta sozinho para o último bom e o
-# script sai com erro.
+# script sai com erro. Depois de um deploy bom, ficam no host só as imagens das
+# últimas IMAGENS_MANTER (padrão 5) tags do histórico (e a que está rodando).
 set -euo pipefail
 # shellcheck source=scripts/_comum.sh
 source "$(dirname "${BASH_SOURCE[0]}")/_comum.sh"
 
-APP_IMAGE="${APP_IMAGE:-ij-crm/app}"
-OPS_IMAGE="${OPS_IMAGE:-ij-crm/ops}"
 HISTORICO="$RAIZ/.deploy/historico"
-export APP_IMAGE OPS_IMAGE
+IMAGENS_MANTER="${IMAGENS_MANTER:-5}"
+[[ "$IMAGENS_MANTER" =~ ^[1-9][0-9]*$ ]] || falhar "IMAGENS_MANTER inválido: $IMAGENS_MANTER"
+APP_IMAGE_PADRAO=ghcr.io/gabriel-marques-tech/ij-crm-app
+OPS_IMAGE_PADRAO=ghcr.io/gabriel-marques-tech/ij-crm-ops
+
+# Nomes das imagens como o compose resolve (shell > .env > padrão do compose.prod.yml).
+resolver_imagens() {
+  APP_IMAGE="$(ler_env APP_IMAGE)"; APP_IMAGE="${APP_IMAGE:-$APP_IMAGE_PADRAO}"
+  OPS_IMAGE="$(ler_env OPS_IMAGE)"; OPS_IMAGE="${OPS_IMAGE:-$OPS_IMAGE_PADRAO}"
+  export APP_IMAGE OPS_IMAGE
+}
 
 # ---- checagens antes de mexer em qualquer coisa ----
 checar_env() {
@@ -45,6 +61,7 @@ checar_env() {
     [[ -n "$(ler_env "$v")" ]] || { log "ERRO: $v vazio" >&2; erros=1; }
   done
   [[ $erros -eq 0 ]] || falhar "corrija o .env (modelo: .env.prod.example)"
+  resolver_imagens
   if [[ "$(ler_env NOTIFICATIONS_ENABLED)" == "true" ]]; then
     log "NOTIFICATIONS_ENABLED=true — envios reais pelo WhatsApp LIGADOS"
   else
@@ -102,24 +119,84 @@ banco_tem_dados() {
     "select to_regclass('public._prisma_migrations') is not null")" == "t" ]]
 }
 
-# Troca só o container `app` para a imagem TAG (já existente) e confere o health.
+tem_imagem() { docker image inspect "$1" >/dev/null 2>&1; }
+
+baixar() {
+  log "docker pull $1"
+  docker pull -q "$1" >/dev/null \
+    || falhar "não consegui baixar $1 (a tag existe no GHCR? docker login ghcr.io feito? runbook §1)"
+}
+
+# Garante as imagens app e ops de TAG neste host (baixa do GHCR se faltar).
+# Tags `local-*` (--build-local) não existem no registry: só confere.
+garantir_imagens() {
+  local tag="$1" img
+  for img in "$APP_IMAGE:$tag" "$OPS_IMAGE:$tag"; do
+    tem_imagem "$img" && continue
+    [[ "$tag" == local-* ]] && falhar "imagem $img não existe neste host (build local apagado?)"
+    baixar "$img"
+  done
+}
+
+# Tag imutável a partir da pedida: `sha-…` passa direto; `latest` (ou outra tag
+# móvel) é baixada e vira o `sha-…` do commit dela. Escreve a tag no stdout.
+resolver_tag() {
+  local pedida="$1" rev
+  if [[ "$pedida" == sha-* || "$pedida" == local-* ]]; then
+    printf '%s' "$pedida"
+    return 0
+  fi
+  baixar "$APP_IMAGE:$pedida" >&2
+  rev="$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$APP_IMAGE:$pedida")"
+  [[ "$rev" =~ ^[0-9a-f]{40}$ ]] \
+    || falhar "$APP_IMAGE:$pedida sem label de revisão do CI; passe a tag: scripts/deploy.sh sha-<commit>"
+  printf 'sha-%s' "${rev:0:7}"
+}
+
+# Disco: apaga as imagens app/ops fora das últimas IMAGENS_MANTER tags do
+# histórico (a que roda fica sempre) e as camadas órfãs (`latest` antigo re-baixado).
+limpar_imagens() {
+  local manter tag repo atual
+  atual="$(tag_rodando)"
+  manter="$(tail -n "$IMAGENS_MANTER" "$HISTORICO" 2>/dev/null || true)"
+  for repo in "$APP_IMAGE" "$OPS_IMAGE"; do
+    while read -r tag; do
+      [[ -z "$tag" || "$tag" == "<none>" || "$tag" == latest || "$tag" == "$atual" ]] && continue
+      grep -qxF "$tag" <<<"$manter" && continue
+      log "limpeza: docker image rm $repo:$tag"
+      docker image rm "$repo:$tag" >/dev/null || true
+    done < <(docker image ls "$repo" --format '{{.Tag}}')
+  done
+  docker image prune -f >/dev/null || true
+}
+
+# Troca só o container `app` para a imagem TAG e confere o health.
 trocar_app() {
   local tag="$1"
-  docker image inspect "$APP_IMAGE:$tag" >/dev/null 2>&1 || falhar "imagem $APP_IMAGE:$tag não existe neste host"
+  garantir_imagens "$tag"
   APP_TAG="$tag" "${COMPOSE[@]}" up -d --no-build --no-deps --wait app || return 1
   verificar_health || return 1
   marcar_latest "$tag"
 }
 
 deploy() {
-  local puxar=1 forcar=0 arg dump_antes="" ultimo
+  local puxar=1 forcar=0 local_build=0 pedida="" arg dump_antes="" ultimo
   for arg in "$@"; do
     case "$arg" in
       --no-pull) puxar=0 ;;
       --force) forcar=1 ;;
-      *) falhar "opção desconhecida: $arg" ;;
+      --build-local) local_build=1 ;;
+      -*) falhar "opção desconhecida: $arg" ;;
+      *)
+        [[ -z "$pedida" ]] || falhar "mais de uma tag: $pedida e $arg"
+        pedida="$arg"
+        ;;
     esac
   done
+  if [[ $local_build -eq 1 && -n "$pedida" ]]; then
+    falhar "--build-local não aceita TAG (a tag é local-<commit>)"
+  fi
+  pedida="${pedida:-latest}"
 
   checar_arvore "$forcar"
   if [[ $puxar -eq 1 ]]; then
@@ -128,17 +205,24 @@ deploy() {
     # Re-executa a versão recém-baixada deste script.
     local repassar=(--no-pull)
     [[ $forcar -eq 1 ]] && repassar+=(--force)
+    if [[ $local_build -eq 1 ]]; then repassar+=(--build-local); else repassar+=("$pedida"); fi
     exec "$RAIZ/scripts/deploy.sh" "${repassar[@]}"
   fi
 
   checar_env
-  APP_TAG="$(git -C "$RAIZ" rev-parse --short=12 HEAD)"
-  export APP_TAG
   ultimo="$(ultimo_bom)"
-  log "deploy de $APP_TAG (último bom: ${ultimo:-nenhum})"
-
-  log "build das imagens app (runtime) e migrate (ops)"
-  "${COMPOSE[@]}" --profile ops build app migrate
+  if [[ $local_build -eq 1 ]]; then
+    APP_TAG="local-$(git -C "$RAIZ" rev-parse --short=12 HEAD)"
+    export APP_TAG
+    log "deploy de $APP_TAG (build local; último bom: ${ultimo:-nenhum})"
+    log "build das imagens app (runtime) e migrate (ops) NESTA máquina"
+    "${COMPOSE[@]}" --profile ops build app migrate
+  else
+    APP_TAG="$(resolver_tag "$pedida")"
+    export APP_TAG
+    log "deploy de $APP_TAG (pedida: $pedida; último bom: ${ultimo:-nenhum})"
+    garantir_imagens "$APP_TAG"
+  fi
 
   log "subindo o banco"
   "${COMPOSE[@]}" up -d --wait db
@@ -164,6 +248,7 @@ deploy() {
   if "${COMPOSE[@]}" up -d --no-build --wait --wait-timeout 300 && verificar_health; then
     registrar_deploy "$APP_TAG"
     marcar_latest "$APP_TAG"
+    limpar_imagens
     log "deploy concluído: $APP_TAG"
     return 0
   fi
@@ -184,6 +269,8 @@ deploy() {
 
 rollback() {
   local alvo="${1:-}" atual idx
+  carregar_ambiente
+  resolver_imagens
   atual="$(tag_rodando)"
   if [[ -z "$alvo" ]]; then
     [[ -s "$HISTORICO" ]] || falhar "sem histórico em $HISTORICO; passe a tag: scripts/deploy.sh rollback <tag>"
@@ -205,6 +292,6 @@ rollback() {
 
 case "${1:-}" in
   rollback) rollback "${2:-}" ;;
-  -h | --help) sed -n '2,16p' "$0" ;;
+  -h | --help) sed -n '2,23p' "$0" ;;
   *) deploy "$@" ;;
 esac
