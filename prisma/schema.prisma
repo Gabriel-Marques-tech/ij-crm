@@ -102,6 +102,7 @@ model Usuario {
   sessoes           Sessao[]
   importPrevias     ImportPrevia[]
   foto              UsuarioFoto?
+  configuracoes     Configuracao[]
 
   @@map("usuario")
 }
@@ -427,4 +428,19 @@ model ImportPrevia {
 
   @@index([expiraEm])
   @@map("import_previa")
+}
+
+// ---------------------------------------------------------------- configuração (GAB-44)
+
+// Chave → JSON validado com zod por chave (src/lib/configuracao). Linha ausente
+// ou inválida = padrão do código. Genérica: GAB-42 (config técnica) reaproveita.
+model Configuracao {
+  chave         String   @id
+  valor         Json
+  atualizadoEm  DateTime @default(now()) @map("atualizado_em")
+  atualizadoPor String?  @map("atualizado_por")
+
+  autor         Usuario? @relation(fields: [atualizadoPor], references: [id], onDelete: SetNull)
+
+  @@map("configuracao")
 }
