@@ -7,26 +7,25 @@ import { cn } from "cn";
 
 const ABA = "rounded-md px-3 py-1 font-mono text-xs uppercase tracking-eyebrow transition-colors";
 
-/** Meu | Time | Pessoa ▾ (padrão "Meu"). Mantém a semana na URL. */
+/** Meu | Time | Pessoa ▾ (padrão "Meu"). Mantém o período na URL. */
 export function SeletorVisao({
   modo,
   pessoaId,
   eu,
   opcoes,
-  semana,
+  periodo,
 }: {
   modo: "meu" | "time" | "pessoa";
   pessoaId: string | null;
   eu: string;
   opcoes: { id: string; nome: string }[];
-  /** `?semana=` atual (null = semana de hoje). */
-  semana: string | null;
+  /** `?periodo=`/`?data=` atuais (ver `paramsDoPeriodo`). */
+  periodo: Record<string, string>;
 }) {
   const router = useRouter();
   const [pendente, startTransition] = useTransition();
   const href = (extra: Record<string, string>) => {
-    const q = new URLSearchParams(extra);
-    if (semana) q.set("semana", semana);
+    const q = new URLSearchParams({ ...extra, ...periodo });
     const s = q.toString();
     return s ? `/calendario?${s}` : "/calendario";
   };

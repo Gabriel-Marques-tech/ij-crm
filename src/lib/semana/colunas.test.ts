@@ -14,8 +14,9 @@ describe("dividirSemana (Minha Semana em colunas)", () => {
     expect(fimDaJanela(semana)).toBe("2026-11-05");
   });
 
-  it("o destaque não se repete nas colunas", () => {
-    const r = dividirSemana(semana, { acoes: [a("x", "2026-10-29"), a("y", "2026-10-29")], prazos: [] }, "x");
+  it("o destaque (Mais urgente) também aparece na coluna do dia dele", () => {
+    const r = dividirSemana(semana, { acoes: [a("x", "2026-10-30"), a("y", "2026-10-29")], prazos: [] }, "x");
+    expect(r.dias[4].acoes.map((i) => i.cardId)).toEqual(["x"]);
     expect(r.dias[3].acoes.map((i) => i.cardId)).toEqual(["y"]);
   });
 
@@ -31,8 +32,15 @@ describe("dividirSemana (Minha Semana em colunas)", () => {
     expect(r.dias[4].prazos.map((i) => i.id)).toEqual(["col"]);
   });
 
+  it("destaque depois do domingo não se repete na 'Próxima semana' (já está no topo)", () => {
+    const r = dividirSemana(semana, { acoes: [a("destaque", "2026-11-03"), a("outro", "2026-11-03")], prazos: [] }, "destaque");
+    expect(r.proxima.acoes.map((i) => i.cardId)).toEqual(["outro"]);
+    expect(r.dias.flatMap((d) => d.acoes)).toHaveLength(0);
+  });
+
   it("sem destaque, nada é filtrado", () => {
-    const r = dividirSemana(semana, { acoes: [a("x", "2026-10-26")], prazos: [] }, null);
+    const r = dividirSemana(semana, { acoes: [a("x", "2026-10-26"), a("y", "2026-11-02")], prazos: [] }, null);
     expect(r.dias[0].acoes).toHaveLength(1);
+    expect(r.proxima.acoes).toHaveLength(1);
   });
 });

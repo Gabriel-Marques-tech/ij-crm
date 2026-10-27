@@ -4,6 +4,7 @@ import { invalidarCachePipelines } from "@/lib/fases/cache";
 import { inicioDoDia } from "@/lib/oportunidades/campos";
 import { criarPrazo, marcarPrazoFeito } from "@/lib/prazos/prazos";
 import { carregarItens, carregarItensDaSemana, resolverVisao } from "./calendario";
+import { resolverPeriodo } from "./periodo";
 import { resolverSemana } from "./semana";
 
 const db = dbTeste();
@@ -174,5 +175,27 @@ describe("resolverVisao", () => {
     expect((await resolverVisao(ator, { pessoa: s.ivo.id })).modo).toBe("meu");
     expect((await resolverVisao(ator, { pessoa: s.ana.id })).modo).toBe("meu");
     expect((await resolverVisao(ator, { pessoa: "lixo" })).modo).toBe("meu");
+  });
+});
+
+describe("limites do mês e dos 15 dias (Calendário por período)", () => {
+  it("mês: 01/10 e 31/10 entram; 30/09 e 01/11 não (ações por instante de SP, prazos pela coluna DATE)", async () => {
+    const s = await semear();
+    const gil = { id: (await db.usuario.create({ data: { nome: "Gil", email: "gil@ij.test", papel: "GESTOR" } })).id, papel: "GESTOR" as const };
+    for (const dia of ["2026-09-30", "2026-10-01", "2026-10-31", "2026-11-01"]) {
+      await s.card(`ação ${dia}`, dia);
+      const r = await criarPrazo(gil, { titulo: `prazo ${dia}`, dia, responsavelId: s.ana.id });
+      if (!r.ok) throw new Error(r.erro);
+    }
+    const ator = { id: s.ana.id, papel: "VENDEDOR" as const };
+    const mes = resolverPeriodo("mes", undefined, AGORA);
+    const r = await carregarItens({ responsavelIds: [s.ana.id] }, { primeiroDia: mes.primeiroDia, ultimoDia: mes.ultimoDia, hoje: mes.hoje }, ator);
+    expect(r.acoes.map((a) => a.dia)).toEqual(["2026-10-01", "2026-10-31"]);
+    expect(r.prazos.map((p) => p.dia)).toEqual(["2026-10-01", "2026-10-31"]);
+
+    const q = resolverPeriodo("15d", "2026-10-17", AGORA); // 17/10 a 31/10
+    const r15 = await carregarItens({ responsavelIds: [s.ana.id] }, { primeiroDia: q.primeiroDia, ultimoDia: q.ultimoDia, hoje: q.hoje }, ator);
+    expect(r15.acoes.map((a) => a.dia)).toEqual(["2026-10-31"]);
+    expect(r15.prazos.map((p) => p.dia)).toEqual(["2026-10-31"]);
   });
 });

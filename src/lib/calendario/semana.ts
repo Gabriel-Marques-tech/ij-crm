@@ -42,12 +42,15 @@ function rotuloSemana(segunda: string, domingo: string): string {
   return a === b ? `${ddmm(segunda)} a ${ddmm(domingo)}/${b}` : `${ddmm(segunda)}/${a} a ${ddmm(domingo)}/${b}`;
 }
 
+/** `ref` (da URL, não confiável) é um dia `YYYY-MM-DD` real a até ~5 anos de `hoje`. */
+export function diaValido(ref: string | undefined, hoje: string): ref is string {
+  return !!ref && inicioDoDia(ref) !== null && Math.abs(Number(ref.slice(0, 4)) - Number(hoje.slice(0, 4))) <= LIMITE_ANOS;
+}
+
 /** `ref` vem da URL (não confiável): qualquer dia válido → a semana dele; o resto → semana atual. */
 export function resolverSemana(ref: string | undefined, agora: Date): SemanaCalendario {
   const hoje = diaEmFuso(agora);
-  const anoHoje = Number(hoje.slice(0, 4));
-  const valido = !!ref && inicioDoDia(ref) !== null && Math.abs(Number(ref.slice(0, 4)) - anoHoje) <= LIMITE_ANOS;
-  const segunda = segundaDe(valido ? ref! : hoje);
+  const segunda = segundaDe(diaValido(ref, hoje) ? ref : hoje);
   const domingo = somarDias(segunda, 6);
   const proxima = somarDias(segunda, 7);
   return {
@@ -75,7 +78,7 @@ export function diaDoPrazo(data: Date): string {
 
 export type DiaAgrupado<A, P> = { dia: string; acoes: A[]; prazos: P[] };
 
-/** Os 7 dias na ordem (vazios inclusive), cada um com as ações e os prazos dele. */
+/** Os dias na ordem (vazios inclusive), cada um com as ações e os prazos dele. */
 export function agruparPorDia<A extends { dia: string }, P extends { dia: string }>(
   dias: readonly string[],
   acoes: readonly A[],
