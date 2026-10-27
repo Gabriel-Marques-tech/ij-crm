@@ -38,10 +38,13 @@ services:
       - app_node_modules:/app/node_modules
       - app_next:/app/.next
     # Esconde do container o que não é app: `.claude/` (worktrees de agentes, que
-    # o Turbopack varreria inteiras a cada mudança). Worktrees ficam FORA do repo
-    # (README, "Worktrees de agentes"); isto é a rede de segurança.
+    # o Turbopack varreria inteiras a cada mudança) e saídas de ferramentas locais
+    # que o app nunca lê. Worktrees ficam FORA do repo (README, "Worktrees de
+    # agentes"); isto é a rede de segurança.
     tmpfs:
       - /app/.claude
+      - /app/.code-review-graph
+      - /app/graphify-out
     depends_on:
       db:
         condition: service_healthy
