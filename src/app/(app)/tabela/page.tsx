@@ -6,13 +6,13 @@ import { PageHeader } from "@/components/shell/page-header";
 import { DiasNaFase } from "@/components/kanban/aging";
 import { Button } from "@/components/ui/button";
 import { exigirUsuario } from "@/lib/auth/atual";
-import { textoVinculo, type Vinculo } from "@/lib/entidades/vinculo";
+import type { Vinculo } from "@/lib/entidades/vinculo";
 import { listarPipelines } from "@/lib/fases/fases";
 import { estadoProximaAcao } from "@/lib/oportunidades/aging";
 import { ROTULO_ORIGEM } from "@/lib/oportunidades/campos";
 import { formatarDinheiro } from "@/lib/oportunidades/formatar";
 import { escreverEstado, lerEstado, paramsDeRegistro, proximaOrdem, type ColunaOrdenavel, type EstadoTabela } from "@/lib/tabela/params";
-import { listarPessoas, listarTabela, POR_PAGINA, type LinhaTabela } from "@/lib/tabela/tabela";
+import { listarPessoas, listarTabela, POR_PAGINA, textoNaTabela, type LinhaTabela } from "@/lib/tabela/tabela";
 import { BarraFiltrosTabela } from "./painel-filtros-tabela";
 
 export const metadata = { title: "Tabela" };
@@ -154,7 +154,7 @@ function BotaoPagina({ estado, pagina, desabilitado, rotulo, children }: { estad
 
 function TextoVinculo({ tipo, v }: { tipo: "empresa" | "contato"; v: Vinculo | null }) {
   if (!v) return <span className="text-fg-faint">—</span>;
-  return <span className={cn("block max-w-48 truncate", v.estado === "ATIVO" ? "text-fg-soft" : "text-fg-mute")}>{textoVinculo(tipo, v)}</span>;
+  return <span className={cn("block max-w-48 truncate", v.estado === "EXCLUIDO" ? "text-fg-mute" : "text-fg-soft")}>{textoNaTabela(tipo, v)}</span>;
 }
 
 function Linha({ l, agora }: { l: LinhaTabela; agora: Date }) {

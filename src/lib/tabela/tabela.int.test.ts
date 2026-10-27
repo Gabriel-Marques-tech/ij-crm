@@ -4,7 +4,7 @@ import { dbTeste, limparBanco } from "@/test/db";
 import { invalidarCachePipelines } from "@/lib/fases/cache";
 import { inicioDoDia } from "@/lib/oportunidades/campos";
 import { ESTADO_PADRAO, FILTROS_TABELA_VAZIOS, type EstadoTabela, type FiltrosTabela } from "./params";
-import { exportarCsv, listarTabela, POR_PAGINA } from "./tabela";
+import { exportarCsv, listarTabela, POR_PAGINA, textoNaTabela } from "./tabela";
 
 const db = dbTeste();
 const sp = (iso: string) => new Date(`${iso}-03:00`);
@@ -189,7 +189,7 @@ describe("listarTabela", () => {
     expect(await busca("%")).toEqual([]);
   });
 
-  it("busca por nome só casa empresa/contato vivos (excluído ou mesclado não)", async () => {
+  it("busca casa o nome exibido: vivo; mesclado → principal viva (ou o próprio, se a principal morreu); excluído não", async () => {
     const s = await semear();
     const morto = await db.contato.create({ data: { nome: "Zeca Morto", deletadoEm: new Date() } });
     await card(s, "x", { empresaId: s.velha.id });
@@ -200,7 +200,12 @@ describe("listarTabela", () => {
     expect(await busca("velha")).toEqual([]);
     expect(await busca("dup")).toEqual([]);
     expect(await busca("zeca")).toEqual([]);
-    expect(await busca("acme")).toEqual(["w"]);
+    expect(await busca("acme")).toEqual(["w", "y"]);
+    const outra = await db.empresa.create({ data: { nome: "Principal Morta", deletadoEm: new Date() } });
+    const orfa = await db.empresa.create({ data: { nome: "Orfa Ltda", mergedIntoId: outra.id } });
+    await card(s, "v", { empresaId: orfa.id });
+    expect(await busca("principal")).toEqual([]);
+    expect(await busca("orfa")).toEqual(["v"]);
   });
 
   it("empresa excluída/mesclada descrita via vinculo.ts", async () => {
@@ -210,6 +215,28 @@ describe("listarTabela", () => {
     const r = await listarTabela(estado({}, { ordem: { coluna: "titulo", dir: "asc" } }), AGORA);
     expect(r.linhas[0].empresa).toMatchObject({ estado: "EXCLUIDO", nome: "Velha SA" });
     expect(r.linhas[1].empresa).toMatchObject({ estado: "MESCLADO", nome: "Acme Dup", destino: { id: s.acme.id, nome: "Acme Ltda" } });
+  });
+
+  it("nome exibido como no Kanban: mesclada → principal viva; principal excluída → nome próprio", async () => {
+    const s = await semear();
+    const morta = await db.empresa.create({ data: { nome: "Principal Morta", deletadoEm: new Date() } });
+    const orfa = await db.empresa.create({ data: { nome: "Orfa Ltda", mergedIntoId: morta.id } });
+    const maria2 = await db.contato.create({ data: { nome: "Maria Dup", mergedIntoId: s.maria.id } });
+    await card(s, "a", { empresaId: s.dup.id, contatoId: maria2.id });
+    await card(s, "b", { empresaId: orfa.id });
+    await card(s, "c", { empresaId: s.velha.id });
+    const r = await listarTabela(estado({}, { ordem: { coluna: "titulo", dir: "asc" } }), AGORA);
+    expect(r.linhas.map((l) => [textoNaTabela("empresa", l.empresa), textoNaTabela("contato", l.contato)])).toEqual([
+      ["Acme Ltda", "Maria 50% Silva"],
+      ["Orfa Ltda", null],
+      ["Velha SA (excluída)", null],
+    ]);
+    const csv = (await csvTexto(estado({}, { ordem: { coluna: "titulo", dir: "asc" } }))).slice(1).split("\r\n").filter(Boolean).slice(1);
+    expect(csv.map((l) => l.split(";").slice(4, 6))).toEqual([
+      ["Acme Ltda", "Maria 50% Silva"],
+      ["Orfa Ltda", ""],
+      ["Velha SA (excluída)", ""],
+    ]);
   });
 
   it("ordenação no banco: vazios por último, desempate estável por id, dias na fase, aging", async () => {

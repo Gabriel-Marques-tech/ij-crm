@@ -4,7 +4,9 @@
  *
  * - Vendedor vê tudo (§4.5, matriz de papéis): responsável é filtro, não parede.
  * - Card soft-deletado nunca aparece (`deletadoEm: null` em toda query).
- * - Empresa/contato excluídos ou mesclados vêm descritos por `vinculo.ts`.
+ * - Empresa/contato excluídos ou mesclados vêm descritos por `vinculo.ts` e
+ *   aparecem pela regra do Kanban (`nomeExibido`): mesclado → nome da
+ *   principal se ela estiver viva, senão o próprio nome (`textoNaTabela`).
  * - Ordenação só por colunas da lista branca, sempre com `id` como desempate
  *   (página estável: o mesmo card não aparece em duas páginas).
  * - Faixas da próxima ação = `faixaProximaAcao` (Kanban e Minha Semana),
@@ -73,22 +75,24 @@ function normalizarColuna(coluna: string): Prisma.Sql {
 }
 
 /**
- * Ids que batem na busca: título, ou nome de empresa/contato VIVOS (excluído
- * ou mesclado não conta; o card ligado a uma empresa mesclada não é achado
- * pelo nome da principal: resolver a cadeia de merge aqui custaria uma CTE
- * recursiva por busca). `%`, `_` e `\` do termo são literais (`escaparLike`,
- * ESCAPE `\`). `restrito` limita a um lote de ids (CSV).
+ * Ids que batem na busca: título, ou o nome EXIBIDO da empresa/contato
+ * (`textoNaTabela`): vivo → o próprio; mesclado → o da principal viva, ou o
+ * próprio se a principal morreu (merge tem 1 nível); excluído não conta.
+ * `%`, `_` e `\` do termo são literais (`escaparLike`, ESCAPE `\`).
+ * `restrito` limita a um lote de ids (CSV).
  */
 async function idsDaBusca(termo: string, restrito?: string[]): Promise<string[]> {
   const padrao = `%${escaparLike(termo)}%`;
   const casa = (coluna: string) => Prisma.sql`${normalizarColuna(coluna)} LIKE public.unaccent(lower(${padrao})) ESCAPE ${"\\"}`;
   const linhas = await db.$queryRaw<{ id: string }[]>`
     SELECT o.id FROM oportunidade o
-    LEFT JOIN empresa e ON e.id = o.empresa_id AND e.deletado_em IS NULL AND e.merged_into_id IS NULL
-    LEFT JOIN contato c ON c.id = o.contato_id AND c.deletado_em IS NULL AND c.merged_into_id IS NULL
+    LEFT JOIN empresa e ON e.id = o.empresa_id AND e.deletado_em IS NULL
+    LEFT JOIN empresa ep ON ep.id = e.merged_into_id AND ep.deletado_em IS NULL
+    LEFT JOIN contato c ON c.id = o.contato_id AND c.deletado_em IS NULL
+    LEFT JOIN contato cp ON cp.id = c.merged_into_id AND cp.deletado_em IS NULL
     WHERE o.deletado_em IS NULL
       ${restrito ? Prisma.sql`AND o.id = ANY(${restrito})` : Prisma.empty}
-      AND (${casa("o.titulo")} OR ${casa("e.nome")} OR ${casa("c.nome")})`;
+      AND (${casa("o.titulo")} OR ${casa("COALESCE(ep.nome, e.nome)")} OR ${casa("COALESCE(cp.nome, c.nome)")})`;
   return linhas.map((l) => l.id);
 }
 
@@ -181,6 +185,17 @@ export type LinhaTabela = {
   criadoEm: Date;
 };
 
+/**
+ * Texto da célula de empresa/contato (tela e CSV), na regra do Kanban
+ * (`nomeExibido`): mesclado → nome da principal se ela estiver viva, senão o
+ * próprio nome. Excluído (sem merge) mantém o aviso "(excluída)".
+ */
+export function textoNaTabela(tipo: "empresa" | "contato", v: Vinculo | null | undefined): string | null {
+  if (!v) return null;
+  if (v.estado === "MESCLADO") return v.destino?.nome ?? v.nome;
+  return textoVinculo(tipo, v);
+}
+
 type Bruta = Prisma.OportunidadeGetPayload<{ select: typeof SELECAO }>;
 
 async function paraLinhas(brutas: Bruta[], agora: Date): Promise<LinhaTabela[]> {
@@ -254,8 +269,8 @@ function linhaParaCsv(l: LinhaTabela): string {
     celulaTexto(l.titulo),
     celulaTexto(l.pipeline.nome),
     celulaTexto(l.fase.nome),
-    celulaTexto(textoVinculo("empresa", l.empresa)),
-    celulaTexto(textoVinculo("contato", l.contato)),
+    celulaTexto(textoNaTabela("empresa", l.empresa)),
+    celulaTexto(textoNaTabela("contato", l.contato)),
     celulaTexto(l.responsavel.nome),
     celulaTexto(l.origem ? ROTULO_ORIGEM[l.origem] : null),
     l.revisar ? "Sim" : "Não",
