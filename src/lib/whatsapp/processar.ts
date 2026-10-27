@@ -42,7 +42,7 @@ import { VERSAO_EXTRACAO } from "@/lib/llm/prompts/extracao.v2";
 import { ErroDeRegra } from "@/lib/oportunidades/erros";
 import { PIPELINE_VENDAS } from "@/lib/oportunidades/terminal-regras";
 import { aplicarExtracao, type Desfecho } from "./aplicar";
-import { alvoDaResposta, oportunidadesCandidatas } from "./candidatas";
+import { alvoDaResposta, oportunidadesCandidatas, type MotivoRespostaInvalida } from "./candidatas";
 import { textoAtualizado, textoCriado, textoFalha, textoPendente } from "./confirmacao";
 import { enviarWhatsApp } from "./enviar";
 import { extrairIdentificadores } from "./identificadores";
@@ -90,7 +90,7 @@ function carregar(id: string) {
  */
 export async function montarContexto(
   m: Pick<Bruta, "texto" | "recebidaEm" | "respondendoEventoId" | "remetenteUsuario" | "remetenteUsuarioId">,
-): Promise<ContextoExtracao> {
+): Promise<ContextoExtracao & { respostaInvalida: MotivoRespostaInvalida | null }> {
   let respondendoA: string | null = null;
   if (m.respondendoEventoId) {
     const anterior =
@@ -118,7 +118,8 @@ export async function montarContexto(
     if (r && !empresas.some((e) => e.id === r.empresa.id)) empresas.push({ id: r.empresa.id, nome: r.empresa.nome, via: r.via });
   }
 
-  const alvoResposta = await alvoDaResposta(m.respondendoEventoId);
+  const resposta = await alvoDaResposta(m.respondendoEventoId, m.recebidaEm);
+  const alvoResposta = resposta?.tipo === "CARD" ? resposta.id : null;
   const oportunidades = await oportunidadesCandidatas({
     remetenteUsuarioId: m.remetenteUsuarioId,
     recebidaEm: m.recebidaEm,
@@ -136,6 +137,7 @@ export async function montarContexto(
     empresas,
     oportunidades,
     alvoResposta,
+    respostaInvalida: resposta?.tipo === "INVALIDA" ? resposta.motivo : null,
   };
 }
 
@@ -259,7 +261,7 @@ async function processar(id: string, opts: { participantJid?: string | null }): 
   if (!m.remetenteUsuarioId) return falhar(m, tentativa, new ErroDeRegra("RESPONSAVEL_INVALIDO"), registroLlm(null), opts.participantJid);
 
   let r: ResultadoExtracao;
-  let ctx: ContextoExtracao;
+  let ctx: Awaited<ReturnType<typeof montarContexto>>;
   try {
     ctx = await montarContexto(m);
     r = await extrairAtualizacao(m.texto, ctx, { ref: m.id });
@@ -285,6 +287,7 @@ async function processar(id: string, opts: { participantJid?: string | null }): 
           registroLlm: llm,
           candidatas: ctx.oportunidades,
           alvoResposta: ctx.alvoResposta,
+          respostaInvalida: ctx.respostaInvalida,
         });
         await tx.mensagemBruta.update({
           where: { id: m.id },

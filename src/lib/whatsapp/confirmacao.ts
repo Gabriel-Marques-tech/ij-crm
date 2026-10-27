@@ -14,6 +14,9 @@
 export type MotivoPendente =
   | "SEM_NOME"
   | "ALVO_NAO_ENCONTRADO"
+  | "RESPOSTA_ANTIGA"
+  | "RESPOSTA_CARD_REMOVIDO"
+  | "RESPOSTA_FORA_DE_VENDAS"
   | "IGNORAR"
   | "CONTATO_EXCLUIDO"
   | "EMPRESA_EXCLUIDA"
@@ -33,6 +36,9 @@ export type ResumoCriado = {
 
 const TEXTO_PENDENTE: Record<MotivoPendente, string> = {
   SEM_NOME: "⚠️ não identifiquei o lead — responde esta mensagem com o nome",
+  RESPOSTA_ANTIGA: "⚠️ essa confirmação tem mais de 30 dias; não atualizei pelo reply, ficou na fila de revisão do CRM",
+  RESPOSTA_CARD_REMOVIDO: "⚠️ o card dessa confirmação foi removido do CRM; ficou na fila de revisão",
+  RESPOSTA_FORA_DE_VENDAS: "⚠️ o card dessa confirmação não está mais em Vendas; atualize pelo CRM (ficou na fila de revisão)",
   ALVO_NAO_ENCONTRADO: "⚠️ não achei o card para atualizar — responde a confirmação do card com a novidade; ficou na fila de revisão do CRM",
   IGNORAR: "⚠️ não entendi como registro de venda; ficou na fila de revisão do CRM",
   CONTATO_EXCLUIDO: "⚠️ esse telefone/email é de um contato excluído do CRM; ficou na fila de revisão",

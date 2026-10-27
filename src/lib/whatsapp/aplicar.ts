@@ -57,6 +57,7 @@ export { FASE_PADRAO_CRIAR, nomeComparavel } from "./comum";
 export async function aplicarExtracao(tx: Tx, e: EntradaAplicacao): Promise<Desfecho> {
   const ex = e.extracao;
   if (ex.intencao === "IGNORAR") return pendente("IGNORAR");
+  if (e.respostaInvalida) return pendente(e.respostaInvalida);
   // Reply a uma confirmação do bot fixa o card: é atualização mesmo que a LLM diga CRIAR.
   const atualizar = ex.intencao === "ATUALIZAR" || !!e.alvoResposta;
 

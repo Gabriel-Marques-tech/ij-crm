@@ -19,21 +19,55 @@ type Cliente = Prisma.TransactionClient | typeof db;
 
 export const JANELA_RECENTES_MS = 30 * 60 * 1000;
 export const MAX_RECENTES = 3;
-/** Por contato/empresa: os mais recentes bastam para a LLM e para as regras. */
-const MAX_POR_IDENTIDADE = 10;
+/**
+ * Por contato/empresa, abertos e fechados em consultas SEPARADAS: fechados
+ * nunca empurram um aberto para fora do limite (as regras de alvo dependem
+ * de saber se existe aberto).
+ */
+const MAX_ABERTOS_POR_IDENTIDADE = 10;
+const MAX_FECHADOS_POR_IDENTIDADE = 5;
+/** Reply a confirmação só fixa o alvo se a confirmação tem até 30 dias. */
+export const VALIDADE_RESPOSTA_MS = 30 * 24 * 60 * 60 * 1000;
+
+export type MotivoRespostaInvalida = "RESPOSTA_ANTIGA" | "RESPOSTA_CARD_REMOVIDO" | "RESPOSTA_FORA_DE_VENDAS";
+export type AlvoDaResposta = { tipo: "CARD"; id: string } | { tipo: "INVALIDA"; motivo: MotivoRespostaInvalida };
 
 const CARD_VIVO_EM_VENDAS = { deletadoEm: null, pipeline: { chave: PIPELINE_VENDAS } } as const;
 
 /**
- * Card da confirmação respondida, se a mensagem é reply a uma confirmação do
- * bot e o card continua vivo em vendas. É o que fixa o alvo sem a LLM.
+ * Reply a uma confirmação do bot que cita um card. `CARD` = fixa o alvo (até
+ * 30 dias, card vivo em vendas); `INVALIDA` = é reply a uma confirmação de
+ * card, mas antiga, de card removido ou fora de vendas — NÃO vira CRIAR, vai
+ * para revisão. `null` = não é reply a confirmação com card. Card não tem
+ * merge (só Empresa/Contato), então "vivo" = não está na lixeira.
  */
-export async function alvoDaResposta(respondendoEventoId: string | null, cliente: Cliente = db): Promise<string | null> {
+export async function alvoDaResposta(respondendoEventoId: string | null, recebidaEm: Date, cliente: Cliente = db): Promise<AlvoDaResposta | null> {
   if (!respondendoEventoId) return null;
-  const enviada = await cliente.mensagemEnviada.findUnique({ where: { eventoId: respondendoEventoId }, select: { oportunidadeId: true } });
+  const enviada = await cliente.mensagemEnviada.findUnique({ where: { eventoId: respondendoEventoId }, select: { oportunidadeId: true, em: true } });
   if (!enviada?.oportunidadeId) return null;
-  const card = await cliente.oportunidade.findFirst({ where: { id: enviada.oportunidadeId, ...CARD_VIVO_EM_VENDAS }, select: { id: true } });
-  return card?.id ?? null;
+  const card = await cliente.oportunidade.findUnique({
+    where: { id: enviada.oportunidadeId },
+    select: { id: true, deletadoEm: true, pipeline: { select: { chave: true } } },
+  });
+  if (!card || card.deletadoEm) return { tipo: "INVALIDA", motivo: "RESPOSTA_CARD_REMOVIDO" };
+  if (card.pipeline.chave !== PIPELINE_VENDAS) return { tipo: "INVALIDA", motivo: "RESPOSTA_FORA_DE_VENDAS" };
+  if (recebidaEm.getTime() - enviada.em.getTime() > VALIDADE_RESPOSTA_MS) return { tipo: "INVALIDA", motivo: "RESPOSTA_ANTIGA" };
+  return { tipo: "CARD", id: card.id };
+}
+
+/** Cards de vendas por identidade: abertos e fechados com limites próprios. */
+async function porIdentidade(cliente: Cliente, filtro: Prisma.OportunidadeWhereInput): Promise<string[]> {
+  const [abertos, fechados] = await Promise.all(
+    ([false, true] as const).map((terminal) =>
+      cliente.oportunidade.findMany({
+        where: { ...CARD_VIVO_EM_VENDAS, ...filtro, fase: { isTerminal: terminal } },
+        orderBy: [{ atualizadoEm: "desc" }, { id: "asc" }],
+        take: terminal ? MAX_FECHADOS_POR_IDENTIDADE : MAX_ABERTOS_POR_IDENTIDADE,
+        select: { id: true },
+      }),
+    ),
+  );
+  return [...abertos, ...fechados].map((o) => o.id);
 }
 
 export async function oportunidadesCandidatas(
@@ -52,24 +86,12 @@ export async function oportunidadesCandidatas(
   if (e.alvoResposta) marcar(e.alvoResposta, "resposta");
 
   if (e.contatoIds.length) {
-    const porContato = await cliente.oportunidade.findMany({
-      where: { ...CARD_VIVO_EM_VENDAS, contatoId: { in: e.contatoIds } },
-      orderBy: { atualizadoEm: "desc" },
-      take: MAX_POR_IDENTIDADE,
-      select: { id: true },
-    });
-    for (const o of porContato) marcar(o.id, "contato");
+    for (const id of await porIdentidade(cliente, { contatoId: { in: e.contatoIds } })) marcar(id, "contato");
   }
   for (const via of ["cnpj", "dominio"] as const) {
     const ids = e.empresas.filter((x) => x.via === via).map((x) => x.id);
     if (!ids.length) continue;
-    const porEmpresa = await cliente.oportunidade.findMany({
-      where: { ...CARD_VIVO_EM_VENDAS, empresaId: { in: ids } },
-      orderBy: { atualizadoEm: "desc" },
-      take: MAX_POR_IDENTIDADE,
-      select: { id: true },
-    });
-    for (const o of porEmpresa) marcar(o.id, via === "cnpj" ? "empresa" : "dominio");
+    for (const id of await porIdentidade(cliente, { empresaId: { in: ids } })) marcar(id, via === "cnpj" ? "empresa" : "dominio");
   }
 
   if (e.remetenteUsuarioId) {
