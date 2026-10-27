@@ -34,7 +34,6 @@ grupo. O grupo é a interface de **inserção**; o app web é a interface de
 **Não-objetivos (v1, escopados para depois):**
 - Áudio (transcrição). O modelo de dados já prevê (`MensagemBruta.mediaType`,
   `mediaUrl`); o pipeline ganha um passo "transcrever" antes da extração.
-- Laya como classificador local (entra quando houver ~200 msgs rotuladas).
 - Google OAuth (substitui email/senha depois).
 - Entidade Projeto com coleta de dados/eficiência; prospecção; email automático;
   métricas/painel (os dados para isso são gravados desde já — ver §5).
@@ -186,8 +185,9 @@ responde. Cron fica só para reprocessar `FALHA` e para backup.
   script roda Sonnet 5.5, Haiku 5.5, GPT-5 mini, GPT-5 nano no mesmo
   prompt/schema; mede campos corretos, fase, intenção, latência, custo.
   Escolha final pelo número. Provedor OpenAI entra atrás da mesma interface.
-- Laya (classificador local, Python) fica atrás da interface `classificar`;
-  entra como sidecar quando houver dados para calibrar.
+- Classificador local (Laya, sidecar Python) **descartado**: não compensa o
+  esforço (mais um serviço e RAM na VPS para ≤ 15 usuários e poucas mensagens
+  por dia). `classificar` continua só com o provedor LLM.
 
 ### 4.5 App web
 - **Kanban** por pipeline: drag-and-drop entre qualquer fase; card mostra
@@ -324,5 +324,3 @@ Matriz de papéis:
   `CommunicationService.sendWhatsAppMessage` (Evolution, JID de grupo,
   timeout), safe mode `NOTIFICATIONS_ENABLED`, normalização de
   identificadores, proibição de fuzzy para autolink.
-- Laya: https://github.com/NandhaKishorM/laya (classificador BERT local,
-  multilingual, descalibrado por padrão).
