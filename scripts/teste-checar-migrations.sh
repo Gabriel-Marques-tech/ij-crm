@@ -45,6 +45,12 @@ caso "RENAME COLUMN" 1 'ALTER TABLE "a" RENAME COLUMN "x" TO "y";'
 caso "RENAME de enum (Prisma)" 1 'ALTER TYPE "Status" RENAME TO "Status_old";'
 caso "só em comentário não conta" 0 '-- DROP TABLE "b"; um dia
 ALTER TABLE "a" ADD COLUMN "w" TEXT; -- RENAME depois'
+caso "-- dentro de string não esconde o DROP" 1 "SELECT '--'; DROP TABLE t;"
+caso "/* */ dentro de string não esconde" 1 "SELECT '/*'; DROP TABLE t; SELECT '*/';"
+caso "string com '' escapado e -- depois" 1 "SELECT 'it''s --'; ALTER TABLE a DROP COLUMN x;"
+caso "comentário de bloco multilinha não conta" 0 '/* DROP TABLE "b";
+RENAME */ ALTER TABLE "a" ADD COLUMN "v" TEXT;'
+caso "DROP depois de comentário de bloco conta" 1 '/* nota */ DROP TABLE "b";'
 caso "destrutiva com marcador" 0 '-- destrutiva-ok: coluna x sem uso desde a release de 2026-10-20
 ALTER TABLE "a" DROP COLUMN "x";'
 caso "marcador sem motivo não vale" 1 '-- destrutiva-ok:

@@ -8,8 +8,8 @@
 #
 # Olha só os migration.sql ADICIONADOS entre <base> e HEAD (prisma/migrations/*/).
 # Falha se algum tem DROP TABLE, DROP COLUMN, ALTER COLUMN … TYPE ou RENAME
-# (ignorando comentários `--`, sem diferenciar maiúsculas, mesmo quebrado em
-# várias linhas), a menos que o arquivo tenha uma linha
+# (ignorando comentários `--` e `/* */` fora de strings, sem diferenciar
+# maiúsculas, mesmo quebrado em várias linhas), a menos que o arquivo tenha uma linha
 #   -- destrutiva-ok: <motivo>
 # Saída: 0 ok; 1 migration destrutiva sem marcador; 2 uso/base inválida.
 set -euo pipefail
@@ -27,6 +27,30 @@ PADROES=(
   'RENAME'
 )
 
+# Máquina de estados: 0 código, 1 dentro de '…' ('' escapado reabre a string
+# sozinho), 2 comentário de linha, 3 comentário de bloco.
+sem_comentarios() {
+  awk '
+    { s = s $0 "\n" }
+    END {
+      n = length(s); st = 0; out = ""
+      for (i = 1; i <= n; i++) {
+        c = substr(s, i, 1); d = substr(s, i, 2)
+        if (st == 0) {
+          if (c == "\047") { st = 1; out = out c }
+          else if (d == "--") { st = 2; i++ }
+          else if (d == "/*") { st = 3; i++; out = out " " }
+          else out = out c
+        } else if (st == 1) {
+          out = out c; if (c == "\047") st = 0
+        } else if (st == 2) {
+          if (c == "\n") { st = 0; out = out c }
+        } else if (d == "*/") { st = 0; i++ }
+      }
+      printf "%s", out
+    }' "$1"
+}
+
 erros=0 vistos=0
 while IFS= read -r arq; do
   [[ -n "$arq" ]] || continue
@@ -35,8 +59,10 @@ while IFS= read -r arq; do
     echo "ok (destrutiva-ok): $arq"
     continue
   fi
-  # Sem comentários, tudo numa linha: pega comando quebrado em várias linhas.
-  sql="$(sed -E 's/--.*$//' "$arq" | tr '\n\t' '  ')"
+  # Sem comentários (`--` e `/* */`) FORA de strings '…' (`SELECT '--'; DROP …`
+  # não esconde o DROP), tudo numa linha: pega comando quebrado em várias linhas.
+  # Conteúdo de string fica (conservador: SQL dinâmico em DO/EXECUTE também conta).
+  sql="$(sem_comentarios "$arq" | tr '\n\t' '  ')"
   achados=()
   for p in "${PADROES[@]}"; do
     if m="$(grep -Eio "$p" <<<"$sql" | head -n 1)" && [[ -n "$m" ]]; then achados+=("$m"); fi
