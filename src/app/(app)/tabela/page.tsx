@@ -59,7 +59,7 @@ export default async function TabelaPage({ searchParams }: { searchParams: Promi
         title="Tabela"
         description="Todas as oportunidades, de todos os quadros. Clique no cabeçalho para ordenar e na linha para abrir o card."
         actions={
-          <Button variant="outline" size="sm" render={<a href={href({ ...atual, pagina: 1 }, "/tabela/csv")} />}>
+          <Button variant="outline" size="sm" nativeButton={false} render={<a href={href({ ...atual, pagina: 1 }, "/tabela/csv")} />}>
             <Download />
             Exportar CSV
           </Button>
@@ -145,7 +145,7 @@ function BotaoPagina({ estado, pagina, desabilitado, rotulo, children }: { estad
     );
   }
   return (
-    <Button variant="outline" size="icon-sm" aria-label={rotulo} render={<Link href={href({ ...estado, pagina })} scroll={false} />}>
+    <Button variant="outline" size="icon-sm" aria-label={rotulo} nativeButton={false} render={<Link href={href({ ...estado, pagina })} scroll={false} />}>
       {children}
     </Button>
   );
