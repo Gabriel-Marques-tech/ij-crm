@@ -25,6 +25,28 @@ describe("descreverErro", () => {
     expect(d).not.toContain("Unique constraint");
   });
 
+  it("demais erros do Prisma → só a classe (e o código, se houver), nunca a mensagem", () => {
+    const segredo = "where: { email: 'ana@segredo.test' }";
+    const casos: [Error, string][] = [
+      [new Prisma.PrismaClientValidationError(`Argument missing ${segredo}`, { clientVersion: "6.19.3" }), "PrismaClientValidationError"],
+      [new Prisma.PrismaClientUnknownRequestError(`falhou ${segredo}`, { clientVersion: "6.19.3" }), "PrismaClientUnknownRequestError"],
+      [new Prisma.PrismaClientRustPanicError(`panic ${segredo}`, "6.19.3"), "PrismaClientRustPanicError"],
+      [new Prisma.PrismaClientInitializationError(`não conectou ${segredo}`, "6.19.3", "P1001"), "PrismaClientInitializationError P1001"],
+    ];
+    for (const [e, esperado] of casos) {
+      const d = descreverErro(e);
+      expect(d).toBe(esperado);
+      expect(d).not.toContain("segredo");
+    }
+  });
+
+  it("Prisma conhecido loga só as CHAVES de meta além de target/modelName", () => {
+    const e = new Prisma.PrismaClientKnownRequestError("x", { code: "P2003", clientVersion: "6.19.3", meta: { field_name: "fk", valor: "ana@segredo.test" } });
+    const d = descreverErro(e);
+    expect(d).toBe("Prisma P2003 meta=field_name,valor");
+    expect(d).not.toContain("segredo");
+  });
+
   it("Error comum → nome: mensagem + no máximo 3 frames do stack", () => {
     const e = new TypeError("travarPipelines is not a function");
     e.stack = ["TypeError: travarPipelines is not a function", "    at a (x.ts:1)", "    at b (x.ts:2)", "    at c (x.ts:3)", "    at d (x.ts:4)"].join("\n");

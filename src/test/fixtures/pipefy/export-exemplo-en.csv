@@ -1,0 +1,3 @@
+Card ID,Title,Current phase,Created at,Updated at,Assignees,Labels,Empresa,Telefone,First time in Primeiro Contato,First time in Contrato assinado,Last time out Primeiro Contato,Total time in Primeiro Contato (days)
+800001,"Portal do aluno, versão 2",Primeiro Contato,2026-03-01T12:00:00Z,2026-03-01T12:00:00Z,Ana Souza,Indicação,Escola Saber,11988887777,2026-03-01T12:00:00Z,,,0.5
+800002,Dashboard financeiro,Contrato assinado,2026-02-01T12:00:00Z,2026-03-10T15:00:00Z,,,,,2026-02-01T12:00:00Z,2026-03-10T15:00:00Z,2026-02-20T12:00:00Z,19

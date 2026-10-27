@@ -26,6 +26,20 @@ describe("proxy", () => {
 
   it("não libera prefixo parecido (/api/healthz)", () => {
     const res = proxy(req("/api/healthz"));
-    expect(res.headers.get("location")).toBe("http://localhost:3000/login");
+    expect(res.status).toBe(401);
+  });
+
+  it("API privada sem sessão → 401 JSON (fetch não segue redirect para a tela de login)", async () => {
+    const res = proxy(req("/api/gestao/importar/previa"));
+    expect(res.status).toBe(401);
+    expect(res.headers.get("location")).toBeNull();
+    expect(await res.json()).toEqual({ erro: "Sessão expirada. Entre de novo." });
+  });
+
+  it("webhook e cron continuam públicos; com cookie, a API passa", () => {
+    expect(proxy(req("/api/webhooks/evolution")).status).toBe(200);
+    expect(proxy(req("/api/cron/reprocessar")).status).toBe(200);
+    const comCookie = new NextRequest(new URL("/api/gestao/importar/previa", "http://localhost:3000"), { headers: { cookie: "ij_sessao=abc" } });
+    expect(proxy(comCookie).status).toBe(200);
   });
 });

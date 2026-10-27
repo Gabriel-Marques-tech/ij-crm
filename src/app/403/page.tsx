@@ -9,7 +9,7 @@ export default function ForbiddenPage() {
       <p className="eyebrow">403</p>
       <h1 className="text-2xl font-semibold tracking-tight">Você não tem acesso a esta área</h1>
       <p className="max-w-sm text-sm text-fg-mute">Esta tela é restrita a gestores ou administradores.</p>
-      <Button render={<Link href="/" />} variant="outline">
+      <Button nativeButton={false} render={<Link href="/" />} variant="outline">
         Voltar ao início
       </Button>
     </div>
