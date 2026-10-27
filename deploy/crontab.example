@@ -7,6 +7,8 @@
 #   crontab -l                         # conferir
 #
 # Os scripts leem segredos e domínio de /opt/ij-crm/.env — nada de segredo aqui.
+# Off-site: o rclone usa ~/.config/rclone/rclone.conf DESTE usuário (runbook §3).
+# Conferir depois de 10 min: tail /var/log/ij-crm/cron.log → "reprocessar HTTP 200".
 # Log do reprocessar: só horário + status HTTP (o corpo da resposta é descartado).
 # Horários em UTC se o host estiver em UTC (padrão de VPS); 06:15 UTC = 03:15 BRT.
 
