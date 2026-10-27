@@ -32,7 +32,7 @@
  *   fica para o GAB-41.
  */
 import { Prisma } from "@prisma/client";
-import { modeloExtracao, limiarConfianca } from "@/lib/config/env";
+import { modeloDoProvedorConfigurado, limiarConfianca } from "@/lib/config/env";
 import { encontrarContatoPorIdentificador, encontrarEmpresa } from "@/lib/contatos/match";
 import { db } from "@/lib/db";
 import { registrarErro } from "@/lib/erros/registrar";
@@ -150,7 +150,7 @@ function registroLlm(r: ResultadoExtracao | null, bruto?: unknown, uso?: Resulta
   return {
     versao: VERSAO_EXTRACAO,
     provedor: u?.provedor ?? null,
-    modelo: u?.modelo ?? modeloExtracao(),
+    modelo: u?.modelo ?? modeloDoProvedorConfigurado(),
     uso: u ? { tokensEntrada: u.tokensEntrada, tokensSaida: u.tokensSaida, ms: u.ms } : null,
     saida: (r?.bruto ?? bruto ?? null) as Prisma.InputJsonValue | null,
   };

@@ -100,40 +100,57 @@ export function notificacoesAtivas(): boolean {
 
 // ---------------------------------------------------------------- LLM (GAB-34)
 
-export type NomeProvedorLlm = "anthropic" | "mock";
+export type NomeProvedorLlm = "openai" | "anthropic" | "mock";
 
 /**
- * Claude Haiku 5.5: barato ($0.10/$0.50 por MTok) e suficiente para mensagens
- * curtas de WhatsApp. Se o benchmark (GAB-40) mostrar erros, trocar por env
- * para `claude-sonnet-5-5`.
+ * Modelo padrão por provedor (GAB-45): produção usa GPT-6.1 Sol com
+ * raciocínio `low`; Claude Haiku 5.5 fica como alternativa por env
+ * (`claude-sonnet-5-5` se precisar de mais qualidade).
  */
-export const MODELO_EXTRACAO_PADRAO = "claude-haiku-5-5";
+export const MODELOS_EXTRACAO_PADRAO = { openai: "gpt-6.1-sol", anthropic: "claude-haiku-5-5" } as const;
 export const LIMIAR_CONFIANCA_PADRAO = 0.7;
 
 /**
- * `LLM_PROVEDOR`: `anthropic` (padrão) ou `mock` (dev/testes, sem rede).
+ * `LLM_PROVEDOR`: `openai` (padrão), `anthropic` ou `mock` (dev/testes, sem rede).
  * Qualquer outro valor → `null`: o pipeline marca a mensagem `FALHA`.
  * `mock` com `NODE_ENV=production` → lança `ConfigInvalida` (idem, `FALHA`).
  */
 export function provedorLlm(): NomeProvedorLlm | null {
-  const v = (ler("LLM_PROVEDOR") ?? "anthropic").toLowerCase();
+  const v = (ler("LLM_PROVEDOR") ?? "openai").toLowerCase();
   // Falha fechada: em produção o mock criaria cards com dados de fixture.
   if (v === "mock" && process.env.NODE_ENV === "production") throw new ConfigInvalida("LLM_PROVEDOR=mock não é permitido em produção");
-  return v === "anthropic" || v === "mock" ? v : null;
-}
-
-/** Modelo da extração. O nome da variável é o que já está no compose/.env.prod (`LLM_EXTRACAO_MODELO`). */
-export function modeloExtracao(): string {
-  return ler("LLM_EXTRACAO_MODELO") ?? MODELO_EXTRACAO_PADRAO;
+  return v === "openai" || v === "anthropic" || v === "mock" ? v : null;
 }
 
 /**
- * Chave da API Anthropic. Não passa pela regra de segredo forte (o formato é
- * da Anthropic). Ausente → extração falha com `SEM_CHAVE`: a mensagem vai
+ * Modelo da extração: `LLM_EXTRACAO_MODELO` (nome que já está no
+ * compose/.env.prod) ou o padrão do provedor.
+ */
+export function modeloExtracao(provedor: keyof typeof MODELOS_EXTRACAO_PADRAO = "openai"): string {
+  return ler("LLM_EXTRACAO_MODELO") ?? MODELOS_EXTRACAO_PADRAO[provedor];
+}
+
+/** Modelo que o provedor configurado usaria; `null` para mock/inválido. Nunca lança (serve de rótulo no registro de falha). */
+export function modeloDoProvedorConfigurado(): string | null {
+  try {
+    const p = provedorLlm();
+    return p === "openai" || p === "anthropic" ? modeloExtracao(p) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Chaves das APIs. Não passam pela regra de segredo forte (o formato é do
+ * provedor). Ausente → extração falha com `SEM_CHAVE`: a mensagem vai
  * para `FALHA` com motivo claro e nada quebra.
  */
 export function chaveAnthropic(): string | undefined {
   return ler("ANTHROPIC_API_KEY");
+}
+
+export function chaveOpenAI(): string | undefined {
+  return ler("OPENAI_API_KEY");
 }
 
 /** Abaixo disto o card nasce com `revisar = true`. `LLM_LIMIAR_CONFIANCA` fora de [0, 1] ou ilegível → 0.7. */

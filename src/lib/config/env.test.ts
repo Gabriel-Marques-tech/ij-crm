@@ -6,6 +6,8 @@ import {
   configEvolution,
   diagnosticarSegredo,
   grupoJid,
+  modeloDoProvedorConfigurado,
+  modeloExtracao,
   notificacoesAtivas,
   provedorLlm,
   segredoWebhook,
@@ -110,6 +112,29 @@ describe("provedorLlm", () => {
     expect(() => provedorLlm()).toThrow(/LLM_PROVEDOR=mock não é permitido em produção/);
     (process.env as Record<string, string>).NODE_ENV = "test";
     expect(provedorLlm()).toBe("mock");
+  });
+
+  it("padrão é openai; modelo padrão por provedor (GPT-6.1 Sol / Claude Haiku 5.5), env sobrepõe", () => {
+    delete process.env.LLM_PROVEDOR;
+    delete process.env.LLM_EXTRACAO_MODELO;
+    expect(provedorLlm()).toBe("openai");
+    expect(modeloExtracao("openai")).toBe("gpt-6.1-sol");
+    expect(modeloExtracao("anthropic")).toBe("claude-haiku-5-5");
+    process.env.LLM_EXTRACAO_MODELO = "gpt-6-sol";
+    expect(modeloExtracao("openai")).toBe("gpt-6-sol");
+  });
+
+  it("modeloDoProvedorConfigurado: modelo do provedor escolhido; null para mock/inválido, sem lançar", () => {
+    delete process.env.LLM_EXTRACAO_MODELO;
+    process.env.LLM_PROVEDOR = "anthropic";
+    expect(modeloDoProvedorConfigurado()).toBe("claude-haiku-5-5");
+    process.env.LLM_PROVEDOR = "openai";
+    expect(modeloDoProvedorConfigurado()).toBe("gpt-6.1-sol");
+    process.env.LLM_PROVEDOR = "gemini";
+    expect(modeloDoProvedorConfigurado()).toBeNull();
+    process.env.LLM_PROVEDOR = "mock";
+    (process.env as Record<string, string>).NODE_ENV = "production";
+    expect(modeloDoProvedorConfigurado()).toBeNull();
   });
 
   it("anthropic em produção segue valendo", () => {

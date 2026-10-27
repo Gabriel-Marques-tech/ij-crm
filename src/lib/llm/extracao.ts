@@ -4,10 +4,11 @@
  * - `classificar(texto)` → `{ relevante, confianca }` (stub nesta fatia: só
  *   mensagens com `#crm` chegam aqui; o classificador real é GAB-39).
  *
- * Provedor por `LLM_PROVEDOR` (`anthropic` | `mock`). Cada chamada loga
- * provedor, modelo, versão do prompt, latência e tokens — NUNCA o texto.
+ * Provedor por `LLM_PROVEDOR` (`openai` padrão | `anthropic` | `mock`). Cada
+ * chamada loga provedor, modelo, versão do prompt, latência e tokens (incl.
+ * raciocínio) — NUNCA o texto.
  */
-import { ConfigInvalida, chaveAnthropic, modeloExtracao, provedorLlm } from "@/lib/config/env";
+import { ConfigInvalida, chaveAnthropic, chaveOpenAI, modeloExtracao, provedorLlm } from "@/lib/config/env";
 import {
   JSON_SCHEMA_EXTRACAO,
   PROMPT_SISTEMA,
@@ -19,6 +20,7 @@ import {
 } from "./prompts/extracao.v1";
 import { criarProvedorAnthropic } from "./provedores/anthropic";
 import { criarProvedorMock } from "./provedores/mock";
+import { criarProvedorOpenAI } from "./provedores/openai";
 import { ErroLlm, type ProvedorLlm, type UsoLlm } from "./tipos";
 
 export { ErroLlm } from "./tipos";
@@ -36,18 +38,32 @@ export function provedorConfigurado(): ProvedorLlm {
     throw e;
   }
   if (nome === "mock") return criarProvedorMock();
+  if (nome === "openai") {
+    const apiKey = chaveOpenAI();
+    if (!apiKey) throw new ErroLlm("SEM_CHAVE", { detalhe: "OPENAI_API_KEY ausente" });
+    const modelo = modeloExtracao("openai");
+    if (modelo.startsWith("claude-")) throw modeloTrocado(modelo, "openai");
+    return criarProvedorOpenAI({ apiKey, modelo });
+  }
   if (nome === "anthropic") {
     const apiKey = chaveAnthropic();
     if (!apiKey) throw new ErroLlm("SEM_CHAVE", { detalhe: "ANTHROPIC_API_KEY ausente" });
-    return criarProvedorAnthropic({ apiKey, modelo: modeloExtracao() });
+    const modelo = modeloExtracao("anthropic");
+    if (!modelo.startsWith("claude-")) throw modeloTrocado(modelo, "anthropic");
+    return criarProvedorAnthropic({ apiKey, modelo });
   }
-  throw new ErroLlm("PROVEDOR_INVALIDO", { detalhe: "LLM_PROVEDOR deve ser anthropic ou mock" });
+  throw new ErroLlm("PROVEDOR_INVALIDO", { detalhe: "LLM_PROVEDOR deve ser openai, anthropic ou mock" });
+}
+
+/** `.env` trocou o provedor e esqueceu o modelo: falha clara em vez de um 404 da API por mensagem. */
+function modeloTrocado(modelo: string, provedor: string): ErroLlm {
+  return new ErroLlm("PROVEDOR_INVALIDO", { detalhe: `LLM_EXTRACAO_MODELO=${modelo} não é modelo do provedor ${provedor}` });
 }
 
 function logUso(uso: UsoLlm | undefined, ref: string, resultado: string) {
   if (!uso) return console.info(`[llm] extracao ref=${ref} versao=${VERSAO_EXTRACAO} ${resultado}`);
   console.info(
-    `[llm] extracao ref=${ref} provedor=${uso.provedor} modelo=${uso.modelo} versao=${VERSAO_EXTRACAO} ms=${uso.ms} tokens_in=${uso.tokensEntrada} tokens_out=${uso.tokensSaida} ${resultado}`,
+    `[llm] extracao ref=${ref} provedor=${uso.provedor} modelo=${uso.modelo} versao=${VERSAO_EXTRACAO} ms=${uso.ms} tokens_in=${uso.tokensEntrada} tokens_out=${uso.tokensSaida}${uso.tokensRaciocinio === undefined ? "" : ` tokens_reasoning=${uso.tokensRaciocinio}`} ${resultado}`,
   );
 }
 
