@@ -6,6 +6,9 @@ const nextConfig: NextConfig = {
   // Imagem de produção (Dockerfile, estágio `runtime`) roda só o server.js
   // rastreado + node_modules mínimo, sem pnpm nem devDependencies (GAB-30).
   output: "standalone",
+  // Sem otimizador (/_next/image): a imagem de produção poda o sharp. Os
+  // assets da marca já saem pré-dimensionados em WebP (public/images/marca).
+  images: { unoptimized: true },
   // App inteiro é autenticado (cookie lido no layout) → tudo é dinâmico por
   // natureza; cacheComponents/PPR não trazem ganho aqui e exigem Suspense em
   // cada rota. Reavaliar se surgir página pública pesada.

@@ -6,7 +6,7 @@ import { cn } from "cn";
 import type { Papel } from "@prisma/client";
 import { itemAtivo, itensParaPapel } from "./nav-config";
 import { useQuadroAtivo } from "./quadro-ativo";
-import { Wordmark } from "./wordmark";
+import { SimboloIJ } from "@/components/marca/marca";
 
 /**
  * Rail lateral (desktop) + barra inferior (mobile).
@@ -29,8 +29,9 @@ export function Rail({ papel }: { papel: Papel }) {
         aria-label="Principal"
         className="hidden md:flex fixed inset-y-0 left-0 w-[88px] flex-col items-center gap-1 border-r border-sidebar-border bg-sidebar py-4"
       >
-        <Link href="/" className="mb-4 flex h-10 w-10 items-center justify-center" aria-label="Início">
-          <Wordmark compact />
+        {/* Rail estreito (88 px): só o símbolo; o logo inteiro ficaria ilegível. */}
+        <Link href="/" className="mb-4 flex size-[60px] items-center justify-center rounded-xl bg-primary-soft/40 ring-1 ring-primary/20 hover:bg-primary-soft/70" title="Início">
+          <SimboloIJ tamanho={48} />
         </Link>
         {itens.map((item) => {
           const active = itemAtivo(item, pathname, quadro);

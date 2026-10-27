@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { EstadoVazio } from "@/components/estado-vazio";
 import Link from "next/link";
 import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Download } from "lucide-react";
 import { cn } from "cn";
@@ -76,7 +77,12 @@ export default async function TabelaPage({ searchParams }: { searchParams: Promi
       />
 
       {pagina.total === 0 ? (
-        <p className="rounded-xl border border-dashed border-border-strong bg-surface/40 p-8 text-center text-sm text-fg-faint">Nenhuma oportunidade com esses filtros.</p>
+        <EstadoVazio
+          mascote="cabeca"
+          titulo="Nenhuma oportunidade com esses filtros"
+          texto="Mude ou limpe os filtros acima."
+          className="rounded-xl border border-dashed border-border-strong bg-surface/40"
+        />
       ) : (
         <>
           {/* Rolagem horizontal só aqui dentro: a página nunca rola de lado. */}

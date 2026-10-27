@@ -4,16 +4,16 @@ import { Avatar } from "@/components/avatar";
 import { Button } from "@/components/ui/button";
 import { logoutAction } from "@/lib/auth/actions";
 import type { UsuarioSessao } from "@/lib/auth/sessao";
-import { Wordmark } from "./wordmark";
+import { SimboloIJ } from "@/components/marca/marca";
 
 const ROTULO_PAPEL = { ADMIN: "admin", GESTOR: "gestor", VENDEDOR: "vendedor" } as const;
 
 export function Topbar({ usuario }: { usuario: UsuarioSessao }) {
   return (
     <header className="sticky top-0 z-10 flex h-14 items-center justify-between border-b border-border bg-background/80 px-4 backdrop-blur md:px-8">
-      <span className="md:hidden">
-        <Wordmark compact />
-      </span>
+      <Link href="/" className="md:hidden" title="Início">
+        <SimboloIJ tamanho={32} />
+      </Link>
       <span className="hidden md:block" />
       <div className="flex items-center gap-3">
         <Link href="/perfil" className="flex items-center gap-3 rounded-lg px-2 py-1 hover:bg-surface-hover" title="Meu perfil">

@@ -29,4 +29,10 @@ describe("TelaDeErro (error.tsx / global-error.tsx)", () => {
     expect(container.textContent).not.toContain("ref:");
     expect(container.textContent).not.toContain("quebrou");
   });
+
+  it("mostra o mascote com a placa", () => {
+    render(<TelaDeErro error={erroDoServidor("1")} retry={() => {}} />);
+    const img = screen.getByRole("img", { name: "Mascote da Inteli Júnior segurando uma placa" });
+    expect(img.getAttribute("src")).toContain("mascote-placa");
+  });
 });
