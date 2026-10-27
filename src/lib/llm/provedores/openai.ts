@@ -95,9 +95,9 @@ export function criarProvedorOpenAI({ apiKey, modelo, fetch, timeoutMs }: Opcoes
           model: modelo,
           instructions: pedido.sistema,
           input: pedido.usuario,
-          max_output_tokens: MAX_TOKENS_EXTRACAO,
+          max_output_tokens: pedido.maxTokens ?? MAX_TOKENS_EXTRACAO,
           reasoning: { effort: "low" },
-          text: { format: { type: "json_schema", name: "extracao", strict: true, schema: pedido.schema } },
+          text: { format: { type: "json_schema", name: pedido.nome ?? "extracao", strict: true, schema: pedido.schema } },
           store: false,
         });
         if (r.status === "failed") throw new RespostaFalhou(r.error?.code ?? "desconhecido", r);

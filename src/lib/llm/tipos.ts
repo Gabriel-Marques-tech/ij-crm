@@ -20,6 +20,10 @@ export type PedidoExtracao = {
   usuario: string;
   /** JSON schema estrito da saída (structured outputs). */
   schema: Record<string, unknown>;
+  /** Nome do formato (OpenAI `text.format.name`) e o que o mock usa para escolher a resposta. Padrão "extracao". */
+  nome?: string;
+  /** Teto de tokens de saída (inclui raciocínio na OpenAI). Padrão `MAX_TOKENS_EXTRACAO`. */
+  maxTokens?: number;
 };
 
 /** `bruto` = JSON já parseado, ainda NÃO validado (a validação é do chamador). */

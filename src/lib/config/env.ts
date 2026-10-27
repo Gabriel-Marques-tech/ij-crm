@@ -160,3 +160,41 @@ export function limiarConfianca(): number {
   const n = Number(bruto.replace(",", "."));
   return Number.isFinite(n) && n >= 0 && n <= 1 ? n : LIMIAR_CONFIANCA_PADRAO;
 }
+
+// ------------------------------------------------- classificador sem #crm (GAB-39)
+
+/** Limiares do classificador; GAB-42 os leva para a config do admin. */
+export const LIMIAR_CLASSIFICADOR_PADRAO = 0.7;
+export const LIMIAR_SEM_TAG_PADRAO = 0.85;
+
+function limiar(nome: string, padrao: number): number {
+  const bruto = ler(nome);
+  if (bruto === undefined) return padrao;
+  const n = Number(bruto.replace(",", "."));
+  return Number.isFinite(n) && n >= 0 && n <= 1 ? n : padrao;
+}
+
+/** Mensagem sem #crm com `confianca` do classificador abaixo disto (ou `relevante=false`) é descartada. */
+export function limiarClassificador(): number {
+  return limiar("LLM_LIMIAR_CLASSIFICADOR", LIMIAR_CLASSIFICADOR_PADRAO);
+}
+
+/**
+ * Mensagem sem #crm só age (cria/atualiza card) se a confiança da EXTRAÇÃO
+ * for ≥ isto — mais exigente que `LLM_LIMIAR_CONFIANCA`. Abaixo → `PENDENTE_REVISAO`.
+ */
+export function limiarSemTag(): number {
+  return limiar("LLM_LIMIAR_SEM_TAG", LIMIAR_SEM_TAG_PADRAO);
+}
+
+/**
+ * Modelo do classificador: `LLM_CLASSIFICACAO_MODELO` se for do provedor
+ * configurado; senão o mesmo da extração. Modelo de outro provedor (o
+ * antigo padrão `claude-haiku-5-5` com `openai`) é ignorado, não derruba o
+ * classificador.
+ */
+export function modeloClassificacao(provedor: keyof typeof MODELOS_EXTRACAO_PADRAO): string {
+  const v = ler("LLM_CLASSIFICACAO_MODELO");
+  if (v && v.startsWith("claude-") === (provedor === "anthropic")) return v;
+  return modeloExtracao(provedor);
+}

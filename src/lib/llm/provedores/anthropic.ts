@@ -61,7 +61,7 @@ export function criarProvedorAnthropic({ apiKey, modelo, fetch }: Opcoes): Prove
       () =>
         cliente.messages.create({
           model: modelo,
-          max_tokens: MAX_TOKENS_EXTRACAO,
+          max_tokens: pedido.maxTokens ?? MAX_TOKENS_EXTRACAO,
           system: pedido.sistema,
           messages: [{ role: "user", content: pedido.usuario }],
           output_config: { effort: "low", format: { type: "json_schema", schema: pedido.schema } },
