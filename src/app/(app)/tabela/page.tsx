@@ -6,13 +6,12 @@ import { PageHeader } from "@/components/shell/page-header";
 import { DiasNaFase } from "@/components/kanban/aging";
 import { Button } from "@/components/ui/button";
 import { exigirUsuario } from "@/lib/auth/atual";
-import { textoVinculo, type Vinculo } from "@/lib/entidades/vinculo";
 import { listarPipelines } from "@/lib/fases/fases";
 import { estadoProximaAcao } from "@/lib/oportunidades/aging";
 import { ROTULO_ORIGEM } from "@/lib/oportunidades/campos";
 import { formatarDinheiro } from "@/lib/oportunidades/formatar";
 import { escreverEstado, lerEstado, paramsDeRegistro, proximaOrdem, type ColunaOrdenavel, type EstadoTabela } from "@/lib/tabela/params";
-import { listarPessoas, listarTabela, POR_PAGINA, type LinhaTabela } from "@/lib/tabela/tabela";
+import { listarPessoas, listarTabela, POR_PAGINA, type LinhaTabela, type RefTabela } from "@/lib/tabela/tabela";
 import { BarraFiltrosTabela } from "./painel-filtros-tabela";
 
 export const metadata = { title: "Tabela" };
@@ -152,9 +151,9 @@ function BotaoPagina({ estado, pagina, desabilitado, rotulo, children }: { estad
   );
 }
 
-function TextoVinculo({ tipo, v }: { tipo: "empresa" | "contato"; v: Vinculo | null }) {
-  if (!v) return <span className="text-fg-faint">—</span>;
-  return <span className={cn("block max-w-48 truncate", v.estado === "ATIVO" ? "text-fg-soft" : "text-fg-mute")}>{textoVinculo(tipo, v)}</span>;
+function TextoRef({ r }: { r: RefTabela | null }) {
+  if (!r) return <span className="text-fg-faint">—</span>;
+  return <span className={cn("block max-w-48 truncate", r.excluido ? "text-fg-mute" : "text-fg-soft")}>{r.nome}</span>;
 }
 
 function Linha({ l, agora }: { l: LinhaTabela; agora: Date }) {
@@ -174,10 +173,10 @@ function Linha({ l, agora }: { l: LinhaTabela; agora: Date }) {
         </div>
       </td>
       <td className="px-3 py-2">
-        <TextoVinculo tipo="empresa" v={l.empresa} />
+        <TextoRef r={l.empresa} />
       </td>
       <td className="px-3 py-2">
-        <TextoVinculo tipo="contato" v={l.contato} />
+        <TextoRef r={l.contato} />
       </td>
       <td className="px-3 py-2 whitespace-nowrap">
         <span className="text-fg-soft">{l.fase.nome}</span>{" "}

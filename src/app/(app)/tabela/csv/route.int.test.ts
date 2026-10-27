@@ -12,7 +12,7 @@ import { GET } from "./route";
 const dbT = dbTeste();
 
 beforeEach(async () => {
-  await limparBanco(["transicao_fase", "timeline", "oportunidade", "fase", "pipeline", "sessao", "usuario"]);
+  await limparBanco(["transicao_fase", "timeline", "oportunidade", "empresa", "fase", "pipeline", "sessao", "usuario"]);
   invalidarCachePipelines();
   exigirUsuario.mockReset();
 });
@@ -54,6 +54,19 @@ describe("GET /tabela/csv", () => {
     const filtrado = await (await GET(new Request(`http://x/tabela/csv?resp=${outro.id}&pagina=3`))).text();
     expect(filtrado).toContain(";dele;");
     expect(filtrado).not.toContain(";meu;");
+  });
+
+  it("empresa mesclada sai com o nome da principal viva (regra do Kanban)", async () => {
+    const { u } = await semear();
+    exigirUsuario.mockResolvedValue({ id: u.id, papel: "VENDEDOR" });
+    const principal = await dbT.empresa.create({ data: { nome: "Principal Viva" } });
+    const dup = await dbT.empresa.create({ data: { nome: "Nome Antigo", mergedIntoId: principal.id } });
+    await dbT.oportunidade.updateMany({ where: { titulo: "meu" }, data: { empresaId: dup.id } });
+    const texto = await (await GET(new Request("http://x/tabela/csv?q=principal"))).text();
+    expect(texto).toContain(";meu;");
+    expect(texto).toContain(";Principal Viva;");
+    expect(texto).not.toContain("Nome Antigo");
+    expect(texto).not.toContain(";dele;");
   });
 
   it("falha no banco → 500 com ref, causa só no log", async () => {
