@@ -127,8 +127,8 @@ Regras: o contato é decidido pelos telefones/emails **achados no texto** (não 
 um dono vivo → reaproveita (e a empresa dele, resolvendo merge; nome lido diferente → `revisar`), donos
 diferentes → `PENDENTE_REVISAO`; vínculo automático de empresa **só por CNPJ**; domínio de email e nome igual são sugestão
 (`revisar` + `resultado_llm.aplicacao.sugestoes`); ponto de contato de contato excluído → `PENDENTE_REVISAO`;
-sem nome de contato nem de empresa → não cria, `PENDENTE_REVISAO`; `ATUALIZAR`/`IGNORAR` →
-`PENDENTE_REVISAO` (atualização é a próxima fatia); responsável = remetente, trocado só por nome
+sem nome de contato nem de empresa → não cria, `PENDENTE_REVISAO`; `ATUALIZAR` → seção abaixo; `IGNORAR` →
+`PENDENTE_REVISAO`; responsável = remetente, trocado só por nome
 completo exato de usuário ativo; `revisar` se confiança < `LLM_LIMIAR_CONFIANCA` (0.7).
 Status: `RECEBIDA → PROCESSANDO → PROCESSADA | PENDENTE_REVISAO | FALHA`. `processarMensagem` nunca
 lança (roda no `after()`): erro de banco vira log com ref e a linha fica para o reprocessamento.
@@ -147,6 +147,30 @@ Env: `LLM_PROVEDOR=anthropic|mock` (dev sem chave: `mock`, que responde com as f
 `LLM_LIMIAR_CONFIANCA`. Saldo da Anthropic esgotado (`billing_error`) → `FALHA` com "sem crédito na
 API da Anthropic" + ref, reprocessável (GAB-41) depois da recarga. Cada chamada loga provedor, modelo, versão, ms e tokens — nunca o texto:
 `[llm] extracao ref=<id> provedor=anthropic modelo=claude-haiku-5-5 versao=extracao.v1 ms=… tokens_in=… tokens_out=… ok`.
+
+## #crm → atualizar card existente (LLM ATUALIZAR)
+
+GAB-38, design §4.3 "Alvo de ATUALIZAR". Prompt `extracao.v2` (mesmas chaves da v1; muda o texto e o
+contexto). Só o pipeline **Vendas**; `projetos` é UI.
+
+- **Candidatas** no contexto (`candidatas.ts`, só leitura): cards de Vendas dos contatos/empresas casados
+  por identificador exato (CNPJ; domínio só como sugestão) + as **3 últimas oportunidades que o remetente
+  tocou** (Timeline com o usuário dele) nos 30 min antes da mensagem — cobre mensagens picadas
+  ("falei com o Gustavo" / "é da Economia Sensata" / "mando proposta sexta").
+- **Alvo** (`alvo.ts`, puro): reply a uma confirmação do bot → o card dela (`MensagemEnviada.oportunidade_id`,
+  gravada a cada confirmação), **sem a LLM decidir** (vale mesmo se ela disser CRIAR). Senão o
+  `oportunidade_id` da LLM, **só se estiver na lista enviada**. Senão, entre as candidatas por identidade:
+  1 aberta → ela; >1 → a tocada mais recentemente + `revisar`; só fechadas → card **novo** com
+  `reaberta_de_id` + `revisar`. Nenhum → `PENDENTE_REVISAO` ("não achei o card para atualizar").
+- **Aplicação** (`atualizar.ts`, mesma transação/cerca do CRIAR): aplica só campos presentes (nunca
+  apaga; origem só se vazia), pontos de contato citados no texto acumulam no contato do card (de outro
+  contato → `revisar`, nunca rouba), empresa por CNPJ ou nome (card com empresa de outro nome só troca numa
+  **correção por reply**; fora disso `revisar`), título automático acompanha os vínculos. Fase pela chave
+  via `registrarMovimento` (TransicaoFase `WHATSAPP`, Timeline, locks por `travarPipelines` — ganho trava
+  também `projetos`). **Terminal** só com o dado na mensagem: ganho precisa do valor ("18 mil"), perda do
+  motivo (da lista ou "Outro: …"); sem ele não move e marca `revisar`.
+- **Confirmação** cita o card: `✅ Gustavo — Economia Sensata: Primeiro Contato → Reunião Diagnóstica.
+  Próx.: reunião (30/10)`; sem movimento `✅ Título (Fase): atualizado.`; `⚠️` + motivo quando `revisar`.
 
 ## Kanban
 
