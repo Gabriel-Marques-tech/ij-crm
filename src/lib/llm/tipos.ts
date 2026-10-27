@@ -53,6 +53,7 @@ export type CodigoErroLlm =
 export type DetalheFixo =
   | "sem crédito na API da OpenAI"
   | "sem crédito na API da Anthropic"
+  | "sem crédito na API de LLM"
   | "OPENAI_API_KEY ausente"
   | "ANTHROPIC_API_KEY ausente"
   | "LLM_PROVEDOR deve ser openai, anthropic ou mock"
