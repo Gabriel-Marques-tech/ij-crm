@@ -183,8 +183,16 @@ export async function listarUsuarios() {
       senhaHash: true,
       conviteExpiraEm: true,
       criadoEm: true,
+      redefinicaoPedidaEm: true,
+      redefinicaoExpiraEm: true,
+      foto: { select: { atualizadoEm: true } },
     },
   }).then((lista) =>
-    lista.map(({ senhaHash, ...u }) => ({ ...u, convitePendente: senhaHash === null })),
+    lista.map(({ senhaHash, foto, ...u }) => ({
+      ...u,
+      convitePendente: senhaHash === null,
+      redefinicaoLinkAtivo: u.redefinicaoExpiraEm !== null && u.redefinicaoExpiraEm.getTime() > Date.now(),
+      fotoEm: foto?.atualizadoEm.getTime() ?? null,
+    })),
   );
 }

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { dbTeste, limparBanco } from "@/test/db";
 import { gerarHashSenha } from "./senha";
-import { aceitarConvite, atualizarUsuario, autenticar, criarConvite, reemitirConvite } from "./usuarios";
+import { aceitarConvite, atualizarUsuario, autenticar, criarConvite, listarUsuarios, reemitirConvite } from "./usuarios";
 import { criarSessao, encerrarSessao, obterUsuarioDaSessao } from "./sessao";
 
 const db = dbTeste();
@@ -19,7 +19,7 @@ async function gestor() {
 }
 
 beforeEach(async () => {
-  await limparBanco(["sessao", "usuario"]);
+  await limparBanco(["sessao", "usuario_foto", "usuario"]);
 });
 
 describe("criarConvite", () => {
@@ -223,5 +223,37 @@ describe("atualizarUsuario", () => {
     await db.usuario.create({ data: { nome: "V", email: "v@ij.test", papel: "VENDEDOR", telefoneWhatsapp: "+5511977776666" } });
     const w = await db.usuario.create({ data: { nome: "W", email: "w@ij.test", papel: "VENDEDOR" } });
     expect(await atualizarUsuario(w.id, { telefone: "11977776666" }, a)).toEqual({ ok: false, erro: "TELEFONE_EM_USO" });
+  });
+});
+
+describe("listarUsuarios (GAB-43)", () => {
+  it("expõe pedido de nova senha, link ativo/expirado e versão da foto — sem hashes", async () => {
+    const a = await admin();
+    const agora = Date.now();
+    const pediu = await db.usuario.create({
+      data: { nome: "Pediu", email: "pediu@ij.test", papel: "VENDEDOR", senhaHash: "x", redefinicaoPedidaEm: new Date(agora - 1000) },
+    });
+    const ativo = await db.usuario.create({
+      data: { nome: "Ativo", email: "ativo@ij.test", papel: "VENDEDOR", senhaHash: "x", redefinicaoTokenHash: "h1", redefinicaoExpiraEm: new Date(agora + 60_000) },
+    });
+    const vencido = await db.usuario.create({
+      data: { nome: "Vencido", email: "vencido@ij.test", papel: "VENDEDOR", senhaHash: "x", redefinicaoTokenHash: "h2", redefinicaoExpiraEm: new Date(agora - 60_000) },
+    });
+    const fotoEm = new Date("2026-10-26T12:00:00Z");
+    await db.usuarioFoto.create({ data: { usuarioId: a.id, bytes: Buffer.from([1, 2, 3]), mime: "image/webp", atualizadoEm: fotoEm } });
+
+    const lista = await listarUsuarios();
+    const por = (id: string) => lista.find((u) => u.id === id)!;
+    expect(por(pediu.id).redefinicaoPedidaEm).toBeInstanceOf(Date);
+    expect(por(pediu.id).redefinicaoLinkAtivo).toBe(false);
+    expect(por(ativo.id).redefinicaoLinkAtivo).toBe(true);
+    expect(por(vencido.id).redefinicaoLinkAtivo).toBe(false);
+    expect(por(a.id).fotoEm).toBe(fotoEm.getTime());
+    expect(por(pediu.id).fotoEm).toBeNull();
+    for (const u of lista) {
+      expect(u).not.toHaveProperty("senhaHash");
+      expect(u).not.toHaveProperty("redefinicaoTokenHash");
+      expect(u).not.toHaveProperty("foto");
+    }
   });
 });

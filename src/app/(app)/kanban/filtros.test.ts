@@ -29,6 +29,7 @@ const card = (id: string, extra: Partial<CardCliente> = {}): CardCliente => ({
   proximaAcaoEmMs: null,
   responsavelId: "u1",
   responsavelNome: "Ana",
+  responsavelFotoEm: null,
   empresaNome: null,
   origem: null,
   estado: null,

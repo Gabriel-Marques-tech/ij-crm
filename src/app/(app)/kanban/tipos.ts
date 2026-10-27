@@ -24,6 +24,8 @@ export type CardCliente = {
   proximaAcaoEmMs: number | null;
   responsavelId: string;
   responsavelNome: string;
+  /** Versão da foto do responsável (ms) ou null → iniciais. */
+  responsavelFotoEm: number | null;
   empresaNome: string | null;
   origem: Origem | null;
   /** UF (sigla) ou null. */
@@ -56,6 +58,7 @@ export function paraCliente(q: Quadro): { fases: FaseCliente[]; cards: CardClien
       proximaAcaoEmMs: c.proximaAcaoEm?.getTime() ?? null,
       responsavelId: c.responsavel.id,
       responsavelNome: c.responsavel.nome,
+      responsavelFotoEm: c.responsavel.foto?.atualizadoEm.getTime() ?? null,
       empresaNome: c.empresa?.nome ?? null,
       origem: c.origem,
       estado: c.estado,

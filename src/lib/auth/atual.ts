@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import type { Papel } from "@prisma/client";
 import { temPapelMinimo } from "./papeis";
-import { obterUsuarioDaSessao, type UsuarioSessao } from "./sessao";
+import { hashSessao, obterUsuarioDaSessao, type UsuarioSessao } from "./sessao";
 
 export const COOKIE_SESSAO = "ij_sessao";
 
@@ -25,6 +25,12 @@ export const usuarioAtual = cache(async (): Promise<UsuarioSessao | null> => {
   if (!id) return null;
   return obterUsuarioDaSessao(id);
 });
+
+/** Id (sha256) da sessão deste request — para marcar "esta sessão" e não encerrá-la. */
+export async function idSessaoAtual(): Promise<string | null> {
+  const valor = (await cookies()).get(COOKIE_SESSAO)?.value;
+  return valor && /^[0-9a-f]{64}$/.test(valor) ? hashSessao(valor) : null;
+}
 
 export async function exigirUsuario(): Promise<UsuarioSessao> {
   const u = await usuarioAtual();

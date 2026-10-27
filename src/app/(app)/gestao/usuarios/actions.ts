@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { exigirPapel } from "@/lib/auth/atual";
 import { atualizarUsuario, criarConvite, reemitirConvite, type ErroUsuario } from "@/lib/auth/usuarios";
+import { MENSAGEM_REDEFINICAO, gerarLinkRedefinicao } from "@/lib/auth/redefinicao";
 import { comTratamentoForm } from "@/lib/erros/registrar";
 
 const MENSAGEM: Record<ErroUsuario, string> = {
@@ -30,14 +31,26 @@ const conviteSchema = z.object({
   telefone: z.string().trim().optional(),
 });
 
-function linkConvite(token: string): string {
+function linkConvite(token: string, caminho: "convite" | "redefinir" = "convite"): string {
   const base = process.env.APP_URL?.replace(/\/+$/, "");
   if (!base) {
     // Fail-closed em produção (§4.6): link errado = convite inutilizável em silêncio.
     if (process.env.NODE_ENV === "production") throw new Error("APP_URL não configurada");
-    return `http://localhost:3000/convite/${token}`;
+    return `http://localhost:3000/${caminho}/${token}`;
   }
-  return `${base}/convite/${token}`;
+  return `${base}/${caminho}/${token}`;
+}
+
+/** Link de redefinição de senha (GAB-43): 1 h, uso único, mostrado uma vez. Gestor não gera para admin. */
+export async function gerarLinkRedefinicaoAction(usuarioId: string): Promise<EstadoConvite> {
+  return comTratamentoForm("gestao.usuarios.gerarLinkRedefinicao", async (): Promise<EstadoConvite> => {
+    const ator = await exigirPapel("GESTOR");
+    if (typeof usuarioId !== "string" || !usuarioId) return { erro: MENSAGEM_REDEFINICAO.USUARIO_NAO_ENCONTRADO };
+    const r = await gerarLinkRedefinicao(usuarioId, ator);
+    if (!r.ok) return { erro: MENSAGEM_REDEFINICAO[r.erro] };
+    revalidatePath("/gestao/usuarios");
+    return { link: linkConvite(r.token, "redefinir"), expiraEm: r.expiraEm.toISOString() };
+  });
 }
 
 export async function criarConviteAction(_prev: EstadoConvite, form: FormData): Promise<EstadoConvite> {

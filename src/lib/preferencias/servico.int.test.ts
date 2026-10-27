@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { dbTeste, limparBanco } from "@/test/db";
 import { invalidarCachePipelines } from "@/lib/fases/cache";
-import { obterPreferencias, salvarVisualizacaoKanban } from "./servico";
+import { obterPreferencias, salvarPaginaInicial, salvarVisualizacaoKanban } from "./servico";
 
 // A action pega o usuário da sessão; aqui a sessão é quem o teste disser.
 const sessao = vi.hoisted(() => ({ atual: { id: "", nome: "", email: "", papel: "VENDEDOR" as const } }));
@@ -61,6 +61,14 @@ describe("preferências de visualização (integração)", () => {
     expect(await obterPreferencias(ana.id)).toEqual({ v: 1, kanban: {} });
     await salvarVisualizacaoKanban(ana.id, "vendas", { mostrarVazias: true, abertas: [] });
     expect(await obterPreferencias(ana.id)).toEqual({ v: 1, kanban: { vendas: { mostrarVazias: true, abertas: [] } } });
+  });
+
+  it("página inicial: grava sem apagar o kanban; valor inválido é recusado", async () => {
+    const { ana } = await semear();
+    await salvarVisualizacaoKanban(ana.id, "vendas", { mostrarVazias: true, abertas: [] });
+    expect(await salvarPaginaInicial(ana.id, "projetos")).toEqual({ ok: true });
+    expect(await salvarPaginaInicial(ana.id, "https://evil.test")).toEqual({ ok: false, erro: "DADOS_INVALIDOS" });
+    expect(await obterPreferencias(ana.id)).toEqual({ v: 1, inicio: "projetos", kanban: { vendas: { mostrarVazias: true, abertas: [] } } });
   });
 
   it("action grava só no usuário da sessão (não aceita id de outro)", async () => {

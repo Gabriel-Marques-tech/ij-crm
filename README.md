@@ -217,7 +217,7 @@ mesclados nele (sem cadeia, sem ciclo). "Desfazer merge" limpa o ponteiro.
 
 ## Minha Semana
 
-`/` lista os cards abertos (vivos, fora de fase terminal) em que o usuário é responsável, por
+`/semana` lista os cards abertos (vivos, fora de fase terminal) em que o usuário é responsável, por
 faixa da próxima ação em dias civis de São Paulo — vencidas, hoje, próximos 7 dias (sem hoje),
 sem próxima ação — com a mais urgente em destaque. As faixas vêm de `faixaProximaAcao`
 (`src/lib/oportunidades/proxima-acao.ts`), a mesma do filtro do Kanban. "Marcar feita"
@@ -266,6 +266,31 @@ pnpm import:pipefy export.csv                       # prévia, grava export.csv.
 pnpm import:pipefy export.csv --confirmar           # importa como o 1º ADMIN ativo
 pnpm import:pipefy export.csv --confirmar --usuario gestor@ij.com --mapa mapa.json --colunas colunas.json --motivo-perda sem_resposta
 ```
+
+## Perfil e conta
+
+Em **Meu perfil** cada um mexe só na própria conta:
+
+- **Foto**: recorte quadrado e redimensionamento no navegador (canvas → WebP 256×256, JPEG se o
+  navegador não codifica WebP). O servidor não confia no nome nem no `Content-Type`: valida os
+  bytes (`src/lib/perfil/imagem.ts` — assinatura, tamanho declarado no cabeçalho, 256×256, sem
+  animação, sem bytes sobrando, ≤ 150 KB). Sem `sharp`. Fica em `usuario_foto` (1:1) e é servida
+  em `GET /api/usuarios/[id]/foto` (sessão obrigatória, `ETag`/304, `nosniff`); o `<Avatar>`
+  (`src/components/avatar.tsx`) põe `?v=<atualizado_em>` na URL e cai para iniciais em 404.
+- **Senha**: exige a atual; ao trocar, encerra as outras sessões. **Email**: exige a senha,
+  normaliza e respeita a unicidade.
+- **Sessões ativas**: dispositivo/navegador pelo user-agent; encerrar uma ou todas as outras.
+  O "último uso" é regravado no máximo a cada 5 min (`SESSAO_TOQUE_MINUTOS`).
+- **Página inicial**: Minha Semana, Kanban Vendas ou Kanban Projetos (`preferencias.inicio`);
+  `/` redireciona no servidor.
+
+**Esqueci a senha** (`/esqueci`, link no login): resposta sempre igual (sem enumerar contas),
+limite em memória de 10 pedidos por IP em 15 min e 3 por IP+email por hora (IP = último hop do
+`X-Forwarded-For`, posto pelo Caddy — runbook §9). O pedido aparece em
+Gestão → Usuários; gestor/admin gera o link (`/redefinir/<token>`: só o hash fica no banco, 1 h,
+uso único, consumo atômico, encerra todas as sessões do usuário). Gestor só gera para vendedor;
+admin gera para qualquer um, menos para si. Metadados da foto (COM/APPn, EXIF/XMP/ICCP) são
+removidos antes de gravar.
 
 ## Erros e debug
 
