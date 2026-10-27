@@ -68,7 +68,7 @@ celular do número da IJ ──(QR, uma vez)──► Evolution API (na VPS, sem
                      confirmação no grupo ◄─────┘ (só com NOTIFICATIONS_ENABLED=true)
 ```
 
-1. **Pareamento (uma vez):** em **Gestão → Admin → "Mostrar QR"**, escaneie com o
+1. **Pareamento (uma vez, só ADMIN):** em **Gestão → Admin → "Mostrar QR"**, escaneie com o
    celular do número: WhatsApp → Dispositivos conectados → Conectar dispositivo.
    A sessão fica salva na Evolution; o celular pode ficar guardado, mas precisa
    abrir o WhatsApp de vez em quando (o WhatsApp derruba aparelhos conectados se o
@@ -76,15 +76,18 @@ celular do número da IJ ──(QR, uma vez)──► Evolution API (na VPS, sem
 2. **Grupo:** adicione o número ao grupo de vendas. Em **Gestão → Admin → "Listar
    grupos"**, escolha o grupo e salve. O CRM só olha esse grupo; o resto é ignorado.
 3. **Quem é quem:** o CRM reconhece o remetente pelo telefone cadastrado em
-   **Gestão → Usuários** (ou em **Meu perfil**). Mensagem de número não cadastrado
-   é contada e descartada, sem guardar o texto.
+   **Gestão → Usuários** (ou em **Meu perfil**), ou pelo LID vinculado em
+   **Gestão → WhatsApp → "Vincular a usuário"** (o WhatsApp às vezes manda um id
+   interno no lugar do telefone). Mensagem de remetente não reconhecido é contada
+   e descartada, sem guardar o texto.
 4. **Webhook:** a Evolution avisa o app a cada mensagem nova, por rede interna do
-   Docker e com segredo (`scripts/evolution.sh webhook`, uma vez).
+   Docker e com segredo (`scripts/evolution.sh webhook`, uma vez, na VPS).
 5. **O que acontece com cada mensagem:**
    - com `#crm` → a LLM cria ou atualiza o card ([#crm → card](#crm--card-llm));
-   - sem `#crm` → um classificador decide se é registro de venda; se for, segue o
-     mesmo fluxo com régua mais alta, e o que ficar em dúvida vai para a fila de
-     revisão em **Gestão → WhatsApp**, sem responder no grupo
+   - sem `#crm` → um classificador decide se é registro de venda. Se achar que
+     não é, ou tiver baixa confiança, a mensagem é descartada sem guardar o texto.
+     Se for, segue o mesmo fluxo com régua mais alta; venda com extração incerta
+     vai para a fila de revisão em **Gestão → WhatsApp**, sem responder no grupo
      ([Mensagens sem #crm](#mensagens-sem-crm-classificador-gab-39));
    - figurinha, emoji solto ou remetente não cadastrado → descartada, sem LLM.
 6. **Resposta no grupo:** o bot só escreve no grupo (confirmação do card) com
@@ -94,8 +97,11 @@ celular do número da IJ ──(QR, uma vez)──► Evolution API (na VPS, sem
 **Sem o número ainda?** O CRM funciona inteiro sem WhatsApp: Kanban, cards,
 prazos, Calendário, Minha Semana, Contatos, Empresas, Tabela, Ranking e Gestão.
 O time lança e atualiza os cards à mão. Quando o número chegar, são só os passos
-1, 2, 4 e 6 acima; nada precisa ser refeito. Para testar antes, dá para parear um
-número pessoal/chip de teste no ambiente de dev (safe mode, nada é enviado).
+1 a 4 e o 6 acima (confira os telefones do time em Gestão → Usuários); nada precisa
+ser refeito. Para testar antes, dá para parear um número pessoal/chip de teste no
+ambiente de dev (safe mode, nada é enviado), seguindo a seção abaixo: lá o webhook
+usa a URL da tabela `WEBHOOK_URL` conforme o app roda em Docker ou `pnpm dev`
+(`scripts/evolution.sh` aponta fixo para `http://app:3000`, o caso da VPS).
 
 **Trocar de número** depois: `scripts/evolution.sh logout` + parear o novo
 ([runbook §4](docs/runbook.md#4-trocar-o-número-do-bot)). O CRM guarda o grupo,
