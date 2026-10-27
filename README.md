@@ -560,8 +560,12 @@ instância mínima: runbook §11.
 ## Testes
 
 `pnpm test` roda unitários e de integração. Os de integração (`*.int.test.ts`)
-usam o Postgres do compose no schema `ijcrm_test`, migrado automaticamente —
-suba o `db` antes (`docker compose up -d db`).
+usam o Postgres do compose num schema de teste, migrado automaticamente —
+suba o `db` antes (`docker compose up -d db`). O schema é o de `DATABASE_URL_TEST`
+quando definida (precisa ser `ijcrm_test` ou `ijcrm_test_<sufixo>`); sem ela, cada
+diretório/worktree usa o seu, `ijcrm_test_<8 hex do sha256 do caminho>` (`src/test/db.ts`),
+para que worktrees em paralelo nunca truncem as tabelas um do outro. Apague os schemas
+de worktrees removidos com `DROP SCHEMA ijcrm_test_<hash> CASCADE`.
 
 ## Comandos
 
