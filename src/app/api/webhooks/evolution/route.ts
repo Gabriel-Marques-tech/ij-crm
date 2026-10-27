@@ -23,6 +23,7 @@ import { ingerirMensagem } from "@/lib/whatsapp/ingestao";
 import { mascararJid } from "@/lib/whatsapp/mascarar";
 import { interpretarPayload } from "@/lib/whatsapp/payload";
 import { processarMensagem } from "@/lib/whatsapp/processar";
+import { avaliarSemTagComLimite } from "@/lib/whatsapp/sem-tag";
 
 export const runtime = "nodejs";
 
@@ -117,6 +118,14 @@ export async function POST(req: Request): Promise<Response> {
       return Response.json({ ok: true, remetenteDesconhecido: true });
     case "DESCARTADA":
       return Response.json({ ok: true, descartada: true });
+    case "CLASSIFICAR": {
+      const usuarioId = resultado.usuarioId;
+      // Sem #crm (GAB-39): o classificador (LLM) roda depois do 200 e só ele
+      // decide se o texto é gravado. `avaliarSemTag` nunca lança.
+      // Até 3 simultâneas por processo, 50 na fila; além disso NAO_CLASSIFICADA.
+      after(() => avaliarSemTagComLimite(mensagem, usuarioId));
+      return Response.json({ ok: true, emAvaliacao: true });
+    }
     case "PERSISTIDA": {
       // 200 primeiro, LLM + confirmação depois (GAB-34): a Evolution não espera.
       // `processarMensagem` reivindica a linha RECEBIDA atomicamente e nunca

@@ -366,6 +366,8 @@ model MensagemBruta {
   tentativas          Int            @default(0)
   resultadoLlm        Json?          @map("resultado_llm")
   erro                String?
+  /// GAB-39: chegou sem #crm e o classificador achou relevante — limiar de extração mais alto e confirmação "↪️".
+  semTag              Boolean        @default(false) @map("sem_tag")
   criadoEm            DateTime       @default(now()) @map("criado_em")
   atualizadoEm        DateTime       @updatedAt @map("atualizado_em")
 
@@ -392,9 +394,12 @@ model MensagemEnviada {
   @@map("mensagem_enviada")
 }
 
+/// Só data (dia civil de São Paulo) e números — nunca conteúdo (design doc §2).
 model ContadorDescartadas {
-  dia   DateTime @id @db.Date
-  total Int      @default(0)
+  dia              DateTime @id @db.Date
+  total            Int      @default(0)
+  /// GAB-39: sem #crm e o classificador falhou (sem crédito, provedor fora); nada persistido.
+  naoClassificadas Int      @default(0) @map("nao_classificadas")
 
   @@map("contador_descartadas")
 }

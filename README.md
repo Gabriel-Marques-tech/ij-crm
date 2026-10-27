@@ -110,7 +110,7 @@ A Evolution não guarda mensagens, contatos nem chats no banco dela (`DATABASE_S
 Nesta fatia (GAB-28) o bot só reage a mensagens com `#crm` de usuários ativos com
 `telefoneWhatsapp`/`whatsappLid` cadastrado; o resto é contado (`contador_descartadas`,
 `remetente_desconhecido`) e descartado sem persistir conteúdo. O que acontece com a mensagem
-`#crm` está em [#crm → card](#crm--card-llm); o classificador sem tag é GAB-39.
+`#crm` está em [#crm → card](#crm--card-llm); sem tag, em [Mensagens sem #crm](#mensagens-sem-crm-classificador-gab-39).
 
 ## #crm → card (LLM)
 
@@ -188,6 +188,56 @@ com `maxRetries: 0`, 2ª tentativa só em 5xx/timeout/rede).
 - Crédito pré-pago com recarga manual (auto-reload desligado, mínimo US$ 5, expira em 1 ano,
   sugestão US$ 50 a cada ~3 meses): `docs/runbook.md` §10.
 
+## Mensagens sem #crm (classificador, GAB-39)
+
+Mensagem do grupo **sem** `#crm` de vendedor cadastrado (design §4.3 passo 4, §2):
+
+1. **Ingestão** (tx do dedup): ruído óbvio — nenhuma letra nem dígito (só emoji/figurinha/símbolo;
+   `ruido.ts`) — ou remetente desconhecido → só `contador_descartadas.total` do dia; nada de LLM.
+   Mensagem curta com letra ("fechou!", "perdeu") vai ao classificador. Senão o `InboxEvento` fica
+   `PROCESSADO`, o webhook responde `200 {emAvaliacao: true}` e agenda `avaliarSemTagComLimite`
+   (`src/lib/whatsapp/sem-tag.ts`) em `after()`: no máximo **3 classificações simultâneas** por
+   processo e **50 na fila** em memória; além disso → não classificada (`FILA_CHEIA`). Retry da
+   Evolution → `DUPLICADO`.
+2. **Classificador** (`src/lib/llm/classificacao.ts`, prompt `prompts/classificacao.v1.ts`): mesmo
+   provedor/modelo da extração (GPT-6.1 Sol, raciocínio low; `LLM_CLASSIFICACAO_MODELO` opcional,
+   ignorado com aviso se for de outro provedor), prompt curto, contexto = só a mensagem respondida (300
+   caracteres), saída `{relevante, confianca}` em JSON schema estrito, teto de 2000 tokens de saída
+   (o raciocínio conta contra ele; `TRUNCADA` ganha 1 nova tentativa). Log: `[llm] classificacao
+   ref=<evento> … tokens_reasoning=… max_out=2000 relevante=… confianca=…` — nunca o texto.
+   Delimitadores (`<mensagem>`, `<respondendo_a>`, inclusive `</ mensagem >`) dentro do texto são
+   neutralizados (`prompts/escapar.ts`).
+3. `relevante=false` ou `confianca < LLM_LIMIAR_CLASSIFICADOR` (0.7) → **descartada**: nenhuma
+   `MensagemBruta`, só `contador_descartadas.total` +1 (dia civil de SP, só data + número).
+4. Relevante → grava `MensagemBruta` com `sem_tag = true` e segue o fluxo de [#crm → card](#crm--card-llm);
+   a extração recebe o aviso "mensagem sem #crm… responda IGNORAR se não for registro de venda". Régua
+   mais alta (`regra-sem-tag.ts`). **Pendente sem tag é silencioso**: nenhuma resposta no grupo, só a fila
+   de revisão (painel do GAB-41); mensagens com `#crm` continuam recebendo o ⚠️ de sempre.
+   - confiança da extração `< LLM_LIMIAR_SEM_TAG` (0.85; nunca abaixo de `LLM_LIMIAR_CONFIANCA`) →
+     `PENDENTE_REVISAO` (`SEM_TAG_INCERTO`);
+   - `IGNORAR` confiante → a linha é apagada e conta como descartada (`IGNORAR` incerto cai na regra acima);
+   - `CRIAR` sem telefone/email/CNPJ citado no texto → `PENDENTE_REVISAO` (`SEM_TAG_SEM_IDENTIFICADOR`; defesa contra injeção: uma
+     mensagem que convença a LLM não cria card sozinha); `ATUALIZAR` — e reply a uma confirmação do bot,
+     que o GAB-38 fixa no card dela — segue as regras de alvo de [ATUALIZAR](#crm--atualizar-card-existente-llm-atualizar);
+   - se agir (criar ou atualizar), a confirmação troca o ✅/⚠️ por
+     `↪️ entendi como atualização: Gustavo — Economia Sensata → Primeiro Contato. Resp: João.`
+   - a extração usa o prompt em vigor (`extracao.v2`), com o mesmo escape de delimitadores e a linha de "sem #crm".
+
+**Falha na classificação** (sem crédito, provedor fora, saída inválida, `TRUNCADA` 2×, erro de banco
+ou inesperado, fila cheia): o texto **não** é gravado (guardar "por via das dúvidas" seria guardar
+conversa do grupo). Em troca: `contador_descartadas.nao_classificadas` +1, log `[sem-tag] ref=…`
+com o erro saneado (`erro-seguro.ts`; nunca o texto) e alerta de ops se for `SEM_CREDITO` (GAB-46, que
+avisa que mensagens sem #crm não são reprocessadas). **Nada vai para o grupo** — nem aviso, nem citação
+da mensagem. Limitação aceita: se o processo morrer
+entre o 200 e o fim do `after()`, a mensagem sem tag se perde (não há cópia para retomar).
+
+Limiares (`LLM_LIMIAR_CONFIANCA`, `LLM_LIMIAR_CLASSIFICADOR`, `LLM_LIMIAR_SEM_TAG`) fora de 0–1 ou
+ilegíveis viram o padrão com um `[config] …` no log (uma vez, já no boot via `src/instrumentation.ts`).
+Saem do env quando a config do admin (GAB-42) existir.
+
+Fixtures: `src/lib/llm/fixtures/classificacao.ts` (10 de venda + 10 de conversa do grupo); o `mock`
+responde por elas (texto desconhecido → não relevante).
+
 ## #crm → atualizar card existente (LLM ATUALIZAR)
 
 GAB-38, design §4.3 "Alvo de ATUALIZAR". Prompt `extracao.v2` (mesmas chaves da v1; muda o texto e o
@@ -226,7 +276,7 @@ GAB-46. A recarga da API de LLM é manual (pré-pago). Quando uma chamada falha 
 (`src/lib/llm/alerta-credito.ts`), que:
 
 - manda `⚠️ Sem crédito na API de LLM. Mensagens do grupo estão ficando em FALHA e serão reprocessadas
-  depois da recarga. ref: …` para `ALERTA_OPS_JID` pelo `enviarWhatsApp` de sempre (timeout 60 s);
+  depois da recarga. Mensagens sem #crm não são reprocessadas; quem precisar, reenvie com #crm. ref: …` para `ALERTA_OPS_JID` pelo `enviarWhatsApp` de sempre (timeout 60 s);
 - respeita cooldown guardado no banco (`alerta_operacional`, sobrevive a restart): 6 h depois de um aviso
   entregue, 5 min se o envio falhou (ou se o processo cair entre reivindicar e enviar). Entrega confirmada
   pela Evolution conta como avisado mesmo se a gravação local falhar depois (`ErroPosEnvio` em `enviar.ts`);

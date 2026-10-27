@@ -30,6 +30,10 @@
  * - `processarMensagem` nunca lança (roda dentro de `after()`): erro de
  *   banco ao carregar ou ao gravar a FALHA é registrado com ref e a linha
  *   fica para o GAB-41.
+ * - Mensagem sem `#crm` (`semTag`, GAB-39): `regra-sem-tag.ts` decide antes
+ *   de aplicar (IGNORAR confiante apaga a linha; confiança < `LLM_LIMIAR_SEM_TAG`
+ *   ou CRIAR sem telefone/email/CNPJ no texto vira pendente, SEM resposta no grupo) e a confirmação de quando age começa
+ *   com "↪️ entendi como atualização:".
  */
 import { Prisma } from "@prisma/client";
 import { modeloDoProvedorConfigurado, limiarConfianca } from "@/lib/config/env";
@@ -44,14 +48,20 @@ import { ErroDeRegra } from "@/lib/oportunidades/erros";
 import { PIPELINE_VENDAS } from "@/lib/oportunidades/terminal-regras";
 import { aplicarExtracao, type Desfecho } from "./aplicar";
 import { alvoDaResposta, oportunidadesCandidatas, type MotivoRespostaInvalida } from "./candidatas";
-import { textoAtualizado, textoCriado, textoFalha, textoPendente } from "./confirmacao";
+import { textoAtualizado, textoAtualizadoSemTag, textoCriado, textoCriadoSemTag, textoFalha, textoPendente } from "./confirmacao";
+import { contarDescartada } from "./contadores";
 import { enviarWhatsApp } from "./enviar";
+import { erroSeguro } from "./erro-seguro";
 import { extrairIdentificadores } from "./identificadores";
+import { regraSemTag } from "./regra-sem-tag";
 
 export type ResultadoProcessamento =
   | { tipo: "IGNORADA" }
   | { tipo: "PROCESSADA"; oportunidadeId: string; confirmacao: string }
-  | { tipo: "PENDENTE_REVISAO"; confirmacao: string }
+  /** `confirmacao: null` = sem resposta no grupo (mensagem sem #crm pendente, GAB-39). */
+  | { tipo: "PENDENTE_REVISAO"; confirmacao: string | null }
+  /** Sem #crm e a extração disse IGNORAR: linha apagada, só o contador (GAB-39). */
+  | { tipo: "DESCARTADA" }
   | { tipo: "FALHA"; ref: string; codigo: string; confirmacao: string }
   /** Erro inesperado fora do fluxo normal (ex.: banco fora); registrado com ref. */
   | { tipo: "ERRO"; ref: string };
@@ -81,6 +91,7 @@ function carregar(id: string) {
       remetenteUsuarioId: true,
       remetenteUsuario: { select: { nome: true } },
       erro: true,
+      semTag: true,
     },
   });
 }
@@ -90,7 +101,7 @@ function carregar(id: string) {
  * por identificador exato e oportunidades candidatas (GAB-38).
  */
 export async function montarContexto(
-  m: Pick<Bruta, "texto" | "recebidaEm" | "respondendoEventoId" | "remetenteUsuario" | "remetenteUsuarioId">,
+  m: Pick<Bruta, "texto" | "recebidaEm" | "respondendoEventoId" | "remetenteUsuario" | "remetenteUsuarioId"> & { semTag?: boolean },
 ): Promise<ContextoExtracao & { respostaInvalida: MotivoRespostaInvalida | null }> {
   let respondendoA: string | null = null;
   if (m.respondendoEventoId) {
@@ -139,6 +150,7 @@ export async function montarContexto(
     oportunidades,
     alvoResposta,
     respostaInvalida: resposta?.tipo === "INVALIDA" ? resposta.motivo : null,
+    semTag: m.semTag ?? false,
   };
 }
 
@@ -148,20 +160,6 @@ function codigoDe(e: unknown): string {
   if (e instanceof ErroDeRegra) return `REGRA_${e.erro}`;
   if (e instanceof Prisma.PrismaClientKnownRequestError) return `PRISMA_${e.code}`;
   return "INESPERADO";
-}
-
-/**
- * Erro que pode ir para `registrarErro` sem vazar texto: ErroLlm/ErroDeRegra
- * têm mensagem só de código; Prisma conhecido é descrito por código. Qualquer
- * outro (ex.: PrismaClientValidationError, que ecoa os argumentos) perde a
- * mensagem e mantém nome + frames.
- */
-function erroSeguro(e: unknown): unknown {
-  if (e instanceof ErroLlm || e instanceof ErroDeRegra || e instanceof Prisma.PrismaClientKnownRequestError) return e;
-  const s = new Error("(mensagem omitida)");
-  s.name = e instanceof Error ? e.name : typeof e;
-  if (e instanceof Error && e.stack) s.stack = e.stack;
-  return s;
 }
 
 function registroLlm(r: ResultadoExtracao | null, bruto?: unknown, uso?: ResultadoExtracao["uso"]) {
@@ -272,8 +270,9 @@ async function processar(id: string, opts: { participantJid?: string | null }): 
   }
   const llm = registroLlm(r);
   await marcarCreditoOk(); // GAB-46: LLM respondeu → some o banner de sem crédito; nunca lança
+  const semTag = regraSemTag(m.semTag, r.extracao, m.texto, undefined, ctx.alvoResposta !== null);
 
-  let desfecho: Desfecho;
+  let desfecho: Desfecho | null;
   try {
     desfecho = await db.$transaction(
       async (tx) => {
@@ -283,15 +282,23 @@ async function processar(id: string, opts: { participantJid?: string | null }): 
           UPDATE mensagem_bruta SET atualizado_em = now()
            WHERE id = ${m.id} AND status = 'PROCESSANDO' AND tentativas = ${tentativa}`;
         if (minha !== 1) throw new CercaPerdida();
-        const d = await aplicarExtracao(tx, {
-          mensagem: { id: m.id, texto: m.texto, recebidaEm: m.recebidaEm, remetenteUsuarioId: m.remetenteUsuarioId! },
-          extracao: r.extracao,
-          limiar: limiarConfianca(),
-          registroLlm: llm,
-          candidatas: ctx.oportunidades,
-          alvoResposta: ctx.alvoResposta,
-          respostaInvalida: ctx.respostaInvalida,
-        });
+        if (semTag === "DESCARTAR") {
+          await tx.mensagemBruta.delete({ where: { id: m.id } });
+          await contarDescartada(tx, m.recebidaEm);
+          return null;
+        }
+        const d: Desfecho =
+          semTag === "INCERTO" || semTag === "SEM_IDENTIFICADOR"
+            ? { tipo: "PENDENTE", motivo: semTag === "INCERTO" ? "SEM_TAG_INCERTO" : "SEM_TAG_SEM_IDENTIFICADOR" }
+            : await aplicarExtracao(tx, {
+                mensagem: { id: m.id, texto: m.texto, recebidaEm: m.recebidaEm, remetenteUsuarioId: m.remetenteUsuarioId! },
+                extracao: r.extracao,
+                limiar: limiarConfianca(),
+                registroLlm: llm,
+                candidatas: ctx.oportunidades,
+                alvoResposta: ctx.alvoResposta,
+                respostaInvalida: ctx.respostaInvalida,
+              });
         await tx.mensagemBruta.update({
           where: { id: m.id },
           data: {
@@ -309,12 +316,19 @@ async function processar(id: string, opts: { participantJid?: string | null }): 
     return falhar(m, tentativa, e, llm, opts.participantJid);
   }
 
+  if (desfecho === null) return { tipo: "DESCARTADA" };
   if (desfecho.tipo === "PENDENTE") {
+    // Sem #crm e pendente (incerto, sem identificador, IGNORAR incerto, …):
+    // silêncio no grupo — só a fila de revisão (decisão do usuário, GAB-39).
+    if (m.semTag) return { tipo: "PENDENTE_REVISAO", confirmacao: null };
     const confirmacao = textoPendente(desfecho.motivo, { reprocessada });
     await responder(m, confirmacao, null, opts.participantJid);
     return { tipo: "PENDENTE_REVISAO", confirmacao };
   }
-  const confirmacao = desfecho.tipo === "ATUALIZADO" ? textoAtualizado(desfecho, { reprocessada }) : textoCriado(desfecho, { reprocessada });
+  const confirmacao =
+    desfecho.tipo === "ATUALIZADO"
+      ? (m.semTag ? textoAtualizadoSemTag : textoAtualizado)(desfecho, { reprocessada })
+      : (m.semTag ? textoCriadoSemTag : textoCriado)(desfecho, { reprocessada });
   await responder(m, confirmacao, desfecho.oportunidadeId, opts.participantJid);
   return { tipo: "PROCESSADA", oportunidadeId: desfecho.oportunidadeId, confirmacao };
 }

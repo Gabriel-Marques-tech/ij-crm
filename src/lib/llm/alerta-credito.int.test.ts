@@ -44,7 +44,7 @@ afterEach(() => {
 describe("alertarSeSemCredito", () => {
   it("texto do aviso tem a ref e nada da mensagem do grupo", () => {
     expect(textoAlertaSemCredito("abc12345")).toBe(
-      "⚠️ Sem crédito na API de LLM. Mensagens do grupo estão ficando em FALHA e serão reprocessadas depois da recarga. ref: abc12345",
+      "⚠️ Sem crédito na API de LLM. Mensagens do grupo estão ficando em FALHA e serão reprocessadas depois da recarga. Mensagens sem #crm não são reprocessadas; quem precisar, reenvie com #crm. ref: abc12345",
     );
   });
 
