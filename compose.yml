@@ -37,6 +37,11 @@ services:
       - .:/app:z
       - app_node_modules:/app/node_modules
       - app_next:/app/.next
+    # Esconde do container o que não é app: `.claude/` (worktrees de agentes, que
+    # o Turbopack varreria inteiras a cada mudança). Worktrees ficam FORA do repo
+    # (README, "Worktrees de agentes"); isto é a rede de segurança.
+    tmpfs:
+      - /app/.claude
     depends_on:
       db:
         condition: service_healthy
