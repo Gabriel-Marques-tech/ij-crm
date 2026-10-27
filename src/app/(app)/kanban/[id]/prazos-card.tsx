@@ -42,7 +42,7 @@ export function PrazosDoCard({ cardId, prazos, hoje }: { cardId: string; prazos:
                 aria-label={p.estado === "feito" ? `Reabrir ${p.titulo}` : `Concluir ${p.titulo}`}
                 title={p.podeMexer ? undefined : "Só o responsável ou a gestão"}
                 className={cn(
-                  "inline-flex size-5 shrink-0 items-center justify-center rounded-md border transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+                  "inline-flex size-6 shrink-0 items-center justify-center rounded-md border transition-colors disabled:cursor-not-allowed disabled:opacity-50",
                   p.estado === "feito" ? "border-border bg-surface-strong text-fg-soft" : p.estado === "vencido" ? "border-primary/60 hover:bg-primary-soft/40" : "border-border-strong hover:bg-surface-hover",
                 )}
               >

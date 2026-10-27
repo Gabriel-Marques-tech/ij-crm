@@ -19,7 +19,7 @@ function MarcarFeitaNoCard({ a, hoje }: { a: AcaoItem; hoje: string }) {
         onClick={() => setAberto(true)}
         aria-label={`Marcar feita: ${a.acao ?? a.titulo}`}
         title="Marcar feita"
-        className="inline-flex size-5 items-center justify-center rounded-md border border-border-strong text-fg-mute transition-colors hover:bg-surface-strong hover:text-foreground"
+        className="inline-flex size-6 items-center justify-center rounded-md border border-border-strong text-fg-mute transition-colors hover:bg-surface-strong hover:text-foreground"
       >
         <Check className="size-3" aria-hidden />
       </button>
