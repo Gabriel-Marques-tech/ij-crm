@@ -55,8 +55,9 @@ export type CodigoErroLlm =
  */
 const DETALHE_PADRAO: Partial<Record<CodigoErroLlm, string>> = {
   // Reprocessável (GAB-41) depois de recarregar o saldo. Os provedores
-  // passam o próprio `detalhe` ("... da OpenAI"/"... da Anthropic").
-  SEM_CREDITO: "sem crédito na API da Anthropic",
+  // passam o próprio `detalhe` ("... da OpenAI"/"... da Anthropic"); o
+  // padrão é neutro para não apontar o provedor errado.
+  SEM_CREDITO: "sem crédito na API de LLM",
 };
 
 export class ErroLlm extends Error {

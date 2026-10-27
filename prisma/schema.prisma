@@ -432,6 +432,18 @@ model ImportPrevia {
   @@map("import_previa")
 }
 
+// GAB-46: estado de alertas operacionais (cooldown do aviso no WhatsApp +
+// banner). Uma linha por chave; hoje só `LLM_SEM_CREDITO`.
+model AlertaOperacional {
+  chave              String    @id
+  ativoDesde         DateTime? @map("ativo_desde")
+  ultimaOcorrenciaEm DateTime? @map("ultima_ocorrencia_em")
+  proximoAvisoEm     DateTime? @map("proximo_aviso_em")
+  avisadoEm          DateTime? @map("avisado_em")
+
+  @@map("alerta_operacional")
+}
+
 // ---------------------------------------------------------------- configuração (GAB-44)
 
 // Chave → JSON validado com zod por chave (src/lib/configuracao). Linha ausente
