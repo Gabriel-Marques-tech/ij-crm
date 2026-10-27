@@ -127,6 +127,20 @@ describe("avaliarSemTag", () => {
     expect(await contador()).toEqual({ dias: 0, total: 0, naoClassificadas: 0 });
   });
 
+  it("reply sem #crm a uma confirmação do bot (GAB-38) → atualiza o card dela, confirmação ↪️", async () => {
+    definirRespostaMock(() => saida({ contato: { nome: "Carla" }, empresa: { nome: "Carla Consultoria" }, confianca: 0.95 }));
+    const criado = await avaliarSemTag(msg(RELEVANTE_COM_ID.texto), joao.id);
+    if (criado.tipo !== "PERSISTIDA" || criado.processamento.tipo !== "PROCESSADA") throw new Error("card não criado");
+    await dbT.mensagemEnviada.create({ data: { eventoId: "BOTCONF1", grupoJid: GRUPO, texto: "✅ Carla", oportunidadeId: criado.processamento.oportunidadeId } });
+    definirClassificacaoMock(() => ({ relevante: true, confianca: 0.9 }));
+    definirRespostaMock(() => saida({ intencao: "ATUALIZAR", campos: { proxima_acao: "ligar", proxima_acao_em: "quinta" }, confianca: 0.95 }));
+    const r = await avaliarSemTag(msg("ela pediu pra ligar quinta", { respondendoEventoId: "BOTCONF1" }), joao.id);
+    expect(r).toMatchObject({ tipo: "PERSISTIDA", processamento: { tipo: "PROCESSADA", oportunidadeId: criado.processamento.oportunidadeId } });
+    if (r.tipo !== "PERSISTIDA" || r.processamento.tipo !== "PROCESSADA") return;
+    expect(r.processamento.confirmacao).toMatch(/^↪️ entendi como atualização: /);
+    expect(await dbT.oportunidade.count()).toBe(1);
+  });
+
   it("relevante + extração com confiança abaixo de LLM_LIMIAR_SEM_TAG → PENDENTE_REVISAO em silêncio, nenhum card", async () => {
     // 0.8 ≥ LLM_LIMIAR_CONFIANCA (0.7): com #crm teria criado; sem tag (0.85) não age.
     definirRespostaMock(() => saida({ contato: { nome: "Rafael" }, empresa: { nome: "Padaria Pão Quente" }, confianca: 0.8 }));

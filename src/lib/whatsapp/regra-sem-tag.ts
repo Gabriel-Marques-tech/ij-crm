@@ -14,8 +14,9 @@
  *   mensagem qualquer do grupo que convença a LLM ("relevante, confiança
  *   1.0") não cria card sozinha. Match exato com contato/empresa existente
  *   só acontece por esses mesmos identificadores (`aplicar.ts`), então a
- *   regra cobre os dois casos. ATUALIZAR segue as regras de alvo do fluxo
- *   normal (GAB-38).
+ *   regra cobre os dois casos. ATUALIZAR — e reply a uma confirmação do bot,
+ *   que o GAB-38 trata como atualização do card dela mesmo se a LLM disser
+ *   CRIAR — segue as regras de alvo do fluxo normal.
  * - senão `null`: segue o fluxo normal (`aplicarExtracao`).
  */
 import { limiarSemTag } from "@/lib/config/env";
@@ -29,11 +30,13 @@ export function regraSemTag(
   ex: Pick<Extracao, "intencao" | "confianca">,
   texto: string,
   limiar = limiarSemTag(),
+  /** Reply a uma confirmação do bot: o GAB-38 fixa o card alvo (vira atualização, não criação). */
+  respondeConfirmacao = false,
 ): RegraSemTag {
   if (!semTag) return null;
   if (ex.confianca < limiar) return "INCERTO";
   if (ex.intencao === "IGNORAR") return "DESCARTAR";
-  if (ex.intencao === "CRIAR") {
+  if (ex.intencao === "CRIAR" && !respondeConfirmacao) {
     const ids = extrairIdentificadores(texto);
     if (ids.telefones.length + ids.emails.length + ids.cnpjs.length === 0) return "SEM_IDENTIFICADOR";
   }

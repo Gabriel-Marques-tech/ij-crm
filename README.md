@@ -141,8 +141,8 @@ Regras: o contato é decidido pelos telefones/emails **achados no texto** (não 
 um dono vivo → reaproveita (e a empresa dele, resolvendo merge; nome lido diferente → `revisar`), donos
 diferentes → `PENDENTE_REVISAO`; vínculo automático de empresa **só por CNPJ**; domínio de email e nome igual são sugestão
 (`revisar` + `resultado_llm.aplicacao.sugestoes`); ponto de contato de contato excluído → `PENDENTE_REVISAO`;
-sem nome de contato nem de empresa → não cria, `PENDENTE_REVISAO`; `ATUALIZAR`/`IGNORAR` →
-`PENDENTE_REVISAO` (atualização é a próxima fatia); responsável = remetente, trocado só por nome
+sem nome de contato nem de empresa → não cria, `PENDENTE_REVISAO`; `ATUALIZAR` → seção abaixo; `IGNORAR` →
+`PENDENTE_REVISAO`; responsável = remetente, trocado só por nome
 completo exato de usuário ativo; `revisar` se confiança < `LLM_LIMIAR_CONFIANCA` (0.7).
 Status: `RECEBIDA → PROCESSANDO → PROCESSADA | PENDENTE_REVISAO | FALHA`. `processarMensagem` nunca
 lança (roda no `after()`): erro de banco vira log com ref e a linha fica para o reprocessamento.
@@ -217,9 +217,11 @@ Mensagem do grupo **sem** `#crm` de vendedor cadastrado (design §4.3 passo 4, �
      `PENDENTE_REVISAO` (`SEM_TAG_INCERTO`);
    - `IGNORAR` confiante → a linha é apagada e conta como descartada (`IGNORAR` incerto cai na regra acima);
    - `CRIAR` sem telefone/email/CNPJ citado no texto → `PENDENTE_REVISAO` (`SEM_TAG_SEM_IDENTIFICADOR`; defesa contra injeção: uma
-     mensagem que convença a LLM não cria card sozinha); `ATUALIZAR` segue as regras de alvo normais;
-   - se agir, a confirmação começa com
+     mensagem que convença a LLM não cria card sozinha); `ATUALIZAR` — e reply a uma confirmação do bot,
+     que o GAB-38 fixa no card dela — segue as regras de alvo de [ATUALIZAR](#crm--atualizar-card-existente-llm-atualizar);
+   - se agir (criar ou atualizar), a confirmação troca o ✅/⚠️ por
      `↪️ entendi como atualização: Gustavo — Economia Sensata → Primeiro Contato. Resp: João.`
+   - a extração usa o prompt em vigor (`extracao.v2`), com o mesmo escape de delimitadores e a linha de "sem #crm".
 
 **Falha na classificação** (sem crédito, provedor fora, saída inválida, `TRUNCADA` 2×, erro de banco
 ou inesperado, fila cheia): o texto **não** é gravado (guardar "por via das dúvidas" seria guardar
@@ -235,6 +237,37 @@ Saem do env quando a config do admin (GAB-42) existir.
 
 Fixtures: `src/lib/llm/fixtures/classificacao.ts` (10 de venda + 10 de conversa do grupo); o `mock`
 responde por elas (texto desconhecido → não relevante).
+
+## #crm → atualizar card existente (LLM ATUALIZAR)
+
+GAB-38, design §4.3 "Alvo de ATUALIZAR". Prompt `extracao.v2` (mesmas chaves da v1; muda o texto e o
+contexto). Só o pipeline **Vendas**; `projetos` é UI.
+
+- **Candidatas** no contexto (`candidatas.ts`, só leitura): cards de Vendas dos contatos/empresas casados
+  por identificador exato (CNPJ; domínio só como sugestão) + as **3 últimas oportunidades que o remetente
+  tocou** (Timeline com o usuário dele) nos 30 min antes da mensagem — cobre mensagens picadas
+  ("falei com o Gustavo" / "é da Economia Sensata" / "mando proposta sexta").
+- **Alvo** (`alvo.ts`, puro): reply a uma confirmação do bot → o card dela (`MensagemEnviada.oportunidade_id`,
+  gravada a cada confirmação), **sem a LLM decidir** (vale mesmo se ela disser CRIAR) — só se a confirmação
+  tem até 30 dias e o card está vivo em Vendas; senão `PENDENTE_REVISAO` (nunca vira CRIAR). Senão o
+  `oportunidade_id` da LLM, **só se estiver na lista enviada**; escolha só pela conversa recente (sem
+  identificador exato) vale sem `revisar` só se for o ÚNICO card que o remetente tocou nos 30 min (aberto,
+  sem card aberto por identidade concorrendo); qualquer outra ambiguidade → `revisar`; card fechado com um aberto da mesma identidade → o aberto. Senão, entre as candidatas por identidade:
+  1 aberta → ela; >1 → a tocada mais recentemente + `revisar`; só fechadas → card **novo** com
+  `reaberta_de_id` + `revisar`. Nenhum → `PENDENTE_REVISAO` ("não achei o card para atualizar").
+- **Aplicação** (`atualizar.ts`, mesma transação/cerca do CRIAR): aplica só campos presentes (nunca
+  apaga; origem só se vazia), pontos de contato citados no texto acumulam no contato do card (de outro
+  contato → `revisar`, nunca rouba; sem contato onde guardar → `revisar`), empresa por CNPJ só em card sem
+  empresa, nome comparado **exato** (nunca por trecho); card com empresa de outro nome só troca numa
+  **correção por reply**, sempre com `revisar`; contato que já tem empresa nunca é reescrito; dono do card
+  nunca muda pelo WhatsApp ("responsável sugerido" + `revisar`); título automático acompanha os vínculos. Fase pela chave
+  via `registrarMovimento` (TransicaoFase `WHATSAPP`, Timeline, locks por `travarPipelines` — ganho trava
+  também `projetos`; os campos entram antes do movimento, então o card de projeto já nasce com eles).
+  **Terminal** só com o dado **ancorado no texto**: ganho precisa de um valor escrito na mensagem igual ao
+  que a LLM leu ("18 mil"), perda de um sinal de perda ("perdemos", "desistiu", "não fechou"… ou o
+  motivo escrito); sem isso não move e marca `revisar`.
+- **Confirmação** cita o card: `✅ Gustavo — Economia Sensata: Primeiro Contato → Reunião Diagnóstica.
+  Próx.: reunião (30/10)`; sem movimento `✅ Título (Fase): atualizado.`; `⚠️` + motivo quando `revisar`.
 
 ## Alerta de sem crédito na LLM
 

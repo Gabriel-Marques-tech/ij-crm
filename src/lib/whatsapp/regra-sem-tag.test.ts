@@ -30,4 +30,9 @@ describe("regraSemTag", () => {
   it("ATUALIZAR confiante segue as regras de alvo do fluxo normal (não exige identificador)", () => {
     expect(regraSemTag(true, { intencao: "ATUALIZAR", confianca: 0.95 }, SEM_ID, LIMIAR)).toBeNull();
   });
+
+  it("reply a uma confirmação do bot (GAB-38 fixa o alvo): CRIAR sem identificador não vira pendente por isso", () => {
+    expect(regraSemTag(true, { intencao: "CRIAR", confianca: 1 }, SEM_ID, LIMIAR, true)).toBeNull();
+    expect(regraSemTag(true, { intencao: "CRIAR", confianca: 0.5 }, SEM_ID, LIMIAR, true)).toBe("INCERTO");
+  });
 });
