@@ -292,6 +292,34 @@ uso único, consumo atômico, encerra todas as sessões do usuário). Gestor só
 admin gera para qualquer um, menos para si. Metadados da foto (COM/APPn, EXIF/XMP/ICCP) são
 removidos antes de gravar.
 
+## Ranking de vendas
+
+`/ranking` (todos os papéis): Semana (seg–dom) | Mês, em dias de São Paulo, com navegação para
+períodos anteriores (`?periodo=semana|mes&ref=YYYY-MM-DD`). Pódio Top 3, classificação completa
+(você destacado), detalhamento dos seus pontos, feed dos últimos 7 dias (ganhos e avanços, só o
+título do card), destaques do período e a tabela ordenável "Métricas por vendedor" com a linha
+"Time". Card "Top 3 da semana" na lateral da Minha Semana.
+
+Pontos são **calculados na leitura** a partir do histórico (`src/lib/ranking/calculo.ts`, puro;
+uma consulta `UNION ALL` por período em `servico.ts`), só com cards vivos do quadro `vendas`:
+
+| evento | pontos padrão | para quem |
+|---|---|---|
+| card em fase de ganho com `data_ganho` no período | 100 + 1 por R$ 1.000 de `valor_fechado` (bônus até 100) | responsável do card |
+| primeira entrada do card numa fase **aberta** de ordem maior (import não conta) | 5 | quem moveu (`transicao_fase.usuario_id`) |
+| "Marcar feita" da Minha Semana (Timeline `NOTA` com `feito`), 1 por card por dia de SP | 2 | quem marcou |
+| card criado em Vendas (UI/WhatsApp) | 1 | quem criou |
+
+Perdido vale 0 (entra na conversão, pela `fase_desde`); venda reaberta perde o ganho e re-ganho
+conta pela nova `data_ganho`. Desempate: mais ganhos → maior R$ fechado → quem chegou antes à
+pontuação. Aparecem usuários ativos `VENDEDOR` e gestores/admins ativos com card vivo em Vendas.
+
+**Gestão → Ranking** (gestor+): pesos, mínimos dos destaques (conversão: 3 fechadas; mais rápido:
+2 ganhos) e "Mostrar ranking aos vendedores". Desligado, o servidor entrega ao vendedor só a própria
+linha (sem posição) e o próprio feed. A config fica em `configuracao` (chave → JSONB, validada com
+zod por chave em `src/lib/configuracao/`; linha ausente ou inválida = padrão) — genérica para a
+config técnica do GAB-42.
+
 ## Erros e debug
 
 Exceção inesperada numa server action não vira tela de erro: a action devolve
