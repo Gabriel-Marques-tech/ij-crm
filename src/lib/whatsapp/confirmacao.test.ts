@@ -71,5 +71,6 @@ describe("confirmação no grupo", () => {
     expect(textoCriadoSemTag(BASE, { reprocessada: true })).toMatch(/^↪️ Reprocessada: entendi como atualização: Gustavo/);
     expect(textoCriadoSemTag(BASE)).not.toBe(textoCriado(BASE));
     expect(textoPendente("SEM_TAG_INCERTO")).toMatch(/^⚠️ .*sem #crm.*fila de revisão/);
+    expect(textoPendente("SEM_TAG_SEM_IDENTIFICADOR")).toMatch(/^⚠️ .*sem #crm.*telefone, email ou CNPJ/);
   });
 });

@@ -22,7 +22,9 @@ export type MotivoPendente =
   | "EMPRESA_EXCLUIDA"
   | "IDENTIFICADORES_CONFLITANTES"
   /** GAB-39: sem #crm e a extração não atingiu `LLM_LIMIAR_SEM_TAG`. */
-  | "SEM_TAG_INCERTO";
+  | "SEM_TAG_INCERTO"
+  /** GAB-39: sem #crm, CRIAR sem telefone/email/CNPJ citado (defesa contra injeção). */
+  | "SEM_TAG_SEM_IDENTIFICADOR";
 
 export type ResumoCriado = {
   titulo: string;
@@ -44,6 +46,7 @@ const TEXTO_PENDENTE: Record<MotivoPendente, string> = {
   EMPRESA_EXCLUIDA: "⚠️ esse CNPJ é de uma empresa excluída do CRM; ficou na fila de revisão",
   IDENTIFICADORES_CONFLITANTES: "⚠️ os dados da mensagem batem com cadastros diferentes no CRM; ficou na fila de revisão",
   SEM_TAG_INCERTO: "⚠️ parece atualização de venda (sem #crm), mas não tive certeza; ficou na fila de revisão do CRM",
+  SEM_TAG_SEM_IDENTIFICADOR: "⚠️ parece lead novo (sem #crm), mas sem telefone, email ou CNPJ; ficou na fila de revisão do CRM",
 };
 
 /** `YYYY-MM-DD` → `DD/MM`. */

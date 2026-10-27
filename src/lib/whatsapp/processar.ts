@@ -31,8 +31,8 @@
  *   banco ao carregar ou ao gravar a FALHA é registrado com ref e a linha
  *   fica para o GAB-41.
  * - Mensagem sem `#crm` (`semTag`, GAB-39): `regra-sem-tag.ts` decide antes
- *   de aplicar (IGNORAR apaga a linha; confiança < `LLM_LIMIAR_SEM_TAG` vira
- *   pendente) e a confirmação começa com "↪️ entendi como atualização:".
+ *   de aplicar (IGNORAR confiante apaga a linha; confiança < `LLM_LIMIAR_SEM_TAG`
+ *   ou CRIAR sem telefone/email/CNPJ no texto vira pendente) e a confirmação começa com "↪️ entendi como atualização:".
  */
 import { Prisma } from "@prisma/client";
 import { modeloDoProvedorConfigurado, limiarConfianca } from "@/lib/config/env";
@@ -256,7 +256,7 @@ async function processar(id: string, opts: { participantJid?: string | null }): 
   }
   const llm = registroLlm(r);
   await marcarCreditoOk(); // GAB-46: LLM respondeu → some o banner de sem crédito; nunca lança
-  const semTag = regraSemTag(m.semTag, r.extracao);
+  const semTag = regraSemTag(m.semTag, r.extracao, m.texto);
 
   let desfecho: Desfecho | null;
   try {
@@ -274,8 +274,8 @@ async function processar(id: string, opts: { participantJid?: string | null }): 
           return null;
         }
         const d: Desfecho =
-          semTag === "INCERTO"
-            ? { tipo: "PENDENTE", motivo: "SEM_TAG_INCERTO" }
+          semTag === "INCERTO" || semTag === "SEM_IDENTIFICADOR"
+            ? { tipo: "PENDENTE", motivo: semTag === "INCERTO" ? "SEM_TAG_INCERTO" : "SEM_TAG_SEM_IDENTIFICADOR" }
             : await aplicarExtracao(tx, {
                 mensagem: { id: m.id, texto: m.texto, recebidaEm: m.recebidaEm, remetenteUsuarioId: m.remetenteUsuarioId! },
                 extracao: r.extracao,
