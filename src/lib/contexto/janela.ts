@@ -2,9 +2,8 @@
  * Janelas de contexto da LLM (GAB-49): blocos FIXOS de 12 h no fuso de
  * negócio — 00:00–12:00 e 12:00–24:00 de America/Sao_Paulo. Puro.
  *
- * O deslocamento do fuso é lido do `Intl` no próprio instante (SP não tem
- * horário de verão desde 2019, mas se voltar a ter o cálculo continua certo
- * fora da hora da troca).
+ * O deslocamento do fuso é lido do `Intl` no início da janela (SP não tem
+ * horário de verão desde 2019; inerte hoje, certo se voltar a ter).
  */
 import { FUSO_NEGOCIO } from "@/lib/oportunidades/aging";
 
@@ -34,9 +33,10 @@ function paredeComoUtc(instante: Date): { ms: number; ano: number; mes: number; 
 export function janelaDe(instante: Date): Janela {
   const t = new Date(Math.floor(instante.getTime() / 1000) * 1000);
   const w = paredeComoUtc(t);
-  const deslocamento = w.ms - t.getTime(); // SP: -3 h
   const inicioParede = Date.UTC(w.ano, w.mes - 1, w.dia, w.hora < 12 ? 0 : 12);
-  const inicio = new Date(inicioParede - deslocamento);
+  // Deslocamento no INÍCIO da janela (SP: -3 h): estimado pelo instante e relido no início.
+  const estimado = inicioParede - (w.ms - t.getTime());
+  const inicio = new Date(inicioParede - (paredeComoUtc(new Date(estimado)).ms - estimado));
   return { inicio, fim: new Date(inicio.getTime() + 12 * HORA_MS) };
 }
 
