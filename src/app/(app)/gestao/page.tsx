@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Users, Layers, MessageSquare, Upload, Trash2 } from "lucide-react";
+import { Users, Layers, MessageSquare, Upload, Trash2, Trophy } from "lucide-react";
 import { PageHeader } from "@/components/shell/page-header";
 
 const AREAS = [
@@ -8,6 +8,7 @@ const AREAS = [
   { href: "/gestao/lixeira", icon: Trash2, titulo: "Lixeira", desc: "Restaurar cards, contatos e empresas excluídos; apagar de vez (admin)." },
   { href: "/gestao/whatsapp", icon: MessageSquare, titulo: "WhatsApp", desc: "Mensagens falhas e pendentes. (GAB-41)", futuro: true },
   { href: "/gestao/importar", icon: Upload, titulo: "Importar", desc: "Pipefy → CRM: CSV com prévia, idempotente." },
+  { href: "/gestao/ranking", icon: Trophy, titulo: "Ranking", desc: "Pesos da pontuação e se os vendedores veem o ranking." },
 ];
 
 export const metadata = { title: "Gestão" };

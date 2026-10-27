@@ -37,11 +37,21 @@ services:
       - .:/app:z
       - app_node_modules:/app/node_modules
       - app_next:/app/.next
+    # Esconde do container o que não é app: `.claude/` (worktrees de agentes, que
+    # o Turbopack varreria inteiras a cada mudança) e saídas de ferramentas locais
+    # que o app nunca lê. Worktrees ficam FORA do repo (README, "Worktrees de
+    # agentes"); isto é a rede de segurança.
+    tmpfs:
+      - /app/.claude
+      - /app/.code-review-graph
+      - /app/graphify-out
     depends_on:
       db:
         condition: service_healthy
     # Roda a cada `up`: idempotente, mas o install pode levar alguns minutos na 1ª vez.
-    command: sh -c "pnpm install --frozen-lockfile && pnpm prisma migrate deploy && pnpm prisma db seed && pnpm dev"
+    # `prisma generate` explícito: o install só regenera o client quando as deps
+    # mudam; schema novo com client velho quebra o app em runtime.
+    command: sh -c "pnpm install --frozen-lockfile && pnpm prisma generate && pnpm prisma migrate deploy && pnpm prisma db seed && pnpm dev"
 
   # ---- WhatsApp: Evolution API v2 (GAB-28) ----
   # Perfil `whatsapp`: `docker compose --profile whatsapp up -d`. Sem o perfil,

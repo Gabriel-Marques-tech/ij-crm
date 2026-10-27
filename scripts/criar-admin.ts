@@ -4,11 +4,10 @@
  * Se o email já existe, recusa — a menos que ADMIN_FORCAR=1 (aí redefine senha,
  * promove a ADMIN e reativa). Evita resetar a conta de alguém por engano.
  */
-import { PrismaClient } from "@prisma/client";
+import { db as prisma } from "../src/lib/db";
+import { mensagemSegura } from "../src/lib/erros/registrar";
 import { gerarHashSenha, senhaAtendeRegras } from "../src/lib/auth/senha";
 import { normalizarEmail } from "../src/lib/normalizacao";
-
-const prisma = new PrismaClient();
 
 async function main() {
   const nome = process.env.ADMIN_NOME?.trim();
@@ -33,7 +32,7 @@ async function main() {
 
 main()
   .catch((e) => {
-    console.error(e.message ?? e);
+    console.error(mensagemSegura(e));
     process.exit(1);
   })
   .finally(() => prisma.$disconnect());

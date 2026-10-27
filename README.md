@@ -23,6 +23,20 @@ pnpm db:seed               # pipelines e fases do Pipefy
 pnpm dev
 ```
 
+## Worktrees de agentes: FORA do diretório do projeto
+
+O `compose.yml` monta o repo inteiro em `/app` e o `next dev` (Turbopack) varre
+tudo o que está lá. Uma worktree dentro do projeto (ex.: `.claude/worktrees/`)
+é uma cópia inteira do código: o dev server passa a indexá-la, a CPU/RAM sobe e
+os reloads ficam lentos. Crie worktrees ao lado do repo:
+
+```bash
+git worktree add ../ij-crm-wt/<nome> -b <branch> origin/main
+```
+
+Como rede de segurança, o container de dev esconde `.claude/` (tmpfs) e
+`tsconfig`/ESLint ignoram `.claude/`, `.code-review-graph/` e `graphify-out/`.
+
 ## Primeiro acesso
 
 ```bash
@@ -309,6 +323,7 @@ para gestor/admin e usuário ativo; para os demais o servidor ignora e mostra a 
 - **Estado na URL** (`src/lib/tabela/params.ts`), compartilhável e igual ao Kanban onde coincide: `quadro` (chaves de pipeline), `fase` (ids), `resp`, `origem` (`SEM` = sem origem), `revisar` e `terminais` (`sim`/`nao`), `acao` (`vencida,hoje,semana,sem`, mesmas faixas da Minha Semana), `de`/`ate` (criação, `YYYY-MM-DD` em SP, inclusivo), `q` (título, empresa ou contato vivos; sem acento, sem caixa e com espaços colapsados como no Kanban, via `public.unaccent` da migration `20261024174500_review_fixes`; `%`/`_` literais), `ordem`/`dir` (lista branca, desempate por id) e `pagina`. Valor inválido é ignorado.
 - **CSV**: `GET /tabela/csv?<mesmos parâmetros>` exporta todas as linhas filtradas (sem limite de página), em streaming: UTF-8 com BOM, `;`, vírgula decimal e datas dd/mm/aaaa (abre direto no Excel pt-BR). Texto que começa com `= + - @`, tab ou CR (mesmo depois de espaços) ganha um `'` visível (mitigação padrão OWASP contra formula injection). Erro antes do primeiro byte → 500 com `ref`; erro no meio do streaming não vira 500 (o 200 já saiu): o arquivo termina com a linha `EXPORTAÇÃO INCOMPLETA: erro no servidor (ref: …)`, que é o sinal de arquivo truncado. Cada lote reaplica os filtros: toda linha exportada ainda batia neles no momento do lote, sem duplicar (não é um retrato único no tempo).
 - **Busca: Tabela × Kanban** (diferença intencional). O Kanban busca em título + empresa, no cliente, sobre os cards já carregados do quadro; a Tabela busca também no nome do contato, no banco, porque é a visão de pesquisa geral. Empresa/contato aparecem (tela e CSV) e são buscados pelo nome exibido, na regra do Kanban (`nomeExibido`): mesclado (mesmo se também excluído) → nome da principal se ela estiver viva, senão o próprio nome; merge tem 1 nível (`validarMerge`). Excluído sem merge aparece com "(excluída)" e não é achado pelo nome.
+- **Ordem por empresa/contato** (GAB-48): pelo nome exibido (mesclado → principal viva; excluído sem merge → o próprio nome), na colação ICU `ij_ptbr` (pt-BR, criada pela migration `20261027140000_colacao_ptbr`; acento e caixa só desempatam; a colação padrão do banco no Alpine compara bytes), vazios por último nos dois sentidos, desempate por id. Toda página (e o CSV) lê os ids filtrados já ordenados, cruza com a busca em memória (nunca um `IN` gigante: o Postgres recusa mais de 32.767 parâmetros) e carrega só a fatia reaplicando os filtros. Limite conhecido: lê todos os ids filtrados por página, ok na escala atual; se crescer, keyset/`OFFSET` no SQL.
 
 ## Preferências de visualização
 
@@ -369,6 +384,44 @@ uso único, consumo atômico, encerra todas as sessões do usuário). Gestor só
 admin gera para qualquer um, menos para si. Metadados da foto (COM/APPn, EXIF/XMP/ICCP) são
 removidos antes de gravar.
 
+## Ranking de vendas
+
+`/ranking` (todos os papéis): Semana (seg–dom) | Mês, em dias de São Paulo, com navegação para
+períodos anteriores (`?periodo=semana|mes&ref=YYYY-MM-DD`). Pódio Top 3, classificação completa
+(você destacado), detalhamento dos seus pontos, feed dos últimos 7 dias (ganhos e avanços, só o
+título do card), destaques do período e a tabela ordenável "Métricas por vendedor" com a linha
+"Time". Card "Top 3 da semana" na lateral da Minha Semana.
+
+Pontos são **calculados na leitura** a partir do histórico (`src/lib/ranking/calculo.ts`, puro;
+uma consulta `UNION ALL` por período em `servico.ts`), só com cards vivos do quadro `vendas` e só
+movimentos feitos por gente — origem `UI` ou `WHATSAPP`. `SISTEMA` (cards migrados ao arquivar/remover
+fase) e `IMPORT` não pontuam e não contam como ganho nem perda:
+
+| evento | pontos padrão | para quem |
+|---|---|---|
+| card em fase de ganho (entrou nela por UI/WhatsApp) com `data_ganho` no período | 100 + 1 por R$ 1.000 de `valor_fechado` (bônus até 100) | responsável do card |
+| primeira entrada do card numa fase **aberta** de ordem maior (import não conta) | 5 | quem moveu (`transicao_fase.usuario_id`) |
+| "Marcar feita" da Minha Semana (Timeline `NOTA` com `feito`), até 4 por vendedor por dia de SP (configurável) | 2 | quem marcou |
+| card criado em Vendas (UI/WhatsApp) | 1 | quem criou |
+
+Perdido vale 0 (entra na conversão, datado pela transição que o levou ao perdido); venda reaberta
+perde o ganho e re-ganho conta pela nova `data_ganho`; migração entre duas fases de ganho não muda
+nada. Desempate: mais ganhos → maior R$ fechado → quem chegou antes à pontuação. Aparecem usuários
+ativos `VENDEDOR` e gestores/admins ativos com card vivo em Vendas, pontuando igual. Usuário
+**desativado** sai da lista, das posições e dos destaques, mas os ganhos e valores dele continuam na
+linha "Time" (é história do time). As datas são comparadas em UTC explícito no SQL
+(`::timestamptz AT TIME ZONE 'UTC'`), independentes da `TimeZone` da sessão do Postgres; índices
+`transicao_fase(em)` e `timeline(tipo, em)` cobrem os filtros por período.
+
+**Gestão → Ranking** (gestor+): pesos, mínimos dos destaques (conversão: 3 fechadas; mais rápido:
+2 ganhos) e "Mostrar ranking aos vendedores". Desligado, o servidor entrega ao vendedor só a própria
+linha (sem posição) e o próprio feed. A config fica em `configuracao` (chave → JSONB, validada com
+zod por chave em `src/lib/configuracao/`) — genérica para a config técnica do GAB-42. Linha
+ausente = padrão; linha que não passa no schema = padrão + log `[configuracao.<chave>] ref=…` (só os
+campos com problema, nunca o valor) e a tela avisa "valor salvo inválido". Gravação com concorrência
+otimista: o formulário manda o `atualizado_em` que carregou e, se outra pessoa salvou no meio, recebe
+"Outra pessoa alterou esta configuração. Recarregue para ver os valores atuais."
+
 ## Erros e debug
 
 Exceção inesperada numa server action não vira tela de erro: a action devolve
@@ -383,6 +436,9 @@ erro do Prisma só loga `code` + `target`/`modelName` (a mensagem ecoa dados da 
 
 Deploy, rollback, backup/restore, QR da Evolution e troca do número do bot:
 [`docs/runbook.md`](docs/runbook.md) (`compose.prod.yml` + `scripts/deploy.sh`).
+As imagens são buildadas no GitHub Actions a cada push na `main` e publicadas no
+GHCR; a VPS só baixa (`scripts/deploy.sh [sha-<commit>]`). Limites de memória e
+instância mínima: runbook §11.
 
 ## Testes
 

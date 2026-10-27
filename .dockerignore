@@ -11,6 +11,8 @@ graphify-out
 .env.*
 !.env.example
 *.log
+*.tsbuildinfo
+next-env.d.ts
 docs
 README.md
 # Infra de deploy não entra na imagem
