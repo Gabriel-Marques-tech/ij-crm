@@ -6,6 +6,8 @@ import {
   configEvolution,
   diagnosticarSegredo,
   grupoJid,
+  chaveGemini,
+  modeloDoProvedor,
   modeloDoProvedorConfigurado,
   modeloExtracao,
   notificacoesAtivas,
@@ -120,6 +122,7 @@ describe("provedorLlm", () => {
     expect(provedorLlm()).toBe("openai");
     expect(modeloExtracao("openai")).toBe("gpt-6.1-sol");
     expect(modeloExtracao("anthropic")).toBe("claude-haiku-5-5");
+    expect(modeloExtracao("gemini")).toBe("gemini-3.8-flash");
     process.env.LLM_EXTRACAO_MODELO = "gpt-6-sol";
     expect(modeloExtracao("openai")).toBe("gpt-6-sol");
   });
@@ -131,15 +134,36 @@ describe("provedorLlm", () => {
     process.env.LLM_PROVEDOR = "openai";
     expect(modeloDoProvedorConfigurado()).toBe("gpt-6.1-sol");
     process.env.LLM_PROVEDOR = "gemini";
+    expect(modeloDoProvedorConfigurado()).toBe("gemini-3.8-flash");
+    process.env.LLM_PROVEDOR = "cohere";
     expect(modeloDoProvedorConfigurado()).toBeNull();
     process.env.LLM_PROVEDOR = "mock";
     (process.env as Record<string, string>).NODE_ENV = "production";
     expect(modeloDoProvedorConfigurado()).toBeNull();
   });
 
-  it("anthropic em produção segue valendo", () => {
-    process.env.LLM_PROVEDOR = "anthropic";
+  it("anthropic e gemini em produção seguem valendo; maiúsculas valem", () => {
     (process.env as Record<string, string>).NODE_ENV = "production";
+    process.env.LLM_PROVEDOR = "anthropic";
     expect(provedorLlm()).toBe("anthropic");
+    process.env.LLM_PROVEDOR = "Gemini";
+    expect(provedorLlm()).toBe("gemini");
+  });
+
+  it("chaveGemini lê GEMINI_API_KEY (vazio = ausente)", () => {
+    process.env.GEMINI_API_KEY = "  ";
+    expect(chaveGemini()).toBeUndefined();
+    process.env.GEMINI_API_KEY = "AIza-x";
+    expect(chaveGemini()).toBe("AIza-x");
+  });
+
+  it("modeloDoProvedor: prefixo decide de quem é o modelo", () => {
+    expect(modeloDoProvedor("gemini-3.8-flash", "gemini")).toBe(true);
+    expect(modeloDoProvedor("gpt-6.1-sol", "gemini")).toBe(false);
+    expect(modeloDoProvedor("claude-haiku-5-5", "anthropic")).toBe(true);
+    expect(modeloDoProvedor("gemini-3.8-flash", "anthropic")).toBe(false);
+    expect(modeloDoProvedor("gpt-6.1-sol", "openai")).toBe(true);
+    expect(modeloDoProvedor("gemini-3.8-flash", "openai")).toBe(false);
+    expect(modeloDoProvedor("claude-haiku-5-5", "openai")).toBe(false);
   });
 });

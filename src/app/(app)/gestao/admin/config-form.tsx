@@ -143,6 +143,7 @@ function Campos({ atual, herdado, efetivo }: { atual: ConfigTecnica; herdado: Co
               <option value="">Herdar ({String(herdado.provedor.valor)}, {ORIGEM[herdado.provedor.origem]})</option>
               <option value="openai">openai</option>
               <option value="anthropic">anthropic</option>
+              <option value="gemini">gemini</option>
               <option value="mock">mock (só dev; recusado em produção)</option>
             </select>
           </div>
@@ -150,7 +151,7 @@ function Campos({ atual, herdado, efetivo }: { atual: ConfigTecnica; herdado: Co
             <Label htmlFor="modeloExtracao">Modelo de extração</Label>
             <Input id="modeloExtracao" name="modeloExtracao" defaultValue={atual.modeloExtracao ?? ""} className="font-mono" />
             <p className="text-xs text-fg-faint">
-              <Herdado v={efetivo.modeloExtracao.origem === "config" ? herdado.modeloExtracao : efetivo.modeloExtracao} />. Precisa ser do provedor (Anthropic: <span className="font-mono">claude-…</span>).
+              <Herdado v={efetivo.modeloExtracao.origem === "config" ? herdado.modeloExtracao : efetivo.modeloExtracao} />. Precisa ser do provedor (Anthropic: <span className="font-mono">claude-…</span>; Gemini: <span className="font-mono">gemini-…</span>).
             </p>
           </div>
           <div className="space-y-1.5">

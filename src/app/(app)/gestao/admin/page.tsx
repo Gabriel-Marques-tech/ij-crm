@@ -1,7 +1,7 @@
 import { ErroCarregamento } from "@/components/erro-carregamento";
 import { PageHeader } from "@/components/shell/page-header";
 import { exigirPapel } from "@/lib/auth/atual";
-import { chaveAnthropic, chaveOpenAI, ConfigAusente, ConfigFraca, diagnosticarSegredo, notificacoesAtivas } from "@/lib/config/env";
+import { ConfigAusente, ConfigFraca, notificacoesAtivas } from "@/lib/config/env";
 import { CONFIG_TECNICA, resolverConfigTecnica, validarCombinacao } from "@/lib/config/tecnica";
 import { obterConfiguracao } from "@/lib/configuracao/servico";
 import { comTratamento, ehInesperado, registrarErro } from "@/lib/erros/registrar";
@@ -12,6 +12,7 @@ import { ErroEvolutionAdmin, estadoConexao, type EstadoConexao } from "@/lib/wha
 import { AbasAdmin } from "./abas";
 import { ConfigTecnicaForm } from "./config-form";
 import { situacaoSafeMode } from "./safe-mode";
+import { estadoSegredos } from "./segredos";
 import { StatusEvolution } from "./status-evolution";
 
 export const metadata = { title: "Admin · Gestão" };
@@ -27,22 +28,6 @@ async function conexao(): Promise<Conexao> {
     if (e instanceof ConfigAusente || e instanceof ConfigFraca) return { ok: false, erro: `Evolution não configurada (${e.variavel}).` };
     return { ok: false, erro: `Erro no servidor (ref: ${registrarErro("pagina.admin.evolution", e)}).` };
   }
-}
-
-function segredos() {
-  const forte = (nome: string) => {
-    const d = diagnosticarSegredo(nome);
-    return d.ok ? "configurada" : d.motivo === "AUSENTE" ? "ausente" : "fraca";
-  };
-  const presente = (v: string | undefined) => (v ? "configurada" : "ausente");
-  return [
-    { nome: "OPENAI_API_KEY", estado: presente(chaveOpenAI()) },
-    { nome: "ANTHROPIC_API_KEY", estado: presente(chaveAnthropic()) },
-    { nome: "EVOLUTION_API_KEY", estado: forte("EVOLUTION_API_KEY") },
-    { nome: "EVOLUTION_WEBHOOK_SECRET", estado: forte("EVOLUTION_WEBHOOK_SECRET") },
-    { nome: "EVOLUTION_API_URL", estado: presente(process.env.EVOLUTION_API_URL?.trim()) },
-    { nome: "EVOLUTION_INSTANCE", estado: presente(process.env.EVOLUTION_INSTANCE?.trim()) },
-  ] as const;
 }
 
 /** Admin → Configuração (GAB-42): grupo, LLM, limiares e timeout sem deploy; segredos e safe mode só leitura. */
@@ -89,7 +74,7 @@ export default async function AdminConfigPage() {
         <section className="rounded-xl border border-border bg-surface p-5">
           <p className="eyebrow mb-3">segredos (só no ambiente, nunca editáveis aqui)</p>
           <ul className="grid gap-x-6 gap-y-1.5 sm:grid-cols-2">
-            {segredos().map((s) => (
+            {estadoSegredos().map((s) => (
               <li key={s.nome} className="flex items-center justify-between gap-3 text-sm">
                 <span className="font-mono text-xs text-fg-soft">{s.nome}</span>
                 <span className={s.estado === "configurada" ? "text-success" : s.estado === "fraca" ? "text-warn" : "text-danger"}>{s.estado}</span>

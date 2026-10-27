@@ -119,18 +119,34 @@ export function timeoutEnvioMs(): number {
 
 // ---------------------------------------------------------------- LLM (GAB-34)
 
-export type NomeProvedorLlm = "openai" | "anthropic" | "mock";
+export type NomeProvedorLlm = "openai" | "anthropic" | "gemini" | "mock";
+/** Provedores reais (com chave e modelo). */
+export type ProvedorReal = Exclude<NomeProvedorLlm, "mock">;
 
 /**
- * Modelo padrão por provedor (GAB-45): produção usa GPT-6.1 Sol com
- * raciocínio `low`; Claude Haiku 5.5 fica como alternativa por env
- * (`claude-sonnet-5-5` se precisar de mais qualidade).
+ * Modelo padrão por provedor (GAB-45): o padrão do código é GPT-6.1 Sol com
+ * raciocínio `low`; Claude Haiku 5.5 (`claude-sonnet-5-5` se precisar de mais
+ * qualidade) e Gemini 3.8 Flash (`provedores/gemini.ts`) são alternativas por
+ * `LLM_PROVEDOR`.
  */
-export const MODELOS_EXTRACAO_PADRAO = { openai: "gpt-6.1-sol", anthropic: "claude-haiku-5-5" } as const;
+export const MODELOS_EXTRACAO_PADRAO = { openai: "gpt-6.1-sol", anthropic: "claude-haiku-5-5", gemini: "gemini-3.8-flash" } as const;
+
+const ehProvedorReal = (p: unknown): p is ProvedorReal => p === "openai" || p === "anthropic" || p === "gemini";
+
+/**
+ * O modelo é do provedor? Pelo prefixo: Anthropic `claude-`, Gemini
+ * `gemini-`; OpenAI é o resto (gpt-*, o*...), nunca os outros dois. Evita o
+ * `.env` trocar o provedor e esquecer o modelo (404 a cada mensagem).
+ */
+export function modeloDoProvedor(modelo: string, provedor: ProvedorReal): boolean {
+  if (provedor === "anthropic") return modelo.startsWith("claude-");
+  if (provedor === "gemini") return modelo.startsWith("gemini-");
+  return !modelo.startsWith("claude-") && !modelo.startsWith("gemini-");
+}
 export const LIMIAR_CONFIANCA_PADRAO = 0.7;
 
 /**
- * `LLM_PROVEDOR`: `openai` (padrão), `anthropic` ou `mock` (dev/testes, sem rede).
+ * `LLM_PROVEDOR`: `openai` (padrão), `anthropic`, `gemini` ou `mock` (dev/testes, sem rede).
  * Qualquer outro valor → `null`: o pipeline marca a mensagem `FALHA`.
  * `mock` com `NODE_ENV=production` → lança `ConfigInvalida` (idem, `FALHA`).
  */
@@ -138,7 +154,7 @@ export function provedorLlm(): NomeProvedorLlm | null {
   const v = (ler("LLM_PROVEDOR") ?? "openai").toLowerCase();
   // Falha fechada: em produção o mock criaria cards com dados de fixture.
   if (v === "mock" && process.env.NODE_ENV === "production") throw new ConfigInvalida("LLM_PROVEDOR=mock não é permitido em produção");
-  return v === "openai" || v === "anthropic" || v === "mock" ? v : null;
+  return ehProvedorReal(v) || v === "mock" ? v : null;
 }
 
 /**
@@ -153,7 +169,7 @@ export function modeloExtracao(provedor: keyof typeof MODELOS_EXTRACAO_PADRAO = 
 export function modeloDoProvedorConfigurado(): string | null {
   try {
     const p = provedorLlm();
-    return p === "openai" || p === "anthropic" ? modeloExtracao(p) : null;
+    return ehProvedorReal(p) ? modeloExtracao(p) : null;
   } catch {
     return null;
   }
@@ -170,6 +186,11 @@ export function chaveAnthropic(): string | undefined {
 
 export function chaveOpenAI(): string | undefined {
   return ler("OPENAI_API_KEY");
+}
+
+/** Chave do Google AI Studio (Gemini Developer API). */
+export function chaveGemini(): string | undefined {
+  return ler("GEMINI_API_KEY");
 }
 
 /** Abaixo disto o card nasce com `revisar = true`. `LLM_LIMIAR_CONFIANCA` fora de [0, 1] ou ilegível → 0.7 (com aviso). */
@@ -232,12 +253,12 @@ export function limiarSemTag(): number {
 /**
  * Modelo do classificador: `LLM_CLASSIFICACAO_MODELO` se for do provedor
  * configurado; senão o mesmo da extração. Modelo de outro provedor (o
- * antigo padrão `claude-haiku-5-5` com `openai`) é ignorado, não derruba o
- * classificador.
+ * antigo padrão `claude-haiku-5-5` com `openai`, um `gpt-*` com `gemini`) é
+ * ignorado, não derruba o classificador.
  */
 export function modeloClassificacao(provedor: keyof typeof MODELOS_EXTRACAO_PADRAO): string {
   const v = ler("LLM_CLASSIFICACAO_MODELO");
-  if (v && v.startsWith("claude-") === (provedor === "anthropic")) return v;
+  if (v && modeloDoProvedor(v, provedor)) return v;
   if (v) {
     avisarUmaVez(
       `LLM_CLASSIFICACAO_MODELO=${v}@${provedor}`,
@@ -258,7 +279,7 @@ export function validarConfigLlm() {
     limiarClassificador();
     limiarSemTag();
     const p = provedorLlm();
-    if (p === "openai" || p === "anthropic") modeloClassificacao(p);
+    if (ehProvedorReal(p)) modeloClassificacao(p);
   } catch {
     // provedor inválido/mock em produção: o pipeline já registra como FALHA.
   }
