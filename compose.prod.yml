@@ -88,6 +88,8 @@ services:
       LLM_CLASSIFICACAO_MODELO: ${LLM_CLASSIFICACAO_MODELO:-}
       LLM_LIMIAR_CLASSIFICADOR: ${LLM_LIMIAR_CLASSIFICADOR:-0.7}
       LLM_LIMIAR_SEM_TAG: ${LLM_LIMIAR_SEM_TAG:-0.85}
+      # GAB-46: aviso de sem crédito na LLM. Vazio = desligado.
+      ALERTA_OPS_JID: ${ALERTA_OPS_JID:-}
       # Único controle de acesso a /api/cron/* (header x-cron-secret, GAB-41).
       CRON_SECRET: ${CRON_SECRET:?defina CRON_SECRET no .env}
     networks: [edge, rede-app, rede-whatsapp]

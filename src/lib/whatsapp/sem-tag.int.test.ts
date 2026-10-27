@@ -24,6 +24,7 @@ const TABELAS = [
   "mensagem_bruta",
   "inbox_evento",
   "contador_descartadas",
+  "alerta_operacional",
   "sessao",
   "usuario",
 ];
@@ -174,6 +175,8 @@ describe("avaliarSemTag", () => {
     await avaliarSemTag(msg(RELEVANTE.texto), joao.id);
     expect(logs(console.info).match(/\[SAFE MODE\]/g)).toHaveLength(1);
     expect(await contador()).toMatchObject({ naoClassificadas: 2 });
+    // GAB-46: o mesmo alerta de ops do FALHA abre o incidente de sem crédito.
+    expect(await dbT.alertaOperacional.count()).toBe(1);
   });
 
   it("contador usa o dia civil de São Paulo", async () => {

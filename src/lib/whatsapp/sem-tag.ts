@@ -21,6 +21,7 @@
  * grupo). Em vez de sumir em silêncio:
  * - `naoClassificadas` +1 no contador do dia (só número);
  * - log `[sem-tag] ref=… LLM <código>` (nunca o texto);
+ * - `SEM_CREDITO` dispara o alerta de ops do GAB-46 (`alertarSeSemCredito`);
  * - aviso no grupo, citando a mensagem, no máximo 1 a cada 30 min por
  *   processo: "⚠️ não consegui avaliar mensagens sem #crm agora (ref: …).
  *   O que for para o CRM, mande com #crm." — quem mandou venda sabe reenviar.
@@ -31,6 +32,7 @@
  */
 import { db } from "@/lib/db";
 import { registrarErro } from "@/lib/erros/registrar";
+import { alertarSeSemCredito, marcarCreditoOk } from "@/lib/llm/alerta-credito";
 import { classificar, deveDescartar } from "@/lib/llm/classificacao";
 import { ErroLlm } from "@/lib/llm/tipos";
 import { contarDescartada, contarNaoClassificada } from "./contadores";
@@ -94,12 +96,13 @@ export async function avaliarSemTag(m: MensagemRecebida, usuarioId: string): Pro
     try {
       const c = await classificar(m.texto, { respondendoA: await textoRespondido(m.respondendoEventoId) }, { ref: m.eventoId });
       relevante = !deveDescartar(c);
+      await marcarCreditoOk(); // GAB-46: LLM respondeu → fecha o incidente de sem crédito; nunca lança
     } catch (e) {
       if (!(e instanceof ErroLlm)) throw e;
       const ref = registrarErro("sem-tag", e);
       await contarNaoClassificada(db, m.recebidaEm);
-      // TODO(GAB-46): chamar `alertarSeSemCredito` (mesmo alerta do FALHA de `processar.ts`) quando entrar na main.
       await avisarFalha(m, ref);
+      await alertarSeSemCredito(e, ref); // GAB-46: mesmo alerta de ops do FALHA de `processar.ts`; nunca lança
       return { tipo: "NAO_CLASSIFICADA", ref, codigo: e.codigo };
     }
     if (!relevante) {
