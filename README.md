@@ -402,14 +402,23 @@ Só ADMIN (gestor recebe 403): **Gestão → Admin**.
   Precedência **config > env > padrão**: o valor salvo vira sobrescrita das variáveis lidas por
   `src/lib/config/env.ts` (mesmas validações de lá). Campo vazio = herda do env.
 - Salvar recusa combinação inválida (em português): modelo de outro provedor, limiar sem
-  #crm < com #crm, `mock` em produção, JID que não é de grupo. Concorrência otimista.
+  #crm < com #crm, `mock` em produção, JID que não é de grupo, e qualquer salvar/restaurar que
+  deixe o CRM **sem grupo** (nem aqui nem no env). Grupo novo precisa estar em "Listar grupos";
+  com a Evolution fora, só com "salvar mesmo assim". Concorrência otimista (salvar e restaurar).
+- Modelo de classificação e limiares sem #crm/classificador só valem depois do classificador
+  sem #crm (GAB-39) — a tela marca isso.
 - **Cache**: a config é lida do banco uma vez por processo (entrada do webhook e de
   `processarMensagem`) e fica em memória; salvar/restaurar aplica na hora, então vale já na
   próxima mensagem. Funciona porque o app roda em **um processo Next** — com réplicas seria
   preciso TTL ou `LISTEN/NOTIFY`. Edição manual da linha no banco só vale após reiniciar.
+  Uma geração no cache impede que uma carga lenta sobrescreva um salvar feito no meio dela.
+  Config salva que virou inválida com o env (ex.: trocaram o provedor no env) é ignorada na
+  carga (log com ref, só a chave) e a tela avisa. Banco fora na carga → webhook responde 503
+  (a Evolution re-tenta) e `processarMensagem` não reivindica (fica RECEBIDA para o cron).
 - Segredos (chaves de API, chave da Evolution, segredo do webhook) e o safe mode
   (`NOTIFICATIONS_ENABLED`) **não** são editáveis: a tela mostra só configurada/ausente e um
-  aviso quando o safe mode está desligado.
+  o safe mode com o ambiente: em produção avisa quando o bot está calado; fora dela, quando envia.
+  Também mostra quantos eventos de outro chat chegaram na última hora (sinal de GRUPO_JID errado).
 - **Estado da Evolution** (`GET /instance/connectionState/{instância}`) e botão "Mostrar QR"
   (`GET /instance/connect/{instância}`; com a instância fechada isso inicia uma conexão). O QR
   vincula o WhatsApp: action só-ADMIN, nunca logado nem cacheado, some ao fechar.
@@ -418,7 +427,9 @@ Só ADMIN (gestor recebe 403): **Gestão → Admin**.
   mensagem). Tabelas `log_webhook`/`log_llm` em anel: cada inserção apaga o que passou do
   limite (`src/lib/logs/tecnicos.ts`). Nunca texto de mensagem, telefone ou email; tipo,
   resultado e modelo só entram se parecem identificadores. Falha ao gravar log não afeta o
-  webhook.
+  webhook. **401 não entra na tabela** (um flood empurraria os eventos reais): só um contador em
+  memória (zera ao reiniciar), mostrado em Logs, e no máximo uma linha `[webhook] … (401)` por
+  minuto no console. "Listar grupos" tem timeout próprio de 60 s.
 
 ## Erros e debug
 
