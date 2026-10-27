@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { estadoConexao, ErroEvolutionAdmin, listarGrupos, obterQr, TIMEOUT_ADMIN_MS } from "./evolution-admin";
+import { estadoConexao, ErroEvolutionAdmin, listarGrupos, obterQr, TIMEOUT_ADMIN_MS, TIMEOUT_GRUPOS_MS } from "./evolution-admin";
 
 const envOriginal = { ...process.env };
 const CHAVE = "chave-evolution-de-teste-0123456789abcdef";
@@ -67,11 +67,27 @@ describe("Evolution (Admin)", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(
       (_u, init) => new Promise((_, rej) => (init as RequestInit).signal!.addEventListener("abort", () => rej(new DOMException("a", "AbortError")))),
     );
-    const p = listarGrupos();
+    const p = estadoConexao();
     const verif = expect(p).rejects.toBeInstanceOf(ErroEvolutionAdmin);
     await vi.advanceTimersByTimeAsync(TIMEOUT_ADMIN_MS);
     await verif;
     await expect(p).rejects.toThrow(/timeout/);
+  });
+
+  it("listarGrupos tem timeout próprio, maior, e mensagem clara se estourar", async () => {
+    expect(TIMEOUT_GRUPOS_MS).toBeGreaterThanOrEqual(60_000);
+    vi.useFakeTimers();
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      (_u, init) => new Promise((_, rej) => (init as RequestInit).signal!.addEventListener("abort", () => rej(new DOMException("a", "AbortError")))),
+    );
+    let resolvido = false;
+    const p = listarGrupos();
+    p.catch(() => (resolvido = true));
+    await vi.advanceTimersByTimeAsync(TIMEOUT_ADMIN_MS);
+    expect(resolvido).toBe(false); // ainda esperando além do timeout padrão
+    const verif = expect(p).rejects.toThrow(/demorou mais de 60 s para listar os grupos/);
+    await vi.advanceTimersByTimeAsync(TIMEOUT_GRUPOS_MS - TIMEOUT_ADMIN_MS);
+    await verif;
   });
 
   it("sem configuração da Evolution: erro claro sem chamar a rede", async () => {

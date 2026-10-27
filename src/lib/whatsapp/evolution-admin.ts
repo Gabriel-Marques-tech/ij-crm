@@ -15,9 +15,14 @@
 import { configEvolution } from "@/lib/config/env";
 
 export const TIMEOUT_ADMIN_MS = 20_000;
+/** A Evolution busca a foto de cada grupo antes de responder: com muitos grupos demora. */
+export const TIMEOUT_GRUPOS_MS = 60_000;
 
 export class ErroEvolutionAdmin extends Error {
-  constructor(motivo: string) {
+  constructor(
+    motivo: string,
+    readonly timeout = false,
+  ) {
     super(motivo);
     this.name = "ErroEvolutionAdmin";
   }
@@ -35,7 +40,8 @@ async function chamar(caminho: string, timeoutMs = TIMEOUT_ADMIN_MS): Promise<un
     return await r.json().catch(() => null);
   } catch (e) {
     if (e instanceof ErroEvolutionAdmin) throw e;
-    throw new ErroEvolutionAdmin(`Evolution ${nome}: ${controlador.signal.aborted ? `timeout após ${timeoutMs / 1000}s` : "falha de rede"}`);
+    const timeout = controlador.signal.aborted;
+    throw new ErroEvolutionAdmin(`Evolution ${nome}: ${timeout ? `timeout após ${timeoutMs / 1000}s` : "falha de rede"}`, timeout);
   } finally {
     clearTimeout(timer);
   }
@@ -44,7 +50,17 @@ async function chamar(caminho: string, timeoutMs = TIMEOUT_ADMIN_MS): Promise<un
 export type GrupoEvolution = { jid: string; nome: string; membros: number | null };
 
 export async function listarGrupos(): Promise<GrupoEvolution[]> {
-  const bruto = await chamar("group/fetchAllGroups/{i}?getParticipants=false");
+  let bruto: unknown;
+  try {
+    bruto = await chamar("group/fetchAllGroups/{i}?getParticipants=false", TIMEOUT_GRUPOS_MS);
+  } catch (e) {
+    if (e instanceof ErroEvolutionAdmin && e.timeout)
+      throw new ErroEvolutionAdmin(
+        `A Evolution demorou mais de ${TIMEOUT_GRUPOS_MS / 1000} s para listar os grupos (ela busca a foto de cada um). Tente de novo em instantes ou informe o JID à mão.`,
+        true,
+      );
+    throw e;
+  }
   if (!Array.isArray(bruto)) throw new ErroEvolutionAdmin("Evolution fetchAllGroups: resposta sem lista");
   return bruto
     .filter((g): g is { id: string; subject?: unknown; size?: unknown } => typeof g?.id === "string" && g.id.endsWith("@g.us"))

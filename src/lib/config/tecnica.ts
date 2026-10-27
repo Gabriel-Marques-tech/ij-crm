@@ -21,7 +21,8 @@ import { temPapelMinimo } from "@/lib/auth/papeis";
 import { definirConfiguracao } from "@/lib/configuracao/definicao";
 import { obterConfiguracao, restaurarConfiguracao, salvarConfiguracao } from "@/lib/configuracao/servico";
 import { registrarErro } from "@/lib/erros/registrar";
-import { LIMIAR_CONFIANCA_PADRAO, MODELOS_EXTRACAO_PADRAO, TIMEOUT_ENVIO_MAX_MS, TIMEOUT_ENVIO_MIN_MS, TIMEOUT_ENVIO_PADRAO_MS } from "./env";
+import { ErroEvolutionAdmin, listarGrupos } from "@/lib/whatsapp/evolution-admin";
+import { ConfigAusente, ConfigFraca, LIMIAR_CONFIANCA_PADRAO, MODELOS_EXTRACAO_PADRAO, TIMEOUT_ENVIO_MAX_MS, TIMEOUT_ENVIO_MIN_MS, TIMEOUT_ENVIO_PADRAO_MS } from "./env";
 import { definirSobrescritas } from "./sobrescritas";
 
 /** Campo da config → variável de ambiente que ele sobrescreve. */
@@ -168,41 +169,78 @@ export function validarCombinacao(e: ConfigTecnicaEfetiva, nodeEnv = process.env
   return null;
 }
 
+/** Sem grupo efetivo o webhook responde 503 para tudo: o CRM fica surdo. */
+function semGrupo(e: ConfigTecnicaEfetiva): string | null {
+  return e.grupoJid.valor
+    ? null
+    : "Assim o CRM fica sem grupo: o webhook recusaria todas as mensagens. Informe o GRUPO_JID aqui (ou no ambiente) antes.";
+}
+
 // ------------------------------------------------------------- cache em memória
 
-const g = globalThis as unknown as { __ijConfigTecnica?: { carregada: boolean; promessa?: Promise<void> } };
-const estado = () => (g.__ijConfigTecnica ??= { carregada: false });
+/**
+ * `geracao` sobe a cada salvar, restaurar ou invalidar. Uma carga só aplica o
+ * que leu se a geração não mudou durante a leitura; se mudou por invalidação,
+ * relê; se mudou porque alguém aplicou um valor novo, esse vale.
+ */
+type EstadoCache = { carregada: boolean; geracao: number; promessa?: Promise<ResultadoCarga> };
+const g = globalThis as unknown as { __ijConfigTecnica?: EstadoCache };
+const estado = () => (g.__ijConfigTecnica ??= { carregada: false, geracao: 0 });
+
+export type ResultadoCarga = { ok: true } | { ok: false; ref: string };
 
 function aplicar(cfg: ConfigTecnica) {
   definirSobrescritas(paraSobrescritas(cfg));
   const e = estado();
+  e.geracao++;
   e.carregada = true;
-  e.promessa = undefined;
+}
+
+/** Lê a linha e aplica, ignorando (com log só da chave) combinação que ficou inválida. */
+async function ler(e: EstadoCache): Promise<ResultadoCarga> {
+  for (;;) {
+    const geracao = e.geracao;
+    const c = await obterConfiguracao(CONFIG_TECNICA);
+    if (e.geracao !== geracao) {
+      if (e.carregada) return { ok: true }; // salvar/restaurar aplicou um valor mais novo
+      continue; // invalidado durante a leitura: relê
+    }
+    if (validarCombinacao(resolverConfigTecnica(c.valor)) !== null || semGrupo(resolverConfigTecnica(c.valor)) !== null) {
+      // Só a chave: o valor pode ter modelo/JID. A tela do Admin mostra o motivo.
+      registrarErro("config.tecnica.carregar", new Error(`configuração salva "${CONFIG_TECNICA.chave}" forma combinação inválida com o ambiente; usando só o ambiente`));
+      aplicar({});
+    } else {
+      aplicar(c.valor);
+    }
+    return { ok: true };
+  }
 }
 
 /**
  * Garante a config técnica em memória (lê o banco só na 1ª vez). Nunca lança:
- * banco fora → log com ref e vale o env; tenta de novo na próxima chamada.
+ * banco fora → log com ref e `{ ok: false, ref }` — quem chama falha fechado
+ * (webhook 503, processamento deixa a mensagem RECEBIDA); tenta de novo depois.
  */
-export async function carregarConfigTecnica(): Promise<void> {
+export async function carregarConfigTecnica(): Promise<ResultadoCarga> {
   const e = estado();
-  if (e.carregada) return;
-  e.promessa ??= (async () => {
-    try {
-      const c = await obterConfiguracao(CONFIG_TECNICA);
-      aplicar(c.valor);
-    } catch (err) {
-      registrarErro("config.tecnica.carregar", err);
-    } finally {
-      e.promessa = undefined;
-    }
-  })();
+  if (e.carregada) return { ok: true };
+  if (!e.promessa) {
+    const p: Promise<ResultadoCarga> = ler(e)
+      .catch((err) => ({ ok: false as const, ref: registrarErro("config.tecnica.carregar", err) }))
+      .finally(() => {
+        if (e.promessa === p) e.promessa = undefined;
+      });
+    e.promessa = p;
+  }
   return e.promessa;
 }
 
 /** Esquece o cache: a próxima `carregarConfigTecnica` relê o banco (testes, conflito). */
 export function invalidarConfigTecnica(): void {
-  g.__ijConfigTecnica = { carregada: false };
+  const e = estado();
+  e.geracao++;
+  e.carregada = false;
+  e.promessa = undefined;
 }
 
 // ------------------------------------------------------------- gravação (ADMIN)
@@ -213,15 +251,50 @@ export type ResultadoConfigTecnica =
   | { ok: true; valor: ConfigTecnica }
   | { ok: false; erro: "SEM_PERMISSAO" }
   | { ok: false; erro: "CONFLITO" }
-  | { ok: false; erro: "DADOS_INVALIDOS"; mensagem: string };
+  | { ok: false; erro: "DADOS_INVALIDOS"; mensagem: string }
+  /** Grupo novo e a Evolution não respondeu: só com `confirmarSemEvolution`. */
+  | { ok: false; erro: "EVOLUTION_INDISPONIVEL"; mensagem: string };
 
-/** Valida campo a campo, depois a combinação efetiva (com o env), grava e aplica na hora. */
-export async function salvarConfigTecnica(entrada: unknown, ator: Ator, versao: Date | null): Promise<ResultadoConfigTecnica> {
+export type OpcoesSalvar = {
+  /** "Salvar mesmo assim" marcado: aceita grupo novo sem conferir na Evolution. */
+  confirmarSemEvolution?: boolean;
+  /** Injetável nos testes. */
+  listarGrupos?: () => Promise<{ jid: string }[]>;
+};
+
+/** Erro esperado de falar com a Evolution (fora, timeout, env faltando). */
+function evolutionIndisponivel(e: unknown): string | null {
+  if (e instanceof ErroEvolutionAdmin) return e.message;
+  if (e instanceof ConfigAusente || e instanceof ConfigFraca) return `Evolution não configurada (${e.variavel}).`;
+  return null;
+}
+
+/**
+ * Valida campo a campo; a combinação efetiva (com o env); que sobra um grupo;
+ * e, se o grupo mudou, que a instância está nele. Grava e aplica na hora.
+ */
+export async function salvarConfigTecnica(entrada: unknown, ator: Ator, versao: Date | null, opts: OpcoesSalvar = {}): Promise<ResultadoConfigTecnica> {
   if (!temPapelMinimo(ator.papel, "ADMIN")) return { ok: false, erro: "SEM_PERMISSAO" };
   const r = schemaTecnica.safeParse(entrada);
   if (!r.success) return { ok: false, erro: "DADOS_INVALIDOS", mensagem: r.error.issues[0]?.message ?? "Dados inválidos." };
-  const problema = validarCombinacao(resolverConfigTecnica(r.data));
+  const efetivo = resolverConfigTecnica(r.data);
+  const problema = validarCombinacao(efetivo) ?? semGrupo(efetivo);
   if (problema) return { ok: false, erro: "DADOS_INVALIDOS", mensagem: problema };
+
+  const novo = r.data.grupoJid;
+  if (novo && novo !== (await obterConfiguracao(CONFIG_TECNICA)).valor.grupoJid) {
+    try {
+      const grupos = await (opts.listarGrupos ?? listarGrupos)();
+      if (!grupos.some((x) => x.jid === novo))
+        return { ok: false, erro: "DADOS_INVALIDOS", mensagem: `O grupo ${novo} não está entre os grupos da instância do WhatsApp. Use "Listar grupos" e escolha um deles.` };
+    } catch (e) {
+      const motivo = evolutionIndisponivel(e);
+      if (motivo === null) throw e;
+      if (!opts.confirmarSemEvolution)
+        return { ok: false, erro: "EVOLUTION_INDISPONIVEL", mensagem: `Não deu para conferir o grupo na Evolution (${motivo}). Confira o JID e marque "salvar mesmo assim".` };
+    }
+  }
+
   const s = await salvarConfiguracao(CONFIG_TECNICA, r.data, ator.id, versao);
   if (!s.ok) {
     if (s.erro === "CONFLITO") {
@@ -234,12 +307,19 @@ export async function salvarConfigTecnica(entrada: unknown, ator: Ator, versao: 
   return { ok: true, valor: s.valor };
 }
 
-/** Apaga a linha: tudo volta a vir do env. Recusa se o env sozinho for uma combinação inválida. */
-export async function restaurarConfigTecnica(ator: Ator): Promise<ResultadoConfigTecnica> {
+/**
+ * Apaga a linha (só se ainda for a `versao` carregada): tudo volta a vir do
+ * env. Recusa se o env sozinho for inválido ou não tiver grupo.
+ */
+export async function restaurarConfigTecnica(ator: Ator, versao: Date | null): Promise<ResultadoConfigTecnica> {
   if (!temPapelMinimo(ator.papel, "ADMIN")) return { ok: false, erro: "SEM_PERMISSAO" };
-  const problema = validarCombinacao(resolverConfigTecnica({}));
+  const soEnv = resolverConfigTecnica({});
+  const problema = validarCombinacao(soEnv) ?? semGrupo(soEnv);
   if (problema) return { ok: false, erro: "DADOS_INVALIDOS", mensagem: `Sem a configuração daqui o ambiente fica inválido: ${problema}` };
-  await restaurarConfiguracao(CONFIG_TECNICA);
+  if (!(await restaurarConfiguracao(CONFIG_TECNICA, versao))) {
+    invalidarConfigTecnica();
+    return { ok: false, erro: "CONFLITO" };
+  }
   aplicar({});
   return { ok: true, valor: {} };
 }
