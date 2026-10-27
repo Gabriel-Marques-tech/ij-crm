@@ -291,6 +291,10 @@ function refNaTabela(tipo: "empresa" | "contato", r: RefBrutaTabela | null): Ref
 
 type Bruta = Prisma.OportunidadeGetPayload<{ select: typeof SELECAO }>;
 
+/** Só o CSV lê a descrição (texto longo): a tela não tem essa coluna. */
+const SELECAO_CSV = { ...SELECAO, descricao: true } satisfies Prisma.OportunidadeSelect;
+type BrutaCsv = Prisma.OportunidadeGetPayload<{ select: typeof SELECAO_CSV }>;
+
 async function paraLinhas(brutas: Bruta[], agora: Date): Promise<LinhaTabela[]> {
   return brutas.map((b) => {
     const dias = diasNaFase(new Date(Math.min(b.faseDesde.getTime(), agora.getTime())), agora);
@@ -318,11 +322,16 @@ async function paraLinhas(brutas: Bruta[], agora: Date): Promise<LinhaTabela[]> 
  * Dados de um lote de ids, na ordem do lote, reaplicando filtros e busca:
  * card apagado (ou que deixou de bater) depois da leitura dos ids some.
  */
-async function carregarNaOrdem(f: FiltrosTabela, agora: Date, fatia: string[]): Promise<Bruta[]> {
+async function carregarNaOrdem<B extends { id: string }>(
+  f: FiltrosTabela,
+  agora: Date,
+  fatia: string[],
+  select: typeof SELECAO | typeof SELECAO_CSV,
+): Promise<B[]> {
   if (!fatia.length) return [];
-  const brutas = await db.oportunidade.findMany({ where: await montarWhere(f, agora, fatia), select: SELECAO });
+  const brutas = (await db.oportunidade.findMany({ where: await montarWhere(f, agora, fatia), select })) as unknown as B[];
   const porId = new Map(brutas.map((b) => [b.id, b]));
-  return fatia.map((id) => porId.get(id)).filter((b): b is Bruta => !!b);
+  return fatia.map((id) => porId.get(id)).filter((b): b is B => !!b);
 }
 
 export type PaginaTabela = { linhas: LinhaTabela[]; total: number; pagina: number; paginas: number };
@@ -335,7 +344,7 @@ export async function listarTabela(e: EstadoTabela, agora: Date): Promise<Pagina
   const paginas = Math.max(1, Math.ceil(total / POR_PAGINA));
   const pagina = Math.min(e.pagina, paginas);
   const inicio = (pagina - 1) * POR_PAGINA;
-  const brutas = await carregarNaOrdem(e.filtros, agora, ordenados.slice(inicio, inicio + POR_PAGINA));
+  const brutas = await carregarNaOrdem<Bruta>(e.filtros, agora, ordenados.slice(inicio, inicio + POR_PAGINA), SELECAO);
   return { linhas: await paraLinhas(brutas, agora), total, pagina, paginas };
 }
 
@@ -361,9 +370,10 @@ const CABECALHO = [
   "Data da próxima ação",
   "Orçamento previsto",
   "Criado em",
+  "Descrição",
 ];
 
-function linhaParaCsv(l: LinhaTabela): string {
+function linhaParaCsv(l: LinhaTabela & { descricao: string | null }): string {
   return linhaCsv([
     celulaTexto(l.id),
     celulaTexto(l.titulo),
@@ -379,6 +389,8 @@ function linhaParaCsv(l: LinhaTabela): string {
     celulaData(l.proximaAcaoEm),
     celulaNumero(l.orcamentoPrevisto),
     celulaDataHora(l.criadoEm),
+    // Texto livre: passa pela guarda anti fórmula; quebras de linha vão entre aspas.
+    celulaTexto(l.descricao),
   ]);
 }
 
@@ -399,7 +411,8 @@ export async function* exportarCsv(f: FiltrosTabela, ordem: OrdemTabela, agora: 
   const ids = await idsOrdenados(f, ordem, agora);
   yield BOM + linhaCsv(CABECALHO.map(celulaTexto));
   for (let i = 0; i < ids.length; i += lote) {
-    const ordenadas = await carregarNaOrdem(f, agora, ids.slice(i, i + lote));
-    yield (await paraLinhas(ordenadas, agora)).map(linhaParaCsv).join("");
+    const ordenadas = await carregarNaOrdem<BrutaCsv>(f, agora, ids.slice(i, i + lote), SELECAO_CSV);
+    const linhas = await paraLinhas(ordenadas, agora);
+    yield linhas.map((l, j) => linhaParaCsv({ ...l, descricao: ordenadas[j].descricao })).join("");
   }
 }

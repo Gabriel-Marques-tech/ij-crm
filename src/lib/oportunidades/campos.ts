@@ -3,12 +3,17 @@
  * formulário. Puro: o serviço grava, aqui só se decide o valor.
  */
 import { Origem } from "@prisma/client";
+import { descricaoSchema } from "./descricao";
 import { lerDinheiro } from "./terminal-regras";
+
+// Puro e sem Prisma: componentes cliente importam direto de `./descricao`.
+export { DESCRICAO_MAX, descricaoSchema } from "./descricao";
 
 export const CAMPOS_EDITAVEIS = [
   "titulo",
   "origem",
   "dor",
+  "descricao",
   "orcamentoPrevisto",
   "propostaUrl",
   "cidade",
@@ -47,6 +52,7 @@ export const ROTULO_CAMPO: Record<CampoEditavel, string> = {
   titulo: "Título",
   origem: "Origem",
   dor: "Dor",
+  descricao: "Descrição",
   orcamentoPrevisto: "Orçamento previsto",
   propostaUrl: "Proposta",
   cidade: "Cidade",
@@ -58,6 +64,7 @@ export const ROTULO_CAMPO: Record<CampoEditavel, string> = {
 };
 
 const TITULO_MAX = 200;
+
 
 /** Título do card: aparado, espaços colapsados, 1..200 caracteres. */
 export function validarTitulo(titulo: string): string | null {
@@ -105,6 +112,10 @@ export function interpretarCampo(campo: CampoEditavel, bruto: string): Resultado
     }
     case "dor":
       return textoOpcional(bruto, 5000, "Dor");
+    case "descricao": {
+      const r = descricaoSchema.safeParse(bruto);
+      return r.success ? { ok: true, valor: r.data } : { ok: false, erro: r.error.issues[0].message };
+    }
     case "proximaAcao":
       return textoOpcional(bruto, 500, "Próxima ação");
     case "cidade":
