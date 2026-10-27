@@ -13,6 +13,7 @@ import { db } from "@/lib/db";
 import { resolverContatos } from "@/lib/contatos/match";
 import { PIPELINE_PROJETOS, PIPELINE_VENDAS } from "@/lib/oportunidades/terminal-regras";
 import { aplicarCards, type Relatorio } from "./aplicar";
+import { emLotes } from "./lotes";
 import { interpretarCsv, type Interpretacao, type Ocorrencia } from "./interpretar";
 import type { Aliases } from "./colunas";
 import { canonico, mapeamentoPadrao, resolverResponsavel, validarMapeamento, type FaseCrm, type Mapeamento } from "./mapeamento";
@@ -76,14 +77,19 @@ export async function calcularPrevia(
 
   const ids = interp.cards.map((c) => c.pipefyId);
   const existentes = new Map(
-    (await db.oportunidade.findMany({ where: { pipefyId: { in: ids } }, select: { pipefyId: true, deletadoEm: true, contatoId: true } })).map((o) => [o.pipefyId!, o]),
+    (await emLotes(ids, (lote) => db.oportunidade.findMany({ where: { pipefyId: { in: lote } }, select: { pipefyId: true, deletadoEm: true, contatoId: true } }))).map((o) => [
+      o.pipefyId!,
+      o,
+    ]),
   );
   const usuarios = await db.usuario.findMany({ where: { ativo: true }, select: { id: true, nome: true, email: true } });
 
   // Pontos de contato que caem num contato excluído (lote: uma query + resolução de merges).
   const valores = [...new Set(interp.cards.flatMap((c) => c.pontos.map((p) => p.valorNormalizado)))];
-  const pontos = valores.length ? await db.contatoPonto.findMany({ where: { valorNormalizado: { in: valores } }, select: { tipo: true, valorNormalizado: true, contatoId: true } }) : [];
-  const donos = await resolverContatos([...new Set(pontos.map((p) => p.contatoId))]);
+  const pontos = await emLotes(valores, (lote) => db.contatoPonto.findMany({ where: { valorNormalizado: { in: lote } }, select: { tipo: true, valorNormalizado: true, contatoId: true } }));
+  const donos = new Map(
+    (await emLotes([...new Set(pontos.map((p) => p.contatoId))], async (lote) => [...(await resolverContatos(lote)).entries()])),
+  );
   const bloqueados = new Set(pontos.filter((p) => !donos.get(p.contatoId) || donos.get(p.contatoId)!.deletado).map((p) => `${p.tipo}:${p.valorNormalizado}`));
 
   const erros: Ocorrencia[] = [...interp.erros];
@@ -169,14 +175,22 @@ export async function remapearPrevia(token: string, mapeamento: unknown, por: { 
 
 const ERRO_PREVIA = "Prévia expirada ou já usada. Envie o arquivo de novo.";
 
+/** Apaga prévias vencidas de qualquer usuário (o cron do GAB-41 também deve chamar). */
+export async function purgarVencidas(agora = new Date()): Promise<number> {
+  return (await db.importPrevia.deleteMany({ where: { expiraEm: { lt: agora } } })).count;
+}
+
 export type ResultadoImport = { ok: true; relatorio: Relatorio } | { ok: false; erro: string };
 
 /** Aplica a prévia `token` se o `hash` for o que o gestor viu. Uso único. */
 export async function confirmarPrevia(token: string, hash: string, por: { id: string }, agora = new Date()): Promise<ResultadoImport> {
+  await purgarVencidas(agora);
   // Marca como usada ANTES de aplicar (atômico): duplo clique não roda o import duas vezes.
   const marcada = await db.importPrevia.updateMany({ where: { id: token, usuarioId: por.id, usadaEm: null, expiraEm: { gt: agora }, hash }, data: { usadaEm: agora } });
   if (marcada.count !== 1) return { ok: false, erro: ERRO_PREVIA };
   const p = await db.importPrevia.findUniqueOrThrow({ where: { id: token } });
+  // O CSV (dados pessoais) não fica guardado depois de usado; a linha fica até vencer (auditoria do uso único).
+  await db.importPrevia.update({ where: { id: token }, data: { conteudo: "" } });
   const mapeamento = p.mapeamento as Mapeamento;
   if (hashPrevia(p.conteudo, mapeamento) !== hash) return { ok: false, erro: ERRO_PREVIA };
   return importarConteudo(p.conteudo, mapeamento, por, agora);

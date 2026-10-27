@@ -80,6 +80,8 @@ export function chaveFasePipefy(nome: string): string {
 
 const DOR_MAX = 5000;
 const TITULO_MAX = 200;
+/** Telefones (e emails) por card: segura o tempo de lock do lote e barra célula colada errada. */
+const MAX_PONTOS = 5;
 const AMBIGUO = /^(?:R\$\s*)?\d{1,3}\.\d{3}$/i;
 const CAMPO_CURTO_MAX = 200;
 
@@ -184,7 +186,12 @@ export function interpretarCsv(texto: string, opts: { aliases?: Aliases; maxLinh
 
     const pontos: PontoCsv[] = [];
     const vistos = new Set<string>();
-    for (const original of lerLista(v("telefone"))) {
+    const limitar = (lista: string[], nome: string) => {
+      if (lista.length <= MAX_PONTOS) return lista;
+      avisar(`Card com ${lista.length} ${nome}; o import usa os ${MAX_PONTOS} primeiros (${lista.slice(MAX_PONTOS).join(", ")} ignorados).`);
+      return lista.slice(0, MAX_PONTOS);
+    };
+    for (const original of limitar(lerLista(v("telefone")), "telefones")) {
       const n = normalizarTelefoneBr(original, { exigirDdi: false });
       if (!n) avisar(`Telefone inválido (${original}): ignorado.`);
       else if (!vistos.has(`T${n}`)) {
@@ -192,7 +199,7 @@ export function interpretarCsv(texto: string, opts: { aliases?: Aliases; maxLinh
         pontos.push({ tipo: "TELEFONE", valorNormalizado: n, valorOriginal: original });
       }
     }
-    for (const original of lerLista(v("email"))) {
+    for (const original of limitar(lerLista(v("email")), "emails")) {
       const n = normalizarEmail(original);
       if (!n) avisar(`Email inválido (${original}): ignorado.`);
       else if (!vistos.has(`E${n}`)) {

@@ -132,6 +132,18 @@ describe("interpretarCsv — erros de arquivo", () => {
     expect(r.cards[0].titulo).toBe("T".repeat(200));
     expect(r.avisos).toEqual([{ linha: 2, pipefyId: "1", mensagem: '"titulo" com mais de 200 caracteres: cortado.' }]);
   });
+  it("no máximo 5 telefones e 5 emails por card; o resto vira aviso", () => {
+    const tels = Array.from({ length: 7 }, (_, i) => `11 9000${i}-000${i}`).join(", ");
+    const emails = Array.from({ length: 6 }, (_, i) => `a${i}@x.com`).join(", ");
+    const r = ok(`ID;Title;Current phase;Telefone;Email\n1;a;Lead;"${tels}";"${emails}"\n`);
+    const c = r.cards[0];
+    expect(c.pontos.filter((p) => p.tipo === "TELEFONE")).toHaveLength(5);
+    expect(c.pontos.filter((p) => p.tipo === "EMAIL")).toHaveLength(5);
+    expect(r.avisos.map((a) => a.mensagem)).toEqual([
+      "Card com 7 telefones; o import usa os 5 primeiros (11 90005-0005, 11 90006-0006 ignorados).",
+      "Card com 6 emails; o import usa os 5 primeiros (a5@x.com ignorados).",
+    ]);
+  });
   it("valor 1.234 (ambíguo) é lido como milhar, com aviso", () => {
     const r = ok("ID;Title;Current phase;Orçamento previsto;Valor fechado\n1;a;Lead;1.234;R$ 2.500\n2;b;Lead;1.234,50;12500.5\n");
     expect(r.cards.map((c) => [c.orcamento, c.valorFechado])).toEqual([["1234.00", "2500.00"], ["1234.50", "12500.50"]]);

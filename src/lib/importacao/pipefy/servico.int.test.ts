@@ -215,10 +215,12 @@ describe("confirmar", () => {
     const falha = { ok: false, erro: "Prévia expirada ou já usada. Envie o arquivo de novo." };
     expect(await confirmarPrevia(p.token, "0".repeat(64), admin, AGORA)).toEqual(falha);
     expect(await confirmarPrevia(p.token, p.previa.hash, outro, AGORA)).toEqual(falha);
-    expect(await confirmarPrevia(p.token, p.previa.hash, admin, new Date(AGORA.getTime() + 31 * 60_000))).toEqual(falha);
     expect(await db.oportunidade.count()).toBe(0);
     expect((await confirmarPrevia(p.token, p.previa.hash, admin, AGORA)).ok).toBe(true);
     expect(await confirmarPrevia(p.token, p.previa.hash, admin, AGORA)).toEqual(falha);
+    const q = await criarPrevia({ conteudo: CSV, nomeArquivo: "x.csv" }, admin, AGORA);
+    if (!q.ok) throw new Error(q.erro);
+    expect(await confirmarPrevia(q.token, q.previa.hash, admin, new Date(AGORA.getTime() + 31 * 60_000))).toEqual(falha);
   });
 
   it("card que falha no meio do lote vai para os erros; o resto do lote é gravado", async () => {
@@ -234,6 +236,36 @@ describe("confirmar", () => {
     expect(await db.oportunidade.count({ where: { pipefyId: { in: ["900002", "900003", "900004"] } } })).toBe(0);
     expect(await db.oportunidade.count()).toBe(5);
   });
+
+  it("confirmar apaga o CSV guardado da prévia usada e limpa prévias vencidas (de qualquer usuário)", async () => {
+    const { admin } = await preparar();
+    const outro = await db.usuario.create({ data: { nome: "Outro Gestor", email: "outro@ij.test", papel: "GESTOR" } });
+    await db.importPrevia.create({ data: { id: "v".repeat(64), usuarioId: outro.id, hash: "h", nomeArquivo: "velho.csv", conteudo: CSV, mapeamento: {}, expiraEm: new Date(AGORA.getTime() - 1) } });
+    const p = await criarPrevia({ conteudo: CSV, nomeArquivo: "x.csv" }, admin, AGORA);
+    if (!p.ok) throw new Error(p.erro);
+    // A prévia já limpou a vencida do outro usuário.
+    expect(await db.importPrevia.count({ where: { id: "v".repeat(64) } })).toBe(0);
+    await db.importPrevia.create({ data: { id: "w".repeat(64), usuarioId: outro.id, hash: "h", nomeArquivo: "velho.csv", conteudo: CSV, mapeamento: {}, expiraEm: new Date(AGORA.getTime() - 1) } });
+    expect((await confirmarPrevia(p.token, p.previa.hash, admin, AGORA)).ok).toBe(true);
+    expect(await db.importPrevia.count({ where: { id: "w".repeat(64) } })).toBe(0);
+    const usada = await db.importPrevia.findUniqueOrThrow({ where: { id: p.token } });
+    expect(usada.usadaEm).not.toBeNull();
+    expect(usada.conteudo).toBe("");
+  });
+
+  it("prévia com mais de 32.767 telefones/emails: consulta em lotes (limite de parâmetros do Postgres)", async () => {
+    await preparar();
+    const linhas = ["ID;Título;Fase atual;Telefone;E-mail"];
+    for (let i = 0; i < 3300; i++) {
+      const tels = Array.from({ length: 5 }, (_, j) => `11 9${String(i * 5 + j).padStart(8, "0")}`).join(", ");
+      const emails = Array.from({ length: 5 }, (_, j) => `c${i}x${j}@empresa${i}.com.br`).join(", ");
+      linhas.push(`${i + 1};Card ${i + 1};Primeiro Contato;${tels};${emails}`);
+    }
+    const r = await calcularPrevia(linhas.join("\n"), { nomeArquivo: "grande.csv" });
+    if (!r.ok) throw new Error(r.erro);
+    expect(r.previa.cards).toBe(3300);
+    expect(r.previa.novos).toBe(3300);
+  }, 60_000);
 
   it("prévia sem gravar (dry-run do CLI) não cria import_previa", async () => {
     await preparar();
