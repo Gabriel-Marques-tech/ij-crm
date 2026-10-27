@@ -46,6 +46,7 @@ import { travarPipelines } from "@/lib/fases/fases";
 import { resolverContatos, resolverEmpresas } from "@/lib/contatos/match";
 import { ehDominioPublico, formatarCnpj, normalizarDominio } from "@/lib/normalizacao";
 import { registrarErro } from "@/lib/erros/registrar";
+import { mudancaDescricao } from "@/lib/oportunidades/descricao";
 import { ErroDeRegra } from "@/lib/oportunidades/erros";
 import { inserirCard, registrarMovimento } from "@/lib/oportunidades/oportunidades";
 import { aoEntrarEmTerminal, ehConflitoDeProjetoDaVenda } from "@/lib/oportunidades/terminal";
@@ -473,6 +474,7 @@ async function aplicarCard(ctx: Ctx, card: CardPipefy): Promise<Desfecho> {
         revisar: revisar || !responsavel,
         origem: card.origem,
         dor: card.dor,
+        descricao: card.descricao,
         orcamentoPrevisto: card.orcamento,
         propostaUrl: card.propostaUrl,
         cidade: card.cidade,
@@ -508,17 +510,19 @@ async function aplicarCard(ctx: Ctx, card: CardPipefy): Promise<Desfecho> {
   }
 
   // ---------------------------------------------------------------- atualização
-  type Mudanca = { campo: string; antes: string | null; depois: string | null };
+  type Mudanca = { campo: string; antes: string | null; depois: string | null; truncado?: true };
   const mudancas: Mudanca[] = [];
   const data: Prisma.OportunidadeUncheckedUpdateInput = {};
   const comparar = (campo: keyof typeof data & string, atual: string | null, novo: string | null) => {
     if (novo === null || novo === atual) return;
-    mudancas.push({ campo, antes: atual, depois: novo });
+    // Descrição (até 5000): o histórico do import guarda só a prévia.
+    mudancas.push(campo === "descricao" ? mudancaDescricao(campo, atual, novo) : { campo, antes: atual, depois: novo });
     (data as Record<string, unknown>)[campo] = novo;
   };
   comparar("titulo", existente.titulo, card.titulo);
   comparar("origem", existente.origem, card.origem as Origem | null);
   comparar("dor", existente.dor, card.dor);
+  comparar("descricao", existente.descricao, card.descricao);
   comparar("orcamentoPrevisto", existente.orcamentoPrevisto?.toFixed(2) ?? null, card.orcamento);
   comparar("propostaUrl", existente.propostaUrl, card.propostaUrl);
   comparar("cidade", existente.cidade, card.cidade);

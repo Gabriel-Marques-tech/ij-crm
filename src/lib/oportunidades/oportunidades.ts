@@ -19,6 +19,7 @@ import { SELECAO_NOME_EXIBIDO, nomeExibido } from "@/lib/entidades/vinculo";
 import { listarPipelines, travarPipelines } from "@/lib/fases/fases";
 import { diaEmFuso } from "./aging";
 import { validarTitulo, type CampoEditavel, type ValorCampo } from "./campos";
+import { mudancaDescricao, PREVIA_DESCRICAO } from "./descricao";
 import { ErroDeRegra, type ErroOportunidade } from "./erros";
 
 // Reexport: `feita.ts` (Minha Semana) importa daqui.
@@ -58,6 +59,9 @@ async function faseDestino(tx: Tx, faseId: string, pipelineId: string): Promise<
 export type CardDoQuadro = {
   id: string;
   titulo: string;
+  /** Até `PREVIA_DESCRICAO` caracteres (cortada no banco); o texto inteiro só em `obterCard`. */
+  descricaoPrevia: string | null;
+  descricaoTruncada: boolean;
   faseId: string;
   faseDesde: Date;
   revisar: boolean;
@@ -88,31 +92,45 @@ export type Quadro = {
 export async function listarQuadro(pipelineChave: string): Promise<Quadro | null> {
   const p = (await listarPipelines()).find((x) => x.chave === pipelineChave);
   if (!p) return null;
-  const cards = await db.oportunidade.findMany({
-    where: { pipelineId: p.id, deletadoEm: null, faseId: { in: p.fases.map((f) => f.id) } },
-    orderBy: [{ faseDesde: "desc" }, { id: "asc" }],
-    select: {
-      id: true,
-      titulo: true,
-      faseId: true,
-      faseDesde: true,
-      revisar: true,
-      proximaAcao: true,
-      proximaAcaoEm: true,
-      origem: true,
-      estado: true,
-      responsavel: { select: { id: true, nome: true, foto: { select: { atualizadoEm: true } } } },
-      // Empresa mesclada aparece com o nome da principal (merge 1 nível, GAB-36).
-      empresa: { select: SELECAO_NOME_EXIBIDO },
-      valorFechado: true,
-      motivoPerda: true,
-      origemOportunidade: { select: { deletadoEm: true, fase: { select: { tipoTerminal: true } } } },
-    },
-  });
+  const [cards, previas] = await Promise.all([
+    db.oportunidade.findMany({
+      where: { pipelineId: p.id, deletadoEm: null, faseId: { in: p.fases.map((f) => f.id) } },
+      orderBy: [{ faseDesde: "desc" }, { id: "asc" }],
+      select: {
+        id: true,
+        titulo: true,
+        faseId: true,
+        faseDesde: true,
+        revisar: true,
+        proximaAcao: true,
+        proximaAcaoEm: true,
+        origem: true,
+        estado: true,
+        responsavel: { select: { id: true, nome: true, foto: { select: { atualizadoEm: true } } } },
+        // Empresa mesclada aparece com o nome da principal (merge 1 nível, GAB-36).
+        empresa: { select: SELECAO_NOME_EXIBIDO },
+        valorFechado: true,
+        motivoPerda: true,
+        origemOportunidade: { select: { deletadoEm: true, fase: { select: { tipoTerminal: true } } } },
+      },
+    }),
+    // Descrição pode ter 5000 caracteres: o quadro recebe só a prévia, cortada no
+    // banco (LEFT conta caracteres, não bytes — não parte emoji).
+    db.$queryRaw<{ id: string; previa: string; truncada: boolean }[]>`
+      SELECT id, LEFT(descricao, ${PREVIA_DESCRICAO}::int) AS previa, char_length(descricao) > ${PREVIA_DESCRICAO}::int AS truncada
+      FROM oportunidade
+      WHERE pipeline_id = ${p.id} AND deletado_em IS NULL AND descricao IS NOT NULL`,
+  ]);
+  const previaPorId = new Map(previas.map((r) => [r.id, r]));
   return {
     pipeline: { id: p.id, chave: p.chave, nome: p.nome },
     fases: p.fases,
-    cards: cards.map((c) => ({ ...c, empresa: c.empresa ? { nome: nomeExibido(c.empresa) } : null })),
+    cards: cards.map((c) => ({
+      ...c,
+      descricaoPrevia: previaPorId.get(c.id)?.previa ?? null,
+      descricaoTruncada: previaPorId.get(c.id)?.truncada ?? false,
+      empresa: c.empresa ? { nome: nomeExibido(c.empresa) } : null,
+    })),
   };
 }
 
@@ -231,15 +249,16 @@ export async function registrarMovimento(
 }
 
 export async function criarCard(
-  dados: { pipelineId: string; faseId: string; titulo: string },
+  dados: { pipelineId: string; faseId: string; titulo: string; /** Já validada (`descricaoSchema`). */ descricao?: string | null },
   por: Ator,
 ): Promise<Resultado<{ id: string }>> {
   const titulo = validarTitulo(dados.titulo);
   if (!titulo) return { ok: false, erro: "TITULO_INVALIDO" };
+  const { descricao, ...resto } = dados;
   try {
     const id = await db.$transaction(async (tx) => {
       if (!(await travarPipelines(tx, [dados.pipelineId]))) throw new ErroDeRegra("PIPELINE_NAO_ENCONTRADO");
-      return criarCardTravado(tx, { ...dados, titulo, responsavelId: por.id, via: "UI" }, por);
+      return criarCardTravado(tx, { ...resto, titulo, responsavelId: por.id, via: "UI", campos: descricao ? { descricao } : undefined }, por);
     });
     return { ok: true, id };
   } catch (e) {
@@ -437,7 +456,8 @@ export async function aplicarPatch(tx: Tx, id: string, patch: PatchCard, por: At
     data: mudancas.map((m, i) => ({
       oportunidadeId: id,
       tipo: "CAMPO_ALTERADO" as TipoTimeline,
-      payload: m,
+      // Descrição (até 5000): a Timeline guarda só a prévia de antes/depois.
+      payload: m.campo === "descricao" ? mudancaDescricao(m.campo, m.antes as string | null, m.depois as string | null) : m,
       usuarioId: por.id,
       em: new Date(base + i),
     })),

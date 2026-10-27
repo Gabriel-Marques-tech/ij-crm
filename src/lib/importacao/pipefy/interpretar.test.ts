@@ -153,3 +153,25 @@ describe("interpretarCsv — erros de arquivo", () => {
     ]);
   });
 });
+
+describe("interpretarCsv — coluna de descrição", () => {
+  it("“Descrição”/“Description” vão para a descrição do card (não mais para a dor); Dor segue separada", () => {
+    const r = ok('ID;Título;Fase atual;Dor;Descrição\n1;Padaria;Primeiro Contato;site lento;"Quer loja\nonline"\n2;Mercado;Primeiro Contato;;\n');
+    expect(r.colunasReconhecidas).toEqual(expect.arrayContaining(["dor", "descricao"]));
+    expect(r.cards.map((c) => [c.dor, c.descricao])).toEqual([
+      ["site lento", "Quer loja\nonline"],
+      [null, null],
+    ]);
+    const en = ok("Card ID,Title,Current phase,Description\n1,Padaria,Primeiro Contato,landing page\n");
+    expect(en.cards[0]).toMatchObject({ dor: null, descricao: "landing page" });
+  });
+});
+
+describe("interpretarCsv — corte de texto longo", () => {
+  it("corta no limite sem partir emoji e avisa", () => {
+    const longa = `${"x".repeat(4999)}😀fim`;
+    const r = ok(`ID;Título;Fase atual;Descrição\n1;Padaria;Primeiro Contato;${longa}\n`);
+    expect(r.cards[0].descricao).toBe("x".repeat(4999));
+    expect(r.avisos.map((a) => a.mensagem)).toContain('"descricao" com mais de 5000 caracteres: cortado.');
+  });
+});

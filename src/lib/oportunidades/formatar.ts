@@ -1,5 +1,6 @@
 /** Formatação pura de valores do card para exibição (detalhe e Timeline). */
 import type { Origem } from "@prisma/client";
+import { cortarTexto } from "@/lib/texto";
 import { FUSO_NEGOCIO } from "./aging";
 import { ROTULO_ORIGEM, type CampoEditavel } from "./campos";
 
@@ -42,6 +43,11 @@ export function formatarValorCampo(campo: CampoEditavel, v: unknown, nomes: Read
       return /^\d{4}-\d{2}-\d{2}$/.test(String(v)) ? formatarDia(String(v)) : String(v);
     case "responsavelId":
       return nomes.get(String(v)) ?? "usuário removido";
+    case "descricao": {
+      // Até 5000 caracteres e multilinha: na Timeline vira um resumo de uma linha.
+      const r = cortarTexto(String(v).replace(/\s+/g, " ").trim(), 120);
+      return r.truncado ? `${r.texto}…` : r.texto;
+    }
     default:
       return String(v);
   }

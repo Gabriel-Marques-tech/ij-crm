@@ -22,6 +22,8 @@ const FASES = [fase("A", 10), fase("SEMLIMITE", null)];
 const card = (id: string, extra: Partial<CardCliente> = {}): CardCliente => ({
   id,
   titulo: id,
+  descricaoPrevia: null,
+  descricaoTruncada: false,
   faseId: "A",
   faseDesdeMs: AGORA,
   revisar: false,

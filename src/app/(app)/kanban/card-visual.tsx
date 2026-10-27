@@ -41,6 +41,12 @@ export function CardVisual({
         {card.titulo}
       </Link>
       {card.empresaNome && card.empresaNome !== card.titulo ? <p className="mt-0.5 truncate text-xs text-fg-mute">{card.empresaNome}</p> : null}
+      {card.descricaoPrevia ? (
+        // Texto puro (sem HTML/markdown), preso em 2 linhas para o card não crescer.
+        <p data-testid="previa-descricao" className="mt-1 line-clamp-2 text-xs leading-snug break-words whitespace-pre-line text-fg-mute">
+          {card.descricaoTruncada ? `${card.descricaoPrevia}…` : card.descricaoPrevia}
+        </p>
+      ) : null}
 
       {mostrarAcao ? (
         <p className="mt-2 flex items-start gap-1.5 text-xs text-fg-soft">
