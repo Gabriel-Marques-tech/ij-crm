@@ -338,6 +338,44 @@ uso único, consumo atômico, encerra todas as sessões do usuário). Gestor só
 admin gera para qualquer um, menos para si. Metadados da foto (COM/APPn, EXIF/XMP/ICCP) são
 removidos antes de gravar.
 
+## Ranking de vendas
+
+`/ranking` (todos os papéis): Semana (seg–dom) | Mês, em dias de São Paulo, com navegação para
+períodos anteriores (`?periodo=semana|mes&ref=YYYY-MM-DD`). Pódio Top 3, classificação completa
+(você destacado), detalhamento dos seus pontos, feed dos últimos 7 dias (ganhos e avanços, só o
+título do card), destaques do período e a tabela ordenável "Métricas por vendedor" com a linha
+"Time". Card "Top 3 da semana" na lateral da Minha Semana.
+
+Pontos são **calculados na leitura** a partir do histórico (`src/lib/ranking/calculo.ts`, puro;
+uma consulta `UNION ALL` por período em `servico.ts`), só com cards vivos do quadro `vendas` e só
+movimentos feitos por gente — origem `UI` ou `WHATSAPP`. `SISTEMA` (cards migrados ao arquivar/remover
+fase) e `IMPORT` não pontuam e não contam como ganho nem perda:
+
+| evento | pontos padrão | para quem |
+|---|---|---|
+| card em fase de ganho (entrou nela por UI/WhatsApp) com `data_ganho` no período | 100 + 1 por R$ 1.000 de `valor_fechado` (bônus até 100) | responsável do card |
+| primeira entrada do card numa fase **aberta** de ordem maior (import não conta) | 5 | quem moveu (`transicao_fase.usuario_id`) |
+| "Marcar feita" da Minha Semana (Timeline `NOTA` com `feito`), até 4 por vendedor por dia de SP (configurável) | 2 | quem marcou |
+| card criado em Vendas (UI/WhatsApp) | 1 | quem criou |
+
+Perdido vale 0 (entra na conversão, datado pela transição que o levou ao perdido); venda reaberta
+perde o ganho e re-ganho conta pela nova `data_ganho`; migração entre duas fases de ganho não muda
+nada. Desempate: mais ganhos → maior R$ fechado → quem chegou antes à pontuação. Aparecem usuários
+ativos `VENDEDOR` e gestores/admins ativos com card vivo em Vendas, pontuando igual. Usuário
+**desativado** sai da lista, das posições e dos destaques, mas os ganhos e valores dele continuam na
+linha "Time" (é história do time). As datas são comparadas em UTC explícito no SQL
+(`::timestamptz AT TIME ZONE 'UTC'`), independentes da `TimeZone` da sessão do Postgres; índices
+`transicao_fase(em)` e `timeline(tipo, em)` cobrem os filtros por período.
+
+**Gestão → Ranking** (gestor+): pesos, mínimos dos destaques (conversão: 3 fechadas; mais rápido:
+2 ganhos) e "Mostrar ranking aos vendedores". Desligado, o servidor entrega ao vendedor só a própria
+linha (sem posição) e o próprio feed. A config fica em `configuracao` (chave → JSONB, validada com
+zod por chave em `src/lib/configuracao/`) — genérica para a config técnica do GAB-42. Linha
+ausente = padrão; linha que não passa no schema = padrão + log `[configuracao.<chave>] ref=…` (só os
+campos com problema, nunca o valor) e a tela avisa "valor salvo inválido". Gravação com concorrência
+otimista: o formulário manda o `atualizado_em` que carregou e, se outra pessoa salvou no meio, recebe
+"Outra pessoa alterou esta configuração. Recarregue para ver os valores atuais."
+
 ## Erros e debug
 
 Exceção inesperada numa server action não vira tela de erro: a action devolve
