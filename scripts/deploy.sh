@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Deploy de produção (GAB-30). Ver docs/runbook.md §1–§2.
 #
-#   scripts/deploy.sh [TAG] [--no-pull] [--force]   checa → git pull → docker pull → backup → migrate → up → health
+#   scripts/deploy.sh [TAG] [--no-pull] [--force] [--digest-app=sha256:… --digest-ops=sha256:…]
+#                  checa → git fetch + checkout do commit da TAG → docker pull → backup → migrate → up → health
 #   scripts/deploy.sh --build-local [--no-pull] [--force]   idem, mas builda as imagens NESTA máquina
 #   scripts/deploy.sh rollback [TAG]                app volta para TAG `sha-…`/`local-…` (padrão: o deploy bom anterior ao que roda)
 #
@@ -11,10 +12,19 @@
 #                  rollback sempre usam tags imutáveis.
 #   --build-local  escape: sem CI/registry, builda aqui (tag `local-<commit>`). Pesado
 #                  para uma VPS pequena (~2 GB de RAM e de disco só de build).
-#   --no-pull      não roda `git pull` (compose/scripts/Caddyfile ficam como estão no disco)
+#   --no-pull      não faz `git fetch`/checkout (compose/scripts/Caddyfile ficam como estão no disco)
 #   --force        aceita árvore git suja
+#   --digest-app / --digest-ops   (deploy automático, scripts/deploy-remoto.sh) digests
+#                  esperados das imagens: baixa POR DIGEST e recusa se a imagem local
+#                  `<repo>:TAG` tiver outro digest ou se o label de revisão não for do
+#                  commit da TAG (tags do GHCR são mutáveis; digest não). Só com TAG sha-….
 #
 # O repo na VPS fornece só compose.prod.yml, Caddyfile e scripts; o código vem da imagem.
+# Esses arquivos vêm do MESMO commit da imagem: o deploy faz `git fetch` e
+# `git checkout --detach <commit da TAG>` (o repo fica em HEAD destacado; `latest`
+# é resolvida antes para o sha-… dela; --build-local usa origin/main). O commit é
+# achado SÓ na história de origin/main, pelo prefixo do sha (um branch ou tag
+# com nome de hash não o substitui); fora da main ou ambíguo = recusa.
 # .deploy/historico = deploys que passaram no health, em ordem (um por linha).
 # .deploy/atual = a tag boa que DEVE estar rodando: gravada por deploy E por
 # rollback bem-sucedidos. Se o deploy falha no up/health, o app volta sozinho
@@ -22,9 +32,17 @@
 # versão que o operador acabou de abandonar) e o script sai com erro.
 # Rollback não reescreve o histórico; `:latest` local aponta sempre para o que
 # está rodando depois de um deploy/rollback bem-sucedido.
-# Um deploy/rollback por vez (flock em .deploy/lock). Depois de um deploy bom,
+# Um deploy/rollback por vez (flock em .deploy/lock): o segundo ESPERA até
+# LOCK_ESPERA s (padrão 900) e só então desiste. Depois de um deploy bom,
 # ficam no host só as imagens das últimas IMAGENS_MANTER (padrão 5) tags do
 # histórico, a do .deploy/atual e a que está rodando.
+#
+# Saída do deploy: 0 ok; 1 falhou ANTES de trocar o app (checagens, pull/digest,
+# backup, migration: o app anterior segue no ar); 10 up/health falhou e o
+# rollback automático voltou o app para o bom anterior; 11 up/health falhou e o
+# app NÃO voltou (rollback falhou, não havia anterior ou era a mesma tag):
+# intervenção manual. O deploy automático (deploy-remoto.sh + Actions) classifica
+# o resultado por esse código.
 set -euo pipefail
 # shellcheck source=scripts/_comum.sh
 source "$(dirname "${BASH_SOURCE[0]}")/_comum.sh"
@@ -43,6 +61,10 @@ HEALTH_TENTATIVAS="${HEALTH_TENTATIVAS:-20}"
 HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-3}"
 [[ "$HEALTH_TENTATIVAS" =~ ^[1-9][0-9]*$ ]] || falhar "HEALTH_TENTATIVAS inválido: $HEALTH_TENTATIVAS"
 [[ "$HEALTH_TIMEOUT" =~ ^[1-9][0-9]*$ ]] || falhar "HEALTH_TIMEOUT inválido: $HEALTH_TIMEOUT"
+LOCK_ESPERA="${LOCK_ESPERA:-900}"
+[[ "$LOCK_ESPERA" =~ ^[0-9]+$ ]] || falhar "LOCK_ESPERA inválido: $LOCK_ESPERA"
+RE_TAG_SHA='^sha-[0-9a-f]{7,40}$'
+RE_DIGEST='^sha256:[0-9a-f]{64}$'
 APP_IMAGE_PADRAO=ghcr.io/gabriel-marques-tech/ij-crm-app
 OPS_IMAGE_PADRAO=ghcr.io/gabriel-marques-tech/ij-crm-ops
 # Label que o docker/metadata-action grava nas imagens do CI.
@@ -116,6 +138,17 @@ verificar_health() {
 
 ultimo_bom() { tail -n 1 "$HISTORICO" 2>/dev/null || true; }
 
+# Sha completo do único commit da história de origin/main que começa com HEX
+# (7 a 40 hex). Por prefixo do sha, nunca por nome: um branch/tag chamado como
+# o hash não "sombreia" o commit. Falha se não há ou se há mais de um.
+commit_da_main() {
+  local hex="$1" achados
+  [[ "$hex" =~ ^[0-9a-f]{7,40}$ ]] || return 1
+  achados="$(git -C "$RAIZ" rev-list refs/remotes/origin/main -- | grep -E "^$hex" || true)"
+  [[ -n "$achados" && "$(grep -c . <<<"$achados")" -eq 1 ]] || return 1
+  printf '%s' "$achados"
+}
+
 # Tag boa corrente (alvo do rollback automático). Instalação anterior a este
 # arquivo: cai no fim do histórico.
 bom_atual() {
@@ -131,12 +164,18 @@ marcar_bom_atual() {
 }
 
 # Um deploy/rollback por vez. O fd 8 fica aberto até o fim do processo (e passa
-# pelo `exec` do deploy depois do git pull, que por isso não trava de novo).
+# pelo `exec` do deploy depois do checkout, que por isso não trava de novo).
+# Ocupado: espera até LOCK_ESPERA s (o automático espera o manual terminar).
 travar() {
   [[ "${IJ_DEPLOY_TRAVADO:-0}" == "1" ]] && return 0
   mkdir -p "$RAIZ/.deploy"
   exec 8>"$RAIZ/.deploy/lock"
-  flock -n 8 || falhar "outro deploy/rollback em andamento ($RAIZ/.deploy/lock)"
+  if ! flock -n 8; then
+    log "outro deploy/rollback em andamento; aguardando o lock até ${LOCK_ESPERA}s ($RAIZ/.deploy/lock)"
+    flock -w "$LOCK_ESPERA" 8 \
+      || falhar "outro deploy/rollback em andamento há mais de ${LOCK_ESPERA}s ($RAIZ/.deploy/lock); nada foi feito. Confira com ps/journal e tente de novo"
+    log "lock liberado; seguindo"
+  fi
   export IJ_DEPLOY_TRAVADO=1
 }
 
@@ -170,10 +209,36 @@ baixar() {
     || falhar "não consegui baixar $1 (a tag existe no GHCR? docker login ghcr.io feito? runbook §0)"
 }
 
+# Imagem REPO:TAG garantida pelo digest esperado: se não existe aqui, baixa
+# `REPO@DIGEST` (nunca pela tag, que é mutável) e dá a tag local. Recusa se a
+# imagem local tem outro digest ou se o label de revisão não é do commit da TAG
+# (impede deploy de imagem de branch com uma tag sha-… da main).
+garantir_por_digest() {
+  local repo="$1" tag="$2" digest="$3" rev
+  if ! tem_imagem "$repo:$tag"; then
+    log "docker pull $repo@$digest"
+    docker pull -q "$repo@$digest" >/dev/null \
+      || falhar "não consegui baixar $repo@$digest (o digest existe no GHCR?)"
+    docker tag "$repo@$digest" "$repo:$tag"
+  fi
+  docker image inspect -f '{{range .RepoDigests}}{{println .}}{{end}}' "$repo:$tag" | grep -qxF "$repo@$digest" \
+    || falhar "$repo:$tag neste host NÃO tem o digest esperado $digest (tag reescrita ou imagem local trocada); deploy recusado antes de mexer em algo"
+  rev="$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$repo:$tag")"
+  [[ "$rev" =~ ^[0-9a-f]{40}$ && "$rev" == "${tag#sha-}"* ]] \
+    || falhar "$repo@$digest é do commit '${rev:-?}', não do de $tag; deploy recusado antes de mexer em algo"
+  log "$repo:$tag confere: $digest (commit ${rev:0:12})"
+}
+
 # Garante as imagens app e ops de TAG neste host (baixa do GHCR se faltar).
+# Com digests (3º e 4º args): por digest, conferido (garantir_por_digest).
 # Tags `local-*` (--build-local) não existem no registry: só confere.
 garantir_imagens() {
-  local tag="$1" img
+  local tag="$1" dig_app="${2:-}" dig_ops="${3:-}" img
+  if [[ -n "$dig_app" ]]; then
+    garantir_por_digest "$APP_IMAGE" "$tag" "$dig_app"
+    garantir_por_digest "$OPS_IMAGE" "$tag" "$dig_ops"
+    return 0
+  fi
   for img in "$APP_IMAGE:$tag" "$OPS_IMAGE:$tag"; do
     tem_imagem "$img" && continue
     [[ "$tag" == local-* ]] && falhar "imagem $img não existe neste host (build local apagado?)"
@@ -225,11 +290,14 @@ trocar_app() {
 
 deploy() {
   local puxar=1 forcar=0 local_build=0 pedida="" arg dump_antes="" anterior
+  local dig_app="" dig_ops="" alvo commit
   for arg in "$@"; do
     case "$arg" in
       --no-pull) puxar=0 ;;
       --force) forcar=1 ;;
       --build-local) local_build=1 ;;
+      --digest-app=*) dig_app="${arg#*=}" ;;
+      --digest-ops=*) dig_ops="${arg#*=}" ;;
       -*) falhar "opção desconhecida: $arg" ;;
       *)
         [[ -z "$pedida" ]] || falhar "mais de uma tag: $pedida e $arg"
@@ -241,16 +309,40 @@ deploy() {
     falhar "--build-local não aceita TAG (a tag é local-<commit>)"
   fi
   pedida="${pedida:-latest}"
+  if [[ "$pedida" == sha-* && ! "$pedida" =~ $RE_TAG_SHA ]]; then
+    falhar "tag inválida: $pedida (sha-<7 a 40 hex minúsculos>)"
+  fi
+  if [[ -n "$dig_app$dig_ops" ]]; then
+    [[ "$dig_app" =~ $RE_DIGEST && "$dig_ops" =~ $RE_DIGEST ]] \
+      || falhar "--digest-app e --digest-ops vão juntos, no formato sha256:<64 hex>"
+    [[ $local_build -eq 0 && "$pedida" =~ $RE_TAG_SHA ]] \
+      || falhar "digests só com TAG sha-<commit> (não com latest/local-/--build-local)"
+  fi
 
   travar
   checar_arvore "$forcar"
   if [[ $puxar -eq 1 ]]; then
-    log "git pull --ff-only"
-    git -C "$RAIZ" pull --ff-only
-    # Re-executa a versão recém-baixada deste script.
+    # compose/Caddyfile/scripts do MESMO commit da imagem (não do HEAD da main).
+    log "git fetch origin"
+    git -C "$RAIZ" fetch -q origin
+    if [[ $local_build -eq 1 ]]; then
+      commit="$(git -C "$RAIZ" rev-parse -q --verify --end-of-options 'refs/remotes/origin/main^{commit}')" \
+        || falhar "origin/main não existe depois do fetch"
+    else
+      resolver_imagens
+      pedida="$(resolver_tag "$pedida")"
+      alvo="${pedida#sha-}"; alvo="${alvo#local-}"
+      commit="$(commit_da_main "$alvo")" \
+        || falhar "nenhum commit (ou mais de um) da origin/main começa com $alvo; a tag é de um commit da main?"
+      [[ "$commit" == "$alvo"* ]] || falhar "commit $commit não corresponde a $alvo"
+    fi
+    log "arquivos do deploy (compose, Caddyfile, scripts) do commit $commit"
+    git -C "$RAIZ" checkout -q --detach "$commit"
+    # Re-executa a versão deste script desse commit.
     local repassar=(--no-pull)
     [[ $forcar -eq 1 ]] && repassar+=(--force)
     if [[ $local_build -eq 1 ]]; then repassar+=(--build-local); else repassar+=("$pedida"); fi
+    [[ -n "$dig_app" ]] && repassar+=("--digest-app=$dig_app" "--digest-ops=$dig_ops")
     exec "$RAIZ/scripts/deploy.sh" "${repassar[@]}"
   fi
 
@@ -266,7 +358,7 @@ deploy() {
     APP_TAG="$(resolver_tag "$pedida")"
     export APP_TAG
     log "deploy de $APP_TAG (pedida: $pedida; bom atual: ${anterior:-nenhum})"
-    garantir_imagens "$APP_TAG"
+    garantir_imagens "$APP_TAG" "$dig_app" "$dig_ops"
   fi
 
   log "subindo o banco"
@@ -304,15 +396,15 @@ deploy() {
     log "rollback automático do app para o bom atual: $anterior (o schema NÃO volta; ver runbook §2)" >&2
     if (trocar_app "$anterior"); then
       log "rollback automático ok: app em $anterior" >&2
-    else
-      log "ERRO: rollback automático para $anterior também falhou — intervenção manual (runbook §2)" >&2
+      exit 10
     fi
+    log "ERRO: rollback automático para $anterior também falhou — intervenção manual (runbook §2)" >&2
   elif [[ "$anterior" == "$APP_TAG" ]]; then
     log "app segue em $APP_TAG com o health falhando; sem rollback automático: esta já é a última tag boa. Veja: docker compose -f compose.prod.yml logs app" >&2
   else
     log "sem deploy bom anterior para voltar automaticamente" >&2
   fi
-  exit 1
+  exit 11
 }
 
 rollback() {
@@ -346,6 +438,6 @@ rollback() {
 
 case "${1:-}" in
   rollback) rollback "${2:-}" ;;
-  -h | --help) sed -n '2,27p' "$0" ;;
+  -h | --help) sed -n '2,45p' "$0" ;;
   *) deploy "$@" ;;
 esac

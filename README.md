@@ -639,8 +639,26 @@ erro do Prisma só loga `code` + `target`/`modelName` (a mensagem ecoa dados da 
 Deploy, rollback, backup/restore, QR da Evolution e troca do número do bot:
 [`docs/runbook.md`](docs/runbook.md) (`compose.prod.yml` + `scripts/deploy.sh`).
 As imagens são buildadas no GitHub Actions a cada push na `main` e publicadas no
-GHCR; a VPS só baixa (`scripts/deploy.sh [sha-<commit>]`). Limites de memória e
-instância mínima: runbook §11.
+GHCR; a VPS só baixa (`scripts/deploy.sh [sha-<commit>]`). **O deploy é
+automático**: depois do build, o job `deploy` assume uma role da AWS por OIDC
+(sem chave guardada) e manda por **SSM Run Command** o documento
+`deploy/ssm-deploy.yaml` com a tag e os digests das imagens; na VPS,
+`scripts/deploy-remoto.sh` confere que o commit está na `main` e roda
+`scripts/deploy.sh`, que baixa por digest e usa compose/scripts do mesmo commit.
+Porta 22 fechada (admin pelo Session Manager). Deploy que falha (mesmo com
+rollback automático) deixa o workflow vermelho. Pausar: variável de repositório
+`DEPLOY_AUTOMATICO=false`. Configuração (IAM, documento SSM, environment
+`producao`): runbook, "Deploy automático (GitHub Actions + AWS SSM)". Limites de
+memória e instância mínima: runbook §11.
+
+### Migrations: expand/contract
+
+O rollback troca só o app; o schema não volta. Toda migration tem de rodar com a
+versão **anterior** do app: adicionar tabela/coluna/índice é livre; remover,
+renomear ou trocar tipo vai em **duas releases** (1ª: o código para de usar;
+2ª: a migration remove, com a linha `-- destrutiva-ok: <motivo>`). O CI
+(`scripts/checar-migrations.sh`) recusa migration nova com `DROP TABLE`,
+`DROP COLUMN`, `ALTER COLUMN … TYPE` ou `RENAME` sem o marcador. Runbook §2.
 
 ## Testes
 

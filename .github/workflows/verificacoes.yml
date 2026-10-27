@@ -1,0 +1,35 @@
+# Checagens de PR que não precisam de banco nem Docker:
+#   - migrations novas destrutivas sem `-- destrutiva-ok: <motivo>` (expand/contract,
+#     scripts/checar-migrations.sh; o mesmo check barra o build da main em imagens.yml);
+#   - testes dos scripts de deploy (stubs, sem Docker).
+# Sem filtro de paths de propósito: dá para marcar como check obrigatório na
+# proteção da main sem deixar PR "esperando" para sempre.
+# Actions fixadas por SHA de commit (versão no comentário).
+name: verificacoes
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-e-migrations:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+
+      - name: Migrations destrutivas
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: scripts/checar-migrations.sh "$BASE"
+
+      - name: Testes dos scripts de deploy
+        run: |
+          bash scripts/teste-checar-migrations.sh
+          bash scripts/teste-deploy.sh
+          bash scripts/teste-deploy-remoto.sh
+          bash scripts/teste-workflow-deploy.sh

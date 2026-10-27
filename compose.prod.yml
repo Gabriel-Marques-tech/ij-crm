@@ -9,7 +9,7 @@
 #
 # Exposição: só o Caddy publica portas para fora (80/443) e só serve o app.
 # A Evolution NÃO tem rota pública: a porta dela é publicada só em 127.0.0.1 da
-# VPS, acessada por túnel SSH (runbook §5).
+# VPS, acessada por port forwarding do AWS Session Manager (sem SSH; runbook §5).
 #
 # Memória (máquina pequena, ≤ 15 usuários): todo serviço tem `mem_limit` e os
 # processos são dimensionados para caber nele (heap do Node, buffers do Postgres,
@@ -208,11 +208,12 @@ services:
     restart: unless-stopped
     logging: *logging
     mem_limit: ${EVOLUTION_MEM_LIMIT:-512m}
-    # SÓ loopback da VPS: acesso por túnel SSH (`ssh -L 8080:127.0.0.1:8080 vps`, runbook §5).
+    # SÓ loopback da VPS: acesso por port forwarding do Session Manager (runbook §5):
+    #   aws ssm start-session --target <i-…> --document-name AWS-StartPortForwardingSession --parameters '{"portNumber":["8080"],"localPortNumber":["8080"]}'
     ports:
       - "127.0.0.1:${EVOLUTION_HOST_PORT:-8080}:8080"
     environment:
-      # Endereço visto pelo operador através do túnel SSH.
+      # Endereço visto pelo operador através do port forwarding do Session Manager.
       SERVER_URL: http://localhost:${EVOLUTION_HOST_PORT:-8080}
       AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY:?defina EVOLUTION_API_KEY no .env}
       # false: o token da instância não vai no corpo do webhook nem no fetchInstances.

@@ -372,7 +372,9 @@ Matriz de papéis:
   (`pg_dump` via cron do host) — recomendado, não opcional.
 
 ## 6. Pendências externas (não bloqueiam o plano)
-- VPS com SSH; número WhatsApp dedicado; export CSV do Pipefy; ~50 mensagens
+- VPS na AWS acessada pelo Session Manager (sem SSH; port forwarding para a
+  Evolution: `aws ssm start-session --document-name AWS-StartPortForwardingSession`,
+  runbook §5); número WhatsApp dedicado; export CSV do Pipefy; ~50 mensagens
   reais para o benchmark; chaves de API (Anthropic; OpenAI se benchmark
   incluir); logo/cores da IJ; lista inicial de usuários e quem é admin.
 
