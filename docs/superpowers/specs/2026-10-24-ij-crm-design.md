@@ -294,8 +294,11 @@ Matriz de papéis:
   (`src/lib/whatsapp/retencao.ts`, em lotes, idempotente). O **texto original**
   da mensagem fica (é o registro da venda). Prévias de import vencidas e sessões
   expiradas também são apagadas pelo mesmo cron.
+- **Sem #crm não confirmada (GAB-41, decisão do usuário): 30 dias.** Mensagem
+  `sem_tag` que nunca virou venda (`FALHA` ou `PENDENTE_REVISAO`) é apagada
+  inteira — linha e texto — depois de 30 dias. As `#crm` mantêm o texto.
 - `/api/cron/*`: segredo `CRON_SECRET` forte (mesma regra dos outros segredos,
-  tempo constante, falha fechado), uma execução por vez (advisory lock) e
+  tempo constante, falha fechado), uma execução por vez (trava por aluguel de linha, `trava_cron`) e
   resposta só com contagens.
 - Google OAuth depois, sem quebrar o modelo (Usuario ganha `google_sub`).
 

@@ -6,7 +6,8 @@
  *   menos). `CRON_SECRET` ausente, placeholder ou curto ⇒ 401 para tudo
  *   (falha fechado) + log do motivo; comparação em tempo constante.
  * - 200 com contagens; 200 `{emAndamento:true}` se outra execução segura o
- *   lock; 500 com contagens + refs se algum passo falhou (o script loga só o
+ *   trava (aluguel de linha, `src/lib/cron/trava.ts`); 500 com contagens + refs se algum passo
+ *   falhou ou o reprocessamento deu ERRO (o script loga só o
  *   status). Nunca conteúdo de mensagem nem dado pessoal na resposta.
  */
 import { createHash, timingSafeEqual } from "node:crypto";

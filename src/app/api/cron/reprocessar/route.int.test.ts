@@ -11,6 +11,7 @@ const dbT = dbTeste();
 const SEGREDO = "c".repeat(40);
 const envOriginal = { ...process.env };
 const TABELAS = [
+  "trava_cron",
   "alerta_operacional",
   "import_previa",
   "timeline",
@@ -93,6 +94,18 @@ describe("execução", () => {
     expect(texto).not.toContain("5511");
     expect(texto).not.toContain(m.id);
     expect((await dbT.mensagemBruta.findUniqueOrThrow({ where: { id: m.id } })).status).toBe("PROCESSADA");
+  });
+
+  it("ERRO no reprocessamento (config/banco fora) → 500 com a ref, como documentado", async () => {
+    const m = await dbT.mensagemBruta.create({
+      data: { eventoId: "EVT-C3", grupoJid: "g@g.us", texto: FIXTURES_EXTRACAO[0].texto, recebidaEm: RECEBIDA_EM, remetenteUsuarioId: joao.id },
+    });
+    await dbT.$executeRaw`UPDATE mensagem_bruta SET atualizado_em = now() - interval '10 minutes' WHERE id = ${m.id}`;
+    const tecnica = await import("@/lib/config/tecnica");
+    vi.spyOn(tecnica, "carregarConfigTecnica").mockResolvedValue({ ok: false, ref: "cafe0002" } as never);
+    const r = await POST(req(SEGREDO));
+    expect(r.status).toBe(500);
+    expect(await r.json()).toMatchObject({ erros: ["cafe0002"], reprocessamento: { erros: 1 } });
   });
 
   it("duas execuções ao mesmo tempo nunca se sobrepõem (advisory lock)", async () => {

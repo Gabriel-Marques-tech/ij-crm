@@ -382,6 +382,7 @@ model MensagemBruta {
   @@index([status])
   @@index([remetenteUsuarioId, recebidaEm])
   @@index([respondendoEventoId])
+  // + índice parcial (recebida_em) WHERE resultado_llm IS NOT NULL, só na migration 20261027170100 (retenção).
   @@map("mensagem_bruta")
 }
 
@@ -407,6 +408,15 @@ model ContadorDescartadas {
   naoClassificadas Int      @default(0) @map("nao_classificadas")
 
   @@map("contador_descartadas")
+}
+
+// Trava do cron (GAB-41): aluguel de linha com prazo; ver src/lib/cron/trava.ts.
+model TravaCron {
+  nome     String    @id
+  dono     String?
+  expiraEm DateTime? @map("expira_em")
+
+  @@map("trava_cron")
 }
 
 model RemetenteDesconhecido {

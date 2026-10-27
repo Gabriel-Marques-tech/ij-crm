@@ -3,7 +3,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { dbTeste, limparBanco } from "@/test/db";
 import { semear } from "../../../prisma/seed";
-import { apagarJsonLlmVencido } from "./retencao";
+import { apagarJsonLlmVencido, apagarSemTagNaoConfirmadas } from "./retencao";
 
 const dbT = dbTeste();
 const AGORA = new Date("2026-10-27T15:00:00Z");
@@ -67,5 +67,40 @@ describe("apagarJsonLlmVencido", () => {
     for (let i = 0; i < 5; i++) await mensagem(dias(100));
     expect((await apagarJsonLlmVencido({ agora: AGORA, lote: 2, maxLotes: 2 })).mensagens).toBe(4);
     expect((await apagarJsonLlmVencido({ agora: AGORA, lote: 2, maxLotes: 2 })).mensagens).toBe(1);
+  });
+});
+
+describe("apagarSemTagNaoConfirmadas (30 dias)", () => {
+  async function semTag(status: "FALHA" | "PENDENTE_REVISAO" | "PROCESSADA" | "RECEBIDA", diasAtras: number, semTag = true) {
+    seq++;
+    return dbT.mensagemBruta.create({
+      data: { eventoId: `EVT-ST${seq}`, grupoJid: "g@g.us", texto: "conversa do grupo", recebidaEm: dias(diasAtras), status, semTag },
+    });
+  }
+
+  it("apaga linha e texto de sem-tag FALHA/PENDENTE com mais de 30 dias; o resto fica", async () => {
+    const falhaVelha = await semTag("FALHA", 31);
+    const pendVelha = await semTag("PENDENTE_REVISAO", 40);
+    const pendNova = await semTag("PENDENTE_REVISAO", 29);
+    const processada = await semTag("PROCESSADA", 60);
+    const recebida = await semTag("RECEBIDA", 60);
+    const comTag = await semTag("FALHA", 60, false);
+    expect(await apagarSemTagNaoConfirmadas({ agora: AGORA })).toBe(2);
+    const restantes = (await dbT.mensagemBruta.findMany({ select: { id: true } })).map((m) => m.id).sort();
+    expect(restantes).toEqual([pendNova.id, processada.id, recebida.id, comTag.id].sort());
+    expect(restantes).not.toContain(falhaVelha.id);
+    expect(restantes).not.toContain(pendVelha.id);
+    expect(await apagarSemTagNaoConfirmadas({ agora: AGORA })).toBe(0);
+  });
+
+  it("linha referenciada pela Timeline não é apagada (nunca quebra FK)", async () => {
+    const m = await semTag("PENDENTE_REVISAO", 40);
+    await entrada(dias(40), m.id);
+    expect(await apagarSemTagNaoConfirmadas({ agora: AGORA })).toBe(0);
+  });
+
+  it("em lotes", async () => {
+    for (let i = 0; i < 5; i++) await semTag("FALHA", 50);
+    expect(await apagarSemTagNaoConfirmadas({ agora: AGORA, lote: 2 })).toBe(5);
   });
 });
