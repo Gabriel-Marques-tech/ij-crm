@@ -178,33 +178,48 @@ com `maxRetries: 0`, 2ª tentativa só em 5xx/timeout/rede).
 
 Mensagem do grupo **sem** `#crm` de vendedor cadastrado (design §4.3 passo 4, §2):
 
-1. **Ingestão** (tx do dedup): ruído óbvio — menos de 8 caracteres ou sem nenhuma letra/dígito (só
-   emoji) — ou remetente desconhecido → só `contador_descartadas.total` do dia; nada de LLM. Senão o
-   `InboxEvento` fica `PROCESSADO`, o webhook responde `200 {emAvaliacao: true}` e agenda
-   `avaliarSemTag` (`src/lib/whatsapp/sem-tag.ts`) em `after()`. Retry da Evolution → `DUPLICADO`.
+1. **Ingestão** (tx do dedup): ruído óbvio — nenhuma letra nem dígito (só emoji/figurinha/símbolo;
+   `ruido.ts`) — ou remetente desconhecido → só `contador_descartadas.total` do dia; nada de LLM.
+   Mensagem curta com letra ("fechou!", "perdeu") vai ao classificador. Senão o `InboxEvento` fica
+   `PROCESSADO`, o webhook responde `200 {emAvaliacao: true}` e agenda `avaliarSemTagComLimite`
+   (`src/lib/whatsapp/sem-tag.ts`) em `after()`: no máximo **3 classificações simultâneas** por
+   processo e **50 na fila** em memória; além disso → não classificada (`FILA_CHEIA`). Retry da
+   Evolution → `DUPLICADO`.
 2. **Classificador** (`src/lib/llm/classificacao.ts`, prompt `prompts/classificacao.v1.ts`): mesmo
-   provedor/modelo da extração (GPT-6.1 Sol, raciocínio low; `LLM_CLASSIFICACAO_MODELO` opcional, ignorado
-   se for de outro provedor), prompt curto, contexto = só a mensagem respondida (300 caracteres),
-   saída `{relevante, confianca}` em JSON schema estrito. Log: `[llm] classificacao ref=<evento>
-   … relevante=… confianca=…` — nunca o texto.
+   provedor/modelo da extração (GPT-6.1 Sol, raciocínio low; `LLM_CLASSIFICACAO_MODELO` opcional,
+   ignorado com aviso se for de outro provedor), prompt curto, contexto = só a mensagem respondida (300
+   caracteres), saída `{relevante, confianca}` em JSON schema estrito, teto de 2000 tokens de saída
+   (o raciocínio conta contra ele; `TRUNCADA` ganha 1 nova tentativa). Log: `[llm] classificacao
+   ref=<evento> … tokens_reasoning=… max_out=2000 relevante=… confianca=…` — nunca o texto.
+   Delimitadores (`<mensagem>`, `<respondendo_a>`, inclusive `</ mensagem >`) dentro do texto são
+   neutralizados (`prompts/escapar.ts`).
 3. `relevante=false` ou `confianca < LLM_LIMIAR_CLASSIFICADOR` (0.7) → **descartada**: nenhuma
    `MensagemBruta`, só `contador_descartadas.total` +1 (dia civil de SP, só data + número).
-4. Relevante → grava `MensagemBruta` com `sem_tag = true` e segue o fluxo de [#crm → card](#crm--card-llm),
-   com régua mais alta: confiança da extração `< LLM_LIMIAR_SEM_TAG` (0.85) → `PENDENTE_REVISAO`
-   ("⚠️ parece atualização de venda (sem #crm), mas não tive certeza…"); intenção `IGNORAR` → a linha é
-   apagada e conta como descartada; se agir, a confirmação começa com
-   `↪️ entendi como atualização: Gustavo — Economia Sensata → Primeiro Contato. Resp: João.`
+4. Relevante → grava `MensagemBruta` com `sem_tag = true` e segue o fluxo de [#crm → card](#crm--card-llm);
+   a extração recebe o aviso "mensagem sem #crm… responda IGNORAR se não for registro de venda". Régua
+   mais alta (`regra-sem-tag.ts`):
+   - confiança da extração `< LLM_LIMIAR_SEM_TAG` (0.85; nunca abaixo de `LLM_LIMIAR_CONFIANCA`) →
+     `PENDENTE_REVISAO` ("⚠️ parece atualização de venda (sem #crm), mas não tive certeza…");
+   - `IGNORAR` confiante → a linha é apagada e conta como descartada (`IGNORAR` incerto cai na regra acima);
+   - `CRIAR` sem telefone/email/CNPJ citado no texto → `PENDENTE_REVISAO` (defesa contra injeção: uma
+     mensagem que convença a LLM não cria card sozinha); `ATUALIZAR` segue as regras de alvo normais;
+   - se agir, a confirmação começa com
+     `↪️ entendi como atualização: Gustavo — Economia Sensata → Primeiro Contato. Resp: João.`
 
-**Falha do classificador** (sem crédito, provedor fora, saída inválida): o texto **não** é gravado
-(guardar "por via das dúvidas" seria guardar conversa do grupo). Em troca:
-`contador_descartadas.nao_classificadas` +1, log `[sem-tag] ref=… LLM <código>` e um aviso no grupo
-citando a mensagem, no máximo 1 a cada 30 min: "⚠️ não consegui avaliar mensagens sem #crm agora
-(ref: …). O que for para o CRM, mande com #crm." Limitação aceita: se o processo morrer entre o 200 e
-o fim do `after()`, a mensagem sem tag se perde (não há cópia para retomar).
+**Falha na classificação** (sem crédito, provedor fora, saída inválida, `TRUNCADA` 2×, erro de banco
+ou inesperado, fila cheia): o texto **não** é gravado (guardar "por via das dúvidas" seria guardar
+conversa do grupo). Em troca: `contador_descartadas.nao_classificadas` +1, log `[sem-tag] ref=…`
+com o erro saneado (`erro-seguro.ts`; nunca o texto), alerta de ops se for `SEM_CREDITO` (GAB-46) e
+um aviso no grupo citando a mensagem, no máximo 1 a cada 30 min: "⚠️ não consegui avaliar mensagens
+sem #crm agora (ref: …). O que for para o CRM, mande com #crm." Limitação aceita: se o processo morrer
+entre o 200 e o fim do `after()`, a mensagem sem tag se perde (não há cópia para retomar).
+
+Limiares (`LLM_LIMIAR_CONFIANCA`, `LLM_LIMIAR_CLASSIFICADOR`, `LLM_LIMIAR_SEM_TAG`) fora de 0–1 ou
+ilegíveis viram o padrão com um `[config] …` no log (uma vez, já no boot via `src/instrumentation.ts`).
+Saem do env quando a config do admin (GAB-42) existir.
 
 Fixtures: `src/lib/llm/fixtures/classificacao.ts` (10 de venda + 10 de conversa do grupo); o `mock`
-responde por elas (texto desconhecido → não relevante). Os limiares saem do env quando a config do
-admin (GAB-42) existir.
+responde por elas (texto desconhecido → não relevante).
 
 ## Alerta de sem crédito na LLM
 
