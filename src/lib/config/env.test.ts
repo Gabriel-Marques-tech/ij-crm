@@ -6,6 +6,7 @@ import {
   configEvolution,
   diagnosticarSegredo,
   grupoJid,
+  modeloDoProvedorConfigurado,
   modeloExtracao,
   notificacoesAtivas,
   provedorLlm,
@@ -121,6 +122,19 @@ describe("provedorLlm", () => {
     expect(modeloExtracao("anthropic")).toBe("claude-haiku-5-5");
     process.env.LLM_EXTRACAO_MODELO = "gpt-6-sol";
     expect(modeloExtracao("openai")).toBe("gpt-6-sol");
+  });
+
+  it("modeloDoProvedorConfigurado: modelo do provedor escolhido; null para mock/inválido, sem lançar", () => {
+    delete process.env.LLM_EXTRACAO_MODELO;
+    process.env.LLM_PROVEDOR = "anthropic";
+    expect(modeloDoProvedorConfigurado()).toBe("claude-haiku-5-5");
+    process.env.LLM_PROVEDOR = "openai";
+    expect(modeloDoProvedorConfigurado()).toBe("gpt-6.1-sol");
+    process.env.LLM_PROVEDOR = "gemini";
+    expect(modeloDoProvedorConfigurado()).toBeNull();
+    process.env.LLM_PROVEDOR = "mock";
+    (process.env as Record<string, string>).NODE_ENV = "production";
+    expect(modeloDoProvedorConfigurado()).toBeNull();
   });
 
   it("anthropic em produção segue valendo", () => {

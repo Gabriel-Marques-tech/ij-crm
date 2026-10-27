@@ -39,6 +39,8 @@ export type CodigoErroLlm =
   | "REDE"
   | "RECUSA"
   | "TRUNCADA"
+  /** A API respondeu, mas a geração falhou do lado dela (OpenAI `status: "failed"`); detalhe = código. */
+  | "FALHA_PROVEDOR"
   | "SEM_JSON"
   | "SAIDA_INVALIDA";
 

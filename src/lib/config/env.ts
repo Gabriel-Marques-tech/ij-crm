@@ -130,6 +130,16 @@ export function modeloExtracao(provedor: keyof typeof MODELOS_EXTRACAO_PADRAO = 
   return ler("LLM_EXTRACAO_MODELO") ?? MODELOS_EXTRACAO_PADRAO[provedor];
 }
 
+/** Modelo que o provedor configurado usaria; `null` para mock/inválido. Nunca lança (serve de rótulo no registro de falha). */
+export function modeloDoProvedorConfigurado(): string | null {
+  try {
+    const p = provedorLlm();
+    return p === "openai" || p === "anthropic" ? modeloExtracao(p) : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Chaves das APIs. Não passam pela regra de segredo forte (o formato é do
  * provedor). Ausente → extração falha com `SEM_CHAVE`: a mensagem vai

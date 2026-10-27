@@ -132,6 +132,27 @@ describe("provedor OpenAI (SDK oficial, Responses API, fetch falso)", () => {
     await expect(provedor(soTexto).extrair(PEDIDO)).rejects.toMatchObject({ codigo: "HTTP", status: 429 });
   });
 
+  it("todos os códigos de saldo/limite de gasto documentados → SEM_CREDITO, sem re-tentar", async () => {
+    const codigos = [
+      "credit_balance_exhausted",
+      "organization_spend_limit_exceeded",
+      "project_spend_limit_exceeded",
+      "organization_usage_limit_exceeded",
+      "usage_limit_exceeded",
+      "billing_not_active",
+    ];
+    for (const code of codigos) {
+      const fetch = vi.fn().mockResolvedValue(erroApi(429, { type: "insufficient_quota", code, message: "texto do usuário" }));
+      const e = await provedor(fetch).extrair(PEDIDO).catch((x) => x);
+      expect(e, code).toMatchObject({ codigo: "SEM_CREDITO", status: 429 });
+      expect(e.message).not.toContain("texto do usuário");
+      expect(fetch).toHaveBeenCalledTimes(1);
+      // Pelo code sozinho também (type genérico).
+      const soCode = vi.fn().mockResolvedValue(erroApi(429, { type: "requests", code, message: "x" }));
+      await expect(provedor(soCode).extrair(PEDIDO), code).rejects.toMatchObject({ codigo: "SEM_CREDITO" });
+    }
+  });
+
   it("5xx re-tenta uma vez e então funciona", async () => {
     const fetch = vi
       .fn()
@@ -160,6 +181,42 @@ describe("provedor OpenAI (SDK oficial, Responses API, fetch falso)", () => {
     );
     await expect(provedor(fetch, 20).extrair(PEDIDO)).rejects.toMatchObject({ codigo: "TIMEOUT" });
     expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("status failed transitório (server_error, rate_limit_exceeded) re-tenta uma vez e então funciona", async () => {
+    for (const code of ["server_error", "rate_limit_exceeded"]) {
+      const fetch = vi
+        .fn()
+        .mockResolvedValueOnce(http(200, resposta([], { status: "failed", error: { code, message: "texto do usuário" } })))
+        .mockResolvedValueOnce(http(200, resposta([texto(JSON.stringify(SAIDA))])));
+      await expect(provedor(fetch).extrair(PEDIDO), code).resolves.toMatchObject({ bruto: SAIDA });
+      expect(fetch).toHaveBeenCalledTimes(2);
+    }
+  });
+
+  it("status failed transitório duas vezes → FALHA_PROVEDOR com o código (2 tentativas, com uso)", async () => {
+    const fetch = vi.fn().mockImplementation(async () => http(200, resposta([], { status: "failed", error: { code: "server_error", message: "texto do usuário" } })));
+    const e = await provedor(fetch).extrair(PEDIDO).catch((x) => x);
+    expect(e).toBeInstanceOf(ErroLlm);
+    expect(e).toMatchObject({ codigo: "FALHA_PROVEDOR" });
+    expect(e.message).toContain("server_error");
+    expect(e.message).not.toContain("texto do usuário");
+    expect(e.uso).toMatchObject({ tokensEntrada: 1500 });
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("status failed com outro código → FALHA_PROVEDOR com o código, sem re-tentar; sem código → 'desconhecido'", async () => {
+    const fetch = vi.fn().mockResolvedValue(http(200, resposta([], { status: "failed", error: { code: "invalid_prompt", message: "texto do usuário" } })));
+    const e = await provedor(fetch).extrair(PEDIDO).catch((x) => x);
+    expect(e).toMatchObject({ codigo: "FALHA_PROVEDOR" });
+    expect(e.message).toContain("invalid_prompt");
+    expect(e.message).not.toContain("texto do usuário");
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const semCodigo = vi.fn().mockResolvedValue(http(200, resposta([], { status: "failed", error: null })));
+    const e2 = await provedor(semCodigo).extrair(PEDIDO).catch((x) => x);
+    expect(e2).toMatchObject({ codigo: "FALHA_PROVEDOR" });
+    expect(e2.message).toContain("desconhecido");
+    expect(semCodigo).toHaveBeenCalledTimes(1);
   });
 
   it("incompleta (max_output_tokens), recusa e saída que não é JSON viram códigos próprios (com uso)", async () => {

@@ -40,7 +40,10 @@ alcança `db` e `evolution`; a Evolution alcança `evolution-db`,
 - [ ] Teste de restore feito uma vez na VPS (§3).
 - [ ] Número dedicado pareado (§5), webhook configurado, `GRUPO_JID` preenchido.
 - [ ] Conta da OpenAI com crédito pré-pago, **auto-reload desligado** e
-      `OPENAI_API_KEY` no `.env` (§10).
+      `OPENAI_API_KEY` no `.env` (§10). O `deploy.sh` recusa se o provedor
+      selecionado em `LLM_PROVEDOR` (padrão `openai`) estiver sem chave.
+- [ ] Aviso de privacidade da IJ menciona a transferência internacional do
+      texto das mensagens `#crm` ao provedor de LLM (§10, "LGPD").
 - [ ] `NOTIFICATIONS_ENABLED=true` no `.env` da VPS **por último**, e `scripts/deploy.sh`.
 
 ## 0. Primeira instalação (VPS limpa)
@@ -87,7 +90,7 @@ O script, na ordem:
 3. confere o ambiente **como o compose resolve** (`docker compose config
    --environment`: `.env` + variáveis do shell): segredos com ≥ 32 caracteres e
    sem `troque-me`, senhas de banco/Redis seguras para URL, domínio e email
-   preenchidos. Erro aborta antes de mexer em algo. Avisa se `NOTIFICATIONS_ENABLED` ≠ `true`;
+   preenchidos, e a chave do provedor de LLM selecionado (§10). Erro aborta antes de mexer em algo. Avisa se `NOTIFICATIONS_ENABLED` ≠ `true`;
 4. build de `ij-crm/app:<commit>` (runtime) e `ij-crm/ops:<commit>`;
 5. **backup sempre que o banco já tem dados** (existe `_prisma_migrations`);
 6. `prisma migrate deploy` no container one-shot `migrate`. Se falhar, para aqui:
@@ -390,3 +393,11 @@ período (o cron do GAB-41 faz isso sozinho).
 Cada mensagem `#crm` vai para `FALHA` com "sem crédito na API da OpenAI" + ref
 (sem re-tentar, sem gastar), e o grupo recebe "❌ ... (ref: ...)". Recarregue e as
 mensagens voltam pelo reprocessamento (GAB-41, mantendo `erro`).
+
+**LGPD — transferência internacional.** O texto das mensagens `#crm` vai para a
+API do provedor de LLM, nos EUA (OpenAI; antes, igualmente, Anthropic). Só vai o
+que chega à LLM: mensagens do grupo configurado marcadas com `#crm`, com o
+contexto mínimo (nomes/ids de candidatos e fases). A chamada usa `store: false`
+(a OpenAI não guarda a resposta para consulta) e nenhum log do CRM grava o texto
+da mensagem nem o texto devolvido pela API. O aviso de privacidade da IJ deve
+mencionar essa transferência ao provedor de LLM — decisão jurídica do usuário.

@@ -284,6 +284,10 @@ Matriz de papéis:
 - Webhook só aceita `GRUPO_JID` configurado; qualquer outro chat é ignorado
   e nunca logado com conteúdo.
 - Logs mascaram telefone. Sem conteúdo de mensagem em log acima de `debug`.
+- LGPD: o texto das mensagens `#crm` (só as que chegam à LLM) vai ao
+  provedor de LLM nos EUA — OpenAI em produção, como antes ia à Anthropic —
+  com `store: false` e sem texto em log. O aviso de privacidade da IJ deve
+  citar essa transferência internacional (runbook §10).
 - Google OAuth depois, sem quebrar o modelo (Usuario ganha `google_sub`).
 
 ### 4.7 Importação Pipefy
