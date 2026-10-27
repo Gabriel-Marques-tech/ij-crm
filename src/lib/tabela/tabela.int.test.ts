@@ -324,6 +324,22 @@ describe("listarTabela", () => {
     expect(filtrada.linhas.map((l) => l.id)).toEqual(esperado.slice(0, 27));
   });
 
+  it("título e responsável também em pt-BR (ij_ptbr): acento e caixa só desempatam, nos dois sentidos", async () => {
+    const s = await semear();
+    const nomes = ["Zebra", "abc", "Ágil", "ágil"];
+    for (const n of nomes) {
+      const u = await db.usuario.create({ data: { nome: n, email: `${n.normalize("NFD").replace(/\p{Diacritic}/gu, "")}-${n === "Ágil" ? 1 : 2}@ij.test` } });
+      await card(s, n, { resp: u.id });
+    }
+    const ordemTitulo = async (dir: "asc" | "desc") => titulos(estado({}, { ordem: { coluna: "titulo", dir } }));
+    const ordemResp = async (dir: "asc" | "desc") =>
+      (await listarTabela(estado({}, { ordem: { coluna: "responsavel", dir } }), AGORA)).linhas.map((l) => l.responsavel.nome);
+    expect(await ordemTitulo("asc")).toEqual(["abc", "ágil", "Ágil", "Zebra"]);
+    expect(await ordemTitulo("desc")).toEqual(["Zebra", "Ágil", "ágil", "abc"]);
+    expect(await ordemResp("asc")).toEqual(["abc", "ágil", "Ágil", "Zebra"]);
+    expect(await ordemResp("desc")).toEqual(["Zebra", "Ágil", "ágil", "abc"]);
+  });
+
   it("ordem por nome: a página reaplica os filtros (card apagado entre a leitura dos ids e a da página some)", async () => {
     const s = await semear();
     const a = await card(s, "a", { empresaId: s.acme.id });
