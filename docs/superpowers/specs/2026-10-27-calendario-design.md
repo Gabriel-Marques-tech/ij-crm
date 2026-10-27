@@ -16,6 +16,7 @@ Decisões do usuário estão sem marcação. Escolhas minhas (agente) estão mar
 - O responsável precisa ser um usuário ativo. Se ele estiver inativo, o prazo pode ser editado mantendo esse responsável. **[escolha do agente]**
 - Timeline do card: entrada `PRAZO` quando um prazo do card é criado (`evento: "criado"`) ou concluído (`evento: "concluido"`), na mesma transação. Reabrir não grava entrada, e concluir duas vezes também não. **[escolha do agente]**
 - Se o card vai para a lixeira, os prazos dele somem das telas e passam a recusar escrita. Se o card é apagado de vez, os prazos são apagados junto (FK cascade). **[escolha do agente]**
+- Vendedor pode criar prazo em **qualquer** card, desde que ele mesmo seja o responsável. Isso é intencional (decidido na revisão do PR #38): o app não tem permissão de escrita por card, e qualquer papel edita qualquer card no Kanban.
 - O card de um prazo não muda pelo editor. Para trocar, exclua o prazo e crie outro. **[escolha do agente]**
 - Data no passado é aceita, para registrar um prazo que já passou. **[escolha do agente]**
 
@@ -42,7 +43,7 @@ Decisões do usuário estão sem marcação. Escolhas minhas (agente) estão mar
 - **Prazo → "linha de chegada" 🏁** (`linha-chegada.tsx`): o nome fica em cima de uma faixa quadriculada (utilitário CSS `chegada` em `globals.css`, colorido só com tokens).
   - Vencido e não feito: coral.
   - Feito: apagado, riscado e com ✓.
-  - Clicar abre um diálogo para editar, concluir/reabrir ou excluir (a exclusão pede um segundo clique de confirmação).
+  - Clicar abre um diálogo para editar, concluir/reabrir ou excluir. A exclusão tem um passo de confirmação explícito, com "Excluir prazo" e "Cancelar", numa região `aria-live` (o projeto não tem AlertDialog).
   - Quem não pode mexer vê o prazo só para leitura.
   - Na visão Time, o prazo mostra o avatar do responsável. **[escolha do agente]**
 - Ordem dentro do dia: ações por responsável e depois por título; prazos não feitos primeiro e depois por título. **[escolha do agente]**
@@ -58,15 +59,17 @@ Decisões do usuário estão sem marcação. Escolhas minhas (agente) estão mar
 - As listas "Hoje" e "Próximos 7 dias" saíram. No lugar entrou a semana atual (seg–dom) em 7 colunas, com o mesmo `GradeSemana` do Calendário, mostrando as ações e os prazos do vendedor escolhido. No celular, os dias ficam empilhados.
 - Continuam funcionando: a saudação, o seletor de vendedor (gestor+), o Top 3 do ranking, a lista "Sem próxima ação" e o "marcar feita".
 - Também ficaram, por escolha minha:
-  - o **destaque** "mais urgente" no topo **[escolha do agente]**;
+  - o **destaque** "mais urgente" no topo **[escolha do agente]**. Ele **não se repete** nas colunas nem na lista "Próxima semana";
   - a lista **"Vencidas antes desta semana"**, porque essas ações não cabem nas colunas e sumiriam **[escolha do agente]**.
-- "Marcar feita" nas colunas: o botão ✓ do mini-card abre um diálogo com o mesmo formulário `MarcarFeita`. A coluna é estreita demais para o formulário inline. **[escolha do agente]**
-- A Minha Semana mostra só a semana atual, sem navegação. Para outras semanas há o link "abrir no Calendário". **[escolha do agente]**
-- O destaque pode repetir uma ação que também aparece numa coluna. Mantive assim de propósito: o destaque é o atalho do "Today". **[escolha do agente]**
+- **"Próxima semana"**: lista compacta sob as colunas, da segunda seguinte até hoje+7, com ações e prazos. Assim nada do antigo "Próximos 7 dias" some (pedido na revisão). O que vai além de hoje+7 continua como "+N cards … ver no Kanban".
+- A Minha Semana faz uma leitura só, de segunda até hoje+7 (duas queries), dividida em colunas e "Próxima semana" por `dividirSemana` (`src/lib/semana/colunas.ts`).
+- "Marcar feita" nas colunas: o botão ✓ do mini-card (24×24px) abre um diálogo com o mesmo formulário `MarcarFeita`. A coluna é estreita demais para o formulário inline. **[escolha do agente]**
+- A Minha Semana não tem navegação de semana. Para outras semanas há o link "abrir no Calendário". **[escolha do agente]**
 
 ## 6. Desempenho
 
-- Só a semana visível. `carregarItensDaSemana` (`src/lib/calendario/calendario.ts`) faz uma query de ações e uma de prazos, em paralelo, com as relações via `select` (sem N+1).
+- Só a semana visível. As duas queries são meio-abertas: ações em [segunda 00:00 de SP, segunda seguinte) e prazos em [segunda, segunda seguinte) na coluna DATE. Um teste roda a leitura com a sessão em `SET LOCAL TIME ZONE 'America/Sao_Paulo'` para provar que nada desloca de dia.
+- `carregarItensDaSemana` (`src/lib/calendario/calendario.ts`) faz uma query de ações e uma de prazos, em paralelo, com as relações via `select` (sem N+1).
 - O dia civil vem de `diaEmFuso` e `inicioDoDia` (America/Sao_Paulo), os mesmos helpers da Minha Semana e do Ranking. O intervalo das ações é meio-aberto: [segunda 00:00 de SP, segunda seguinte).
 - `prazo.data` é DATE. O Prisma lê e grava esse valor como meia-noite UTC (`instanteDoPrazo`/`diaDoPrazo`), sem fuso no meio.
 - Até 15 usuários: nenhuma dependência nova e nenhuma biblioteca de calendário (só CSS grid).
