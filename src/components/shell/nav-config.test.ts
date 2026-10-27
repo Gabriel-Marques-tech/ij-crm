@@ -33,6 +33,16 @@ describe("NAV_ITEMS", () => {
     for (const papel of ["VENDEDOR", "GESTOR", "ADMIN"] as const) expect(itensParaPapel(papel).map((i) => i.href)).toContain("/ranking");
   });
 
+  it("Calendário aparece para todos os papéis, logo depois da Minha Semana (GAB-51)", () => {
+    for (const papel of ["VENDEDOR", "GESTOR", "ADMIN"] as const) {
+      const hrefs = itensParaPapel(papel).map((i) => i.href);
+      expect(hrefs.indexOf("/calendario")).toBe(hrefs.indexOf("/semana") + 1);
+    }
+    const cal = NAV_ITEMS.find((i) => i.href === "/calendario")!;
+    expect(cal.label).toBe("Calendário");
+    expect(itemAtivo(cal, "/calendario", null)).toBe(true);
+  });
+
   it("tem hrefs únicos", () => {
     const hrefs = NAV_ITEMS.map((i) => i.href);
     expect(new Set(hrefs).size).toBe(hrefs.length);

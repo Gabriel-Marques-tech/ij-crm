@@ -170,3 +170,10 @@
 @utility tabular {
   font-variant-numeric: tabular-nums;
 }
+
+/* GAB-51: "linha de chegada" do prazo — faixa quadriculada. A cor vem de
+   --chegada (token): padrão fg-soft; vencido coral; feito fg-faint. */
+@utility chegada {
+  background-image: repeating-conic-gradient(var(--chegada, var(--fg-soft)) 0 25%, transparent 0 50%);
+  background-size: 8px 8px;
+}

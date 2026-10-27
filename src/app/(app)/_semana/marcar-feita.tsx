@@ -21,6 +21,8 @@ export function MarcarFeita({
   hoje,
   modo = "feita",
   destaque = false,
+  inicialAberto = false,
+  onFechar,
 }: {
   cardId: string;
   esperado: Esperado;
@@ -28,8 +30,16 @@ export function MarcarFeita({
   hoje: string;
   modo?: "feita" | "definir";
   destaque?: boolean;
+  /** Já abre no formulário (dentro de um diálogo, na semana em colunas). */
+  inicialAberto?: boolean;
+  /** Chamado ao salvar ou cancelar (fecha o diálogo de quem abriu). */
+  onFechar?: () => void;
 }) {
-  const [aberto, setAberto] = useState(false);
+  const [aberto, setAberto] = useState(inicialAberto);
+  const fechar = () => {
+    setAberto(false);
+    onFechar?.();
+  };
   const [acao, setAcao] = useState("");
   const [dia, setDia] = useState("");
   const [erro, setErro] = useState<FalhaUI | null>(null);
@@ -47,7 +57,7 @@ export function MarcarFeita({
             );
       setErro(falha);
       // Sucesso: a página revalida e o card muda de faixa; o formulário some junto.
-      if (!falha) setAberto(false);
+      if (!falha) fechar();
     });
   }
 
@@ -75,7 +85,7 @@ export function MarcarFeita({
         enviar("nova");
       }}
       onKeyDown={(e) => {
-        if (e.key === "Escape") setAberto(false);
+        if (e.key === "Escape") fechar();
       }}
       className={cn("w-full space-y-2 rounded-lg border border-border-strong bg-surface-strong p-3", destaque && "mt-2")}
       aria-label={modo === "feita" ? "Marcar feita e definir a próxima ação" : "Definir a próxima ação"}
@@ -102,7 +112,7 @@ export function MarcarFeita({
           </Button>
         ) : null}
         <span className="flex-1" />
-        <Button type="button" size="sm" variant="ghost" disabled={pendente} onClick={() => setAberto(false)}>
+        <Button type="button" size="sm" variant="ghost" disabled={pendente} onClick={fechar}>
           Cancelar
         </Button>
       </div>
