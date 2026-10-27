@@ -116,6 +116,19 @@ describe("ledger da janela atual no contexto", () => {
     expect((await dbT.oportunidade.findUniqueOrThrow({ where: { id: idG } })).revisar).toBe(true);
   });
 
+  it("valor/data que só estão no histórico não são copiados pelo ATUALIZAR (campo cai, revisar)", async () => {
+    const base = new Date("2026-10-27T11:00:00Z");
+    const c = await enviar("#crm falei com o Gustavo da Economia Sensata", base, () => saida({ contato: { nome: "Gustavo" }, empresa: { nome: "Economia Sensata" } }));
+    const id = (c.r as { oportunidadeId: string }).oportunidadeId;
+    await enviar("#crm orçamento uns 15k, proposta sexta", new Date(base.getTime() + MIN), () => saida({ intencao: "ATUALIZAR", oportunidade_id: id, confianca: 0.9 }));
+    const r = await enviar("#crm ele pediu o case também", new Date(base.getTime() + 2 * MIN), (p) =>
+      saida({ intencao: "ATUALIZAR", oportunidade_id: idVia(p, "recente"), campos: { orcamento_previsto: "uns 15k", proxima_acao: "mandar o case", proxima_acao_em: "sexta" } }),
+    );
+    expect(r.r).toMatchObject({ tipo: "PROCESSADA", oportunidadeId: id });
+    const card = await dbT.oportunidade.findUniqueOrThrow({ where: { id } });
+    expect(card).toMatchObject({ orcamentoPrevisto: null, proximaAcaoEm: null, proximaAcao: "mandar o case", revisar: true });
+  });
+
   it("janela nova (12:00 SP) não carrega o ledger da manhã", async () => {
     const manha = new Date("2026-10-27T14:50:00Z"); // 11:50 SP
     await enviar("#crm falei com o Gustavo da Economia Sensata", manha, () => saida({ contato: { nome: "Gustavo" }, empresa: { nome: "Economia Sensata" } }));

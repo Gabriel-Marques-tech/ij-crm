@@ -290,7 +290,7 @@ export async function aplicarAtualizacao(tx: Tx, e: EntradaAplicacao, locks: { v
   }
   if (!contatoFinal && !nomeContatoNovo && pontos.length) motivos.push("identificadores citados sem contato");
   if (corrigida) motivos.unshift(`empresa corrigida por resposta: “${empresaAtual!.nome}” → “${nomeEmpresaNova}”`);
-  const { campos, proximaAcaoEm } = interpretarCamposExtracao(ex, e.mensagem.recebidaEm, motivos);
+  const { campos, proximaAcaoEm } = interpretarCamposExtracao(ex, e.mensagem.recebidaEm, motivos, e.mensagem.texto);
   if (base.origem && !reabrir) delete campos.origem; // origem é histórico: só preenche vazio
   if (ex.confianca < e.limiar) motivos.push("confiança baixa da leitura");
   const revisar = motivos.length > 0;

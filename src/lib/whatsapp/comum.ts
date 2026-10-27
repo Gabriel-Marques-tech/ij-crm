@@ -7,6 +7,7 @@ import type { Origem, Prisma } from "@prisma/client";
 import { resolverDataRelativa } from "@/lib/llm/datas";
 import type { Extracao } from "@/lib/llm/prompts/extracao.v2";
 import { lerValorInformal } from "@/lib/llm/valores";
+import { valoresNoTexto } from "./fechamento";
 import { normalizarPonto, type PontoNormalizado } from "@/lib/normalizacao";
 import { inicioDoDia, interpretarCampo } from "@/lib/oportunidades/campos";
 import { ErroDeRegra } from "@/lib/oportunidades/erros";
@@ -103,12 +104,24 @@ export type CamposInterpretados = {
   proximaAcaoEm: string | null;
 };
 
+export const MOTIVO_ORCAMENTO_FORA_DO_TEXTO = "orçamento não está escrito nesta mensagem (não copiei do histórico)";
+export const MOTIVO_DATA_FORA_DO_TEXTO = "data da próxima ação não está escrita nesta mensagem (não copiei do histórico)";
+
+const semAcento = (s: string) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().replace(/\s+/g, " ").trim();
+
 /**
  * Campos de texto/dinheiro/data da LLM → valores gravíveis. Só entra o que
  * veio (null nunca vira "apagar"). Valor que não dá para entender vira motivo
  * de revisão, nunca chute.
+ *
+ * GAB-49: com o histórico de 12 h no prompt, a LLM poderia copiar valor/data
+ * de mensagens anteriores. Dinheiro e data só entram se estiverem ANCORADOS
+ * no texto da mensagem atual — dinheiro pelo mesmo parser do ganho
+ * (`valoresNoTexto`), data pela expressão escrita (a LLM copia o trecho como
+ * está); senão o campo cai e vira motivo de revisão. Texto livre (próxima
+ * ação, dor…) não é ancorado.
  */
-export function interpretarCamposExtracao(ex: Extracao, recebidaEm: Date, motivos: string[]): CamposInterpretados {
+export function interpretarCamposExtracao(ex: Extracao, recebidaEm: Date, motivos: string[], textoMensagem: string): CamposInterpretados {
   const campos: NonNullable<NovoCard["campos"]> = {};
   const c = ex.campos;
   for (const [nome, campo, rotulo] of [
@@ -126,11 +139,14 @@ export function interpretarCamposExtracao(ex: Extracao, recebidaEm: Date, motivo
   if (c.origem) campos.origem = c.origem as Origem;
   if (c.orcamento_previsto) {
     const v = lerValorInformal(c.orcamento_previsto);
-    if (v) campos.orcamentoPrevisto = v;
-    else motivos.push("orçamento não entendido");
+    if (!v) motivos.push("orçamento não entendido");
+    else if (!valoresNoTexto(textoMensagem).has(v)) motivos.push(MOTIVO_ORCAMENTO_FORA_DO_TEXTO);
+    else campos.orcamentoPrevisto = v;
   }
   let proximaAcaoEm: string | null = null;
-  if (c.proxima_acao_em) {
+  if (c.proxima_acao_em && !semAcento(textoMensagem).includes(semAcento(c.proxima_acao_em))) {
+    motivos.push(MOTIVO_DATA_FORA_DO_TEXTO);
+  } else if (c.proxima_acao_em) {
     proximaAcaoEm = resolverDataRelativa(c.proxima_acao_em, recebidaEm);
     if (proximaAcaoEm) campos.proximaAcaoEm = inicioDoDia(proximaAcaoEm);
     else motivos.push("data da próxima ação não entendida");
