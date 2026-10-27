@@ -38,6 +38,7 @@
 import { Prisma } from "@prisma/client";
 import { modeloDoProvedorConfigurado, limiarConfianca } from "@/lib/config/env";
 import { carregarConfigTecnica } from "@/lib/config/tecnica";
+import { contexto12h } from "@/lib/contexto/contexto-12h";
 import { encontrarContatoPorIdentificador, encontrarEmpresa } from "@/lib/contatos/match";
 import { db } from "@/lib/db";
 import { registrarErro } from "@/lib/erros/registrar";
@@ -99,10 +100,13 @@ function carregar(id: string) {
 
 /**
  * Contexto do passo 6: remetente, msg respondida, fases de vendas, candidatos
- * por identificador exato e oportunidades candidatas (GAB-38).
+ * por identificador exato e oportunidades candidatas (GAB-38), ledger da
+ * janela de 12 h + resumo da anterior (GAB-49, `contexto/contexto-12h.ts`).
  */
 export async function montarContexto(
-  m: Pick<Bruta, "texto" | "recebidaEm" | "respondendoEventoId" | "remetenteUsuario" | "remetenteUsuarioId"> & { semTag?: boolean },
+  m: Pick<Bruta, "texto" | "recebidaEm" | "respondendoEventoId" | "remetenteUsuario" | "remetenteUsuarioId"> & { id?: string; semTag?: boolean },
+  /** GAB-49: tarefas em segundo plano (geração do resumo) que quem chama aguarda no fim. */
+  pendentes?: Promise<unknown>[],
 ): Promise<ContextoExtracao & { respostaInvalida: MotivoRespostaInvalida | null }> {
   let respondendoA: string | null = null;
   if (m.respondendoEventoId) {
@@ -131,6 +135,7 @@ export async function montarContexto(
     if (r && !empresas.some((e) => e.id === r.empresa.id)) empresas.push({ id: r.empresa.id, nome: r.empresa.nome, via: r.via });
   }
 
+  const c12 = await contexto12h(m, { pendentes });
   const resposta = await alvoDaResposta(m.respondendoEventoId, m.recebidaEm);
   const alvoResposta = resposta?.tipo === "CARD" ? resposta.id : null;
   const oportunidades = await oportunidadesCandidatas({
@@ -139,6 +144,7 @@ export async function montarContexto(
     contatoIds: contatos.map((c) => c.id),
     empresas,
     alvoResposta,
+    ledger: c12.cards,
   });
 
   return {
@@ -152,6 +158,8 @@ export async function montarContexto(
     alvoResposta,
     respostaInvalida: resposta?.tipo === "INVALIDA" ? resposta.motivo : null,
     semTag: m.semTag ?? false,
+    historico: c12.historico,
+    resumoAnterior: c12.resumoAnterior,
   };
 }
 
@@ -241,18 +249,22 @@ async function falhar(
  * de LLM/aplicação — vira `FALHA`.
  */
 export async function processarMensagem(id: string, opts: { participantJid?: string | null } = {}): Promise<ResultadoProcessamento> {
+  const pendentes: Promise<unknown>[] = [];
   try {
     // GAB-42: config do Admin > env. Banco fora → não reivindica: fica RECEBIDA para o cron.
     const carga = await carregarConfigTecnica();
     if (!carga.ok) return { tipo: "ERRO", ref: carga.ref };
-    return await processar(id, opts);
+    return await processar(id, opts, pendentes);
   } catch (e) {
     const ref = registrarErro("processar", erroSeguro(e));
     return { tipo: "ERRO", ref };
+  } finally {
+    // GAB-49: resumo da janela anterior gerado em paralelo; só esperado aqui (ainda no after()).
+    await Promise.allSettled(pendentes);
   }
 }
 
-async function processar(id: string, opts: { participantJid?: string | null }): Promise<ResultadoProcessamento> {
+async function processar(id: string, opts: { participantJid?: string | null }, pendentes: Promise<unknown>[]): Promise<ResultadoProcessamento> {
   const reivindicadas = await db.$queryRaw<{ tentativas: number }[]>`
     UPDATE mensagem_bruta
        SET status = 'PROCESSANDO', tentativas = tentativas + 1, atualizado_em = now()
@@ -269,7 +281,7 @@ async function processar(id: string, opts: { participantJid?: string | null }): 
   let r: ResultadoExtracao;
   let ctx: Awaited<ReturnType<typeof montarContexto>>;
   try {
-    ctx = await montarContexto(m);
+    ctx = await montarContexto(m, pendentes);
     r = await extrairAtualizacao(m.texto, ctx, { ref: m.id });
   } catch (e) {
     return falhar(m, tentativa, e, registroLlm(null, e instanceof ErroLlm ? e.bruto : undefined, e instanceof ErroLlm ? e.uso : undefined), opts.participantJid);

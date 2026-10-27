@@ -11,6 +11,9 @@
  * determinístico — texto igual a uma fixture de `fixtures/classificacao.ts`
  * devolve a saída dela; senão `{ relevante: false, confianca: 0 }` (dev sem
  * chave descarta o que não conhece). Testes trocam com `definirClassificacaoMock`.
+ *
+ * Resumo da janela de 12 h (`pedido.nome === "resumo"`, GAB-49): resposta
+ * fixa curta; testes trocam com `definirResumoMock` (recebe texto vazio).
  */
 import { FIXTURES_CLASSIFICACAO } from "../fixtures/classificacao";
 import { FIXTURES_EXTRACAO, saida } from "../fixtures/extracao";
@@ -21,7 +24,7 @@ export const MODELO_MOCK = "mock-extracao";
 /** Recebe o texto ORIGINAL da mensagem (não o prompt montado) e o pedido completo. */
 export type RespostaMock = (texto: string, pedido: PedidoExtracao) => unknown | Promise<unknown>;
 
-const g = globalThis as unknown as { __ijRespostaMock?: RespostaMock | null; __ijClassificacaoMock?: RespostaMock | null };
+const g = globalThis as unknown as { __ijRespostaMock?: RespostaMock | null; __ijClassificacaoMock?: RespostaMock | null; __ijResumoMock?: RespostaMock | null };
 
 /** Troca a resposta do mock (null volta ao padrão). Lançar dentro dela simula falha do provedor. */
 export function definirRespostaMock(fn: RespostaMock | null) {
@@ -32,6 +35,13 @@ export function definirRespostaMock(fn: RespostaMock | null) {
 export function definirClassificacaoMock(fn: RespostaMock | null) {
   g.__ijClassificacaoMock = fn;
 }
+
+/** Idem, só para o resumo da janela (GAB-49). */
+export function definirResumoMock(fn: RespostaMock | null) {
+  g.__ijResumoMock = fn;
+}
+
+const resumoPadrao: RespostaMock = () => ({ resumo: "mock: resumo da janela anterior" });
 
 function classificacaoPadrao(texto: string): unknown {
   return FIXTURES_CLASSIFICACAO.find((x) => x.texto === texto)?.saida ?? { relevante: false, confianca: 0 };
@@ -54,7 +64,12 @@ export function criarProvedorMock(): ProvedorLlm {
     async extrair(pedido): Promise<RespostaProvedor> {
       const inicio = performance.now();
       const texto = textoDoPedido(pedido);
-      const fn = pedido.nome === "classificacao" ? (g.__ijClassificacaoMock ?? classificacaoPadrao) : (g.__ijRespostaMock ?? respostaPadrao);
+      const fn =
+        pedido.nome === "classificacao"
+          ? (g.__ijClassificacaoMock ?? classificacaoPadrao)
+          : pedido.nome === "resumo"
+            ? (g.__ijResumoMock ?? resumoPadrao)
+            : (g.__ijRespostaMock ?? respostaPadrao);
       const bruto = await fn(texto, pedido);
       return {
         bruto: structuredClone(bruto),

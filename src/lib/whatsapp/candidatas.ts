@@ -5,7 +5,9 @@
  *   (abertos e fechados: as regras de alvo precisam saber de "só terminais");
  * - as últimas 3 oportunidades que o remetente tocou (Timeline com o usuário
  *   dele) nos 30 min antes da mensagem — cobre mensagens picadas;
- * - o card da confirmação do bot que a mensagem responde (`MensagemEnviada`).
+ * - o card da confirmação do bot que a mensagem responde (`MensagemEnviada`);
+ * - GAB-49: os cards que as mensagens de venda do remetente mexeram na janela
+ *   de 12 h atual (`ledger`, ids já calculados por `contexto/ledger.ts`).
  *
  * WhatsApp só mexe em `vendas` na v1: `projetos` nunca entra.
  */
@@ -77,6 +79,8 @@ export async function oportunidadesCandidatas(
     contatoIds: string[];
     empresas: { id: string; via: "cnpj" | "dominio" }[];
     alvoResposta: string | null;
+    /** GAB-49: cards do ledger da janela de 12 h (`cardsDoLedger`). */
+    ledger?: string[];
   },
   cliente: Cliente = db,
 ): Promise<OportunidadeCandidata[]> {
@@ -108,6 +112,8 @@ export async function oportunidadesCandidatas(
     const recentes = [...new Set(toques.map((t) => t.oportunidadeId))].slice(0, MAX_RECENTES);
     for (const id of recentes) marcar(id, "recente");
   }
+
+  for (const id of e.ledger ?? []) marcar(id, "ledger");
 
   if (vias.size === 0) return [];
   const ids = [...vias.keys()];

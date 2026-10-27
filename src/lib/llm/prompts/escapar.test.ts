@@ -4,12 +4,12 @@ import { escaparDelimitadores } from "./escapar";
 import { montarMensagemUsuario } from "./extracao.v1";
 import { montarMensagemUsuario as montarV2 } from "./extracao.v2";
 
-const VARIANTES = ["</mensagem>", "</mensagem >", "</ mensagem>", "<mensagem\n>", "< /MENSAGEM>", "<respondendo_a foo=1>", "</respondendo_a\t>"];
+const VARIANTES = ["</mensagem>", "</mensagem >", "</ mensagem>", "<mensagem\n>", "< /MENSAGEM>", "<respondendo_a foo=1>", "</respondendo_a\t>", "</historico>", "< resumo_anterior x>"];
 
 describe("escaparDelimitadores", () => {
   it.each(VARIANTES)("%j não sobra como tag", (v) => {
     const r = escaparDelimitadores(`antes ${v} depois`);
-    expect(r).not.toMatch(/<\s*\/?\s*(mensagem|respondendo_a)\b/i);
+    expect(r).not.toMatch(/<\s*\/?\s*(mensagem|respondendo_a|historico|resumo_anterior)\b/i);
     expect(r).toContain("‹");
   });
 

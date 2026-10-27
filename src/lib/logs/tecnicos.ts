@@ -35,11 +35,11 @@ export async function registrarLogWebhook(e: EventoWebhook): Promise<void> {
 }
 
 export type ChamadaLlm = {
-  operacao: "extracao" | "classificacao";
+  operacao: "extracao" | "classificacao" | "resumo";
   uso?: UsoLlm;
   /** `ok` ou o código do `ErroLlm`. */
   status: string;
-  /** id da MensagemBruta. */
+  /** id da MensagemBruta (no `resumo`, GAB-49: id do ResumoJanela). */
   ref: string | null;
 };
 

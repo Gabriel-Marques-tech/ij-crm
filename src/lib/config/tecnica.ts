@@ -202,7 +202,13 @@ async function ler(e: EstadoCache): Promise<ResultadoCarga> {
       if (e.carregada) return { ok: true }; // salvar/restaurar aplicou um valor mais novo
       continue; // invalidado durante a leitura: relê
     }
-    if (validarCombinacao(resolverConfigTecnica(c.valor)) !== null || semGrupo(resolverConfigTecnica(c.valor)) !== null) {
+    if (c.atualizadoEm === null) {
+      // Nada salvo: vale só o ambiente. GRUPO_JID vazio (normal em dev) não é erro de
+      // config — o webhook já acusa (503) —, mas combinação inválida do env é avisada.
+      const problema = validarCombinacao(resolverConfigTecnica({}));
+      if (problema) registrarErro("config.tecnica.carregar", new Error(`ambiente com combinação inválida (nada salvo no Admin): ${problema}`));
+      aplicar({});
+    } else if (validarCombinacao(resolverConfigTecnica(c.valor)) !== null || semGrupo(resolverConfigTecnica(c.valor)) !== null) {
       // Só a chave: o valor pode ter modelo/JID. A tela do Admin mostra o motivo.
       registrarErro("config.tecnica.carregar", new Error(`configuração salva "${CONFIG_TECNICA.chave}" forma combinação inválida com o ambiente; usando só o ambiente`));
       aplicar({});

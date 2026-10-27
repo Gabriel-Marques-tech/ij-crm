@@ -87,10 +87,10 @@ describe("extrairAtualizacao (mock)", () => {
     const f = FIXTURES_EXTRACAO[0];
     const r = await extrairAtualizacao(f.texto, CTX, { ref: "m1" });
     expect(r.extracao).toEqual(f.saida);
-    expect(r.versao).toBe("extracao.v2");
+    expect(r.versao).toBe("extracao.v2.1");
     expect(r.uso).toMatchObject({ provedor: "mock", modelo: "mock-extracao" });
     const l = logs(console.info);
-    expect(l).toMatch(/\[llm\] extracao ref=m1 provedor=mock modelo=mock-extracao versao=extracao\.v2 ms=\d+ tokens_in=0 tokens_out=0 ok/);
+    expect(l).toMatch(/\[llm\] extracao ref=m1 provedor=mock modelo=mock-extracao versao=extracao\.v2\.1 ms=\d+ tokens_in=0 tokens_out=0 ok/);
     expect(l).not.toContain("Gustavo");
   });
 
@@ -114,7 +114,7 @@ describe("extrairAtualizacao (mock)", () => {
     };
     await extrairAtualizacao("#crm x", CTX, { ref: "m3", provedor });
     expect(logs(console.info)).toMatch(
-      /\[llm\] extracao ref=m3 provedor=openai modelo=gpt-6\.1-sol versao=extracao\.v2 ms=900 tokens_in=1500 tokens_out=260 tokens_reasoning=64 ok/,
+      /\[llm\] extracao ref=m3 provedor=openai modelo=gpt-6\.1-sol versao=extracao\.v2\.1 ms=900 tokens_in=1500 tokens_out=260 tokens_reasoning=64 ok/,
     );
   });
 });

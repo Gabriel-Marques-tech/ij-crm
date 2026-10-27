@@ -169,7 +169,7 @@ export async function aplicarExtracao(tx: Tx, e: EntradaAplicacao): Promise<Desf
   const responsavel = quem.responsavel ?? remetente;
 
   // ---- PLANO: campos
-  const { campos, proximaAcaoEm } = interpretarCamposExtracao(ex, e.mensagem.recebidaEm, motivos);
+  const { campos, proximaAcaoEm } = interpretarCamposExtracao(ex, e.mensagem.recebidaEm, motivos, e.mensagem.texto);
   if (ex.confianca < e.limiar) motivos.push("confiança baixa da leitura");
   const revisar = motivos.length > 0;
 

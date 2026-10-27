@@ -454,7 +454,7 @@ describe("falhas → FALHA com ref, nunca quebra, nunca loga o texto", () => {
   it("log de custo/latência por chamada, sem o texto", async () => {
     await processarMensagem((await bruta(FIXTURES_EXTRACAO[0].texto)).id);
     const l = logs(console.info);
-    expect(l).toMatch(/\[llm\] extracao ref=\S+ provedor=mock modelo=mock-extracao versao=extracao\.v2 ms=\d+ tokens_in=\d+ tokens_out=\d+ ok/);
+    expect(l).toMatch(/\[llm\] extracao ref=\S+ provedor=mock modelo=mock-extracao versao=extracao\.v2\.1 ms=\d+ tokens_in=\d+ tokens_out=\d+ ok/);
     expect(l).not.toContain("Gustavo");
   });
 });

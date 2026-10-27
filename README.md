@@ -269,6 +269,48 @@ contexto). Só o pipeline **Vendas**; `projetos` é UI.
 - **Confirmação** cita o card: `✅ Gustavo — Economia Sensata: Primeiro Contato → Reunião Diagnóstica.
   Próx.: reunião (30/10)`; sem movimento `✅ Título (Fase): atualizado.`; `⚠️` + motivo quando `revisar`.
 
+## Contexto de 12 h da LLM (ledger + resumo, GAB-49)
+
+Mensagens picadas ("falei com o Gustavo" … 2 h depois … "mando proposta sexta") ganham contexto real.
+Janelas **fixas de 12 h** em America/Sao_Paulo: 00:00–12:00 e 12:00–24:00 (`src/lib/contexto/janela.ts`).
+
+- **Ledger** (`contexto/ledger.ts`): as mensagens de venda do remetente na janela atual, antes desta —
+  derivado de `mensagem_bruta` (remetente + `recebida_em`), **sem tabela nova**. Entra: com `#crm`, sempre
+  (não aplicada aparece com a situação: "pendente de revisão", "falhou", "em processamento"); sem tag, **só
+  `PROCESSADA`**. Fica fora: sem tag em qualquer outro status, `CLASSIFICADA_IRRELEVANTE`, e o que nunca foi
+  gravado ou foi apagado. Cada linha leva o card que ela mexeu (Timeline). No prompt (`extracao.v2.1`, seção
+  `<historico>`): orçamento de 3000 caracteres (400 por mensagem), as mais recentes primeiro, exibidas em
+  ordem cronológica (até 60 linhas lidas).
+- **Candidatas**: os cards que as mensagens do ledger mexeram na janela (consulta própria, não o ledger
+  cortado; até 5) entram com `via: ledger`. Escolhido só pelo ledger (mexido há mais de 30 min) → aplica com
+  `revisar`; o ✅ do "único card recente" (GAB-38) continua valendo só se o remetente não mexeu em **outro**
+  card na janela. Card **fechado** que só veio pelo ledger nunca é reaberto → `PENDENTE_REVISAO`
+  ("não reabri").
+- **Nada copiado do histórico**: orçamento e data da próxima ação só entram se estiverem escritos na
+  mensagem atual (dinheiro pelo mesmo parser do ganho; data pela expressão escrita); senão o campo cai e o
+  card fica `revisar`. Texto livre (próxima ação, dor) entra normalmente.
+- **Resumo da janela anterior** (`contexto/resumo.ts`, prompt `resumo.v1`, seção `<resumo_anterior>`, até
+  1200 caracteres). **Fora do caminho da mensagem**: a extração só lê o resumo PRONTO; ausente ou
+  `GERANDO` → segue sem ele. Faltando, `processarMensagem` dispara a geração em paralelo (sem esperar) e
+  só aguarda no fim, ainda no `after()` — a 1ª mensagem da janela sai sem resumo, as seguintes com.
+  - **Uma vez** por vendedor e janela: chave única `resumo_janela(usuario_id, janela_inicio)` +
+    reivindicação; quem perde a corrida desiste na hora. Até 3 tentativas por janela (FALHA ou `GERANDO`
+    abandonado há > 5 min).
+  - Só gera com a fotografia completa: se a janela anterior ainda tem mensagem do vendedor `RECEBIDA` ou
+    `PROCESSANDO`, fica para o próximo gatilho.
+  - Falha → `FALHA` com código + ref; nunca bloqueia nem lança.
+  - LGPD: o prompt proíbe telefone, email, endereço, dados bancários e documentos; o código remove os
+    formatos de telefone/CPF/CNPJ/email (datas, horas e valores ficam).
+  - Mensagem reprocessada de outra janela não gera resumo.
+- **Retenção**: só o resumo da janela anterior à atual fica; os mais antigos são apagados no começo de cada
+  geração (índice de `janela_inicio`).
+- **Para o cron (GAB-41)**: `gerarResumosPendentes(agora, { prazoMs })` gera os da janela anterior de todos
+  os vendedores (índice `mensagem_bruta(recebida_em)`), com prazo total de 2 min (para entre um vendedor e
+  outro, pelo menos um por rodada; devolve `{ gerados, interrompido }`), e aplica a retenção;
+  `aplicarRetencaoResumos()` só a retenção. Nunca lançam.
+- Log por chamada, sem texto: `[llm] resumo ref=<id do resumo> provedor=… modelo=… versao=resumo.v1 ms=…
+  tokens_in=… tokens_out=… ok chars=…` + linha em `log_llm` (`operacao=resumo`).
+
 ## Alerta de sem crédito na LLM
 
 GAB-46. A recarga da API de LLM é manual (pré-pago). Quando uma chamada falha com `SEM_CREDITO`
@@ -581,8 +623,12 @@ instância mínima: runbook §11.
 ## Testes
 
 `pnpm test` roda unitários e de integração. Os de integração (`*.int.test.ts`)
-usam o Postgres do compose no schema `ijcrm_test`, migrado automaticamente —
-suba o `db` antes (`docker compose up -d db`).
+usam o Postgres do compose num schema de teste, migrado automaticamente —
+suba o `db` antes (`docker compose up -d db`). O schema é o de `DATABASE_URL_TEST`
+quando definida (precisa ser `ijcrm_test` ou `ijcrm_test_<sufixo>`); sem ela, cada
+diretório/worktree usa o seu, `ijcrm_test_<8 hex do sha256 do caminho>` (`src/test/db.ts`),
+para que worktrees em paralelo nunca truncem as tabelas um do outro. Apague os schemas
+de worktrees removidos com `DROP SCHEMA ijcrm_test_<hash> CASCADE`.
 
 ## Comandos
 
