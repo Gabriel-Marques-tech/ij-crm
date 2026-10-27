@@ -237,6 +237,36 @@ para gestor/admin e usuário ativo; para os demais o servidor ignora e mostra a 
 
 Opções de visualização de cada usuário (ex.: no Kanban, "mostrar colunas vazias" e colunas abertas à mão, por quadro) ficam em `usuario.preferencias` (JSONB versionado, validado com zod em `src/lib/preferencias/`); cada um só grava as próprias, e JSON inválido vira o padrão.
 
+## Import do Pipefy
+
+Gestão → Importar (GESTOR+) recebe o CSV de "exportar cards" do Pipefy, mostra a prévia (cards
+por fase, novos × existentes, responsáveis sem usuário, linhas com erro) e só grava ao confirmar.
+A prévia fica em `import_previa` (30 min, uso único) com `hash = sha256(CSV + mapeamento)`: o que
+é aplicado é exatamente o que foi visto. O mapeamento de fases do Pipefy → fases do CRM vem por
+nome normalizado (como o seed) e é editável na prévia. Idempotente por `pipefy_id`: importar de
+novo atualiza, não duplica cards, transições nem timeline — mas não desfaz o CRM: card mexido no
+CRM depois do último import (e depois do "Atualizado em" do CSV) é pulado e listado, e card em
+fase terminal nunca sai dela. PERDIDO sem "Motivo da perda" é pulado, salvo se o gestor escolher
+na prévia (ou `--motivo-perda` no CLI) um motivo padrão. O upload vai por
+`/api/gestao/importar/previa` (limite só nessa rota); prévias vencidas são apagadas a cada prévia
+e confirmação, e o CSV de uma prévia usada é descartado. Cards em "Contrato assinado" ou além
+geram o projeto pelo caminho do GAB-32 (`aoEntrarEmTerminal`). Lotes de 25 cards por transação
+(`travarPipelines`); lote que falha é refeito card a card. Limites: 8 MB, 5.000 linhas. Erros e
+avisos por linha baixam em CSV.
+
+Colunas: aliases pt-BR/en em `src/lib/importacao/pipefy/colunas.ts` (obrigatórias: ID do card,
+Título, Fase atual); histórico por colunas "Primeira entrada na fase X" / "First time in X" etc.
+gera `TransicaoFase` retroativas, sem histórico só `fase_desde`. Fixture de referência:
+`src/test/fixtures/pipefy/export-exemplo.csv` (o export real ainda não foi validado).
+
+Go-live pelo terminal (dry-run por padrão):
+
+```bash
+pnpm import:pipefy export.csv                       # prévia, grava export.csv.erros.csv
+pnpm import:pipefy export.csv --confirmar           # importa como o 1º ADMIN ativo
+pnpm import:pipefy export.csv --confirmar --usuario gestor@ij.com --mapa mapa.json --colunas colunas.json --motivo-perda sem_resposta
+```
+
 ## Erros e debug
 
 Exceção inesperada numa server action não vira tela de erro: a action devolve
