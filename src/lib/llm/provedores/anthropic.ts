@@ -7,7 +7,8 @@
  *   (inclusive 429) não re-tenta — a mensagem vai para `FALHA` e o
  *   reprocessamento (GAB-41) cuida depois. Saldo esgotado (`billing_error`)
  *   vira `SEM_CREDITO` ("sem crédito na API da Anthropic").
- * - Modelo padrão: Claude Haiku 5.5 (Sonnet 5.5 como alternativa por env).
+ * - Alternativa à OpenAI (padrão de produção, `openai.ts`), por
+ *   `LLM_PROVEDOR=anthropic`. Modelo padrão: Claude Haiku 5.5 (Sonnet 5.5 por env).
  *   Não manda `temperature`/`top_p`/`top_k`, `thinking.budget_tokens` nem
  *   prefill de assistant (400 no Haiku 5.5); thinking adaptativo fica no padrão.
  * - `stop_reason` é checado antes do conteúdo: `refusal` (Haiku não tem
@@ -19,10 +20,9 @@
  */
 import Anthropic from "@anthropic-ai/sdk";
 import { ErroLlm, type PedidoExtracao, type ProvedorLlm, type RespostaProvedor } from "../tipos";
+import { MAX_TOKENS_EXTRACAO, TIMEOUT_LLM_MS, comRetentativa, type TraducaoErro } from "./comum";
 
-export const TIMEOUT_LLM_MS = 30_000;
-export const MAX_TOKENS_EXTRACAO = 8_000;
-const TENTATIVAS = 2;
+export { MAX_TOKENS_EXTRACAO, TIMEOUT_LLM_MS } from "./comum";
 
 type Opcoes = { apiKey: string; modelo: string; fetch?: typeof fetch };
 
@@ -38,7 +38,7 @@ function saldoBaixoFormatoAntigo(e: InstanceType<typeof Anthropic.APIError>, sta
   return typeof msg === "string" && /credit balance is too low/i.test(msg);
 }
 
-function traduzirErro(e: unknown): { erro: ErroLlm; retentavel: boolean } {
+function traduzirErro(e: unknown): TraducaoErro {
   if (e instanceof Anthropic.APIConnectionTimeoutError) return { erro: new ErroLlm("TIMEOUT"), retentavel: true };
   if (e instanceof Anthropic.APIConnectionError) return { erro: new ErroLlm("REDE"), retentavel: true };
   if (e instanceof Anthropic.APIError) {
@@ -46,7 +46,7 @@ function traduzirErro(e: unknown): { erro: ErroLlm; retentavel: boolean } {
     // Saldo esgotado: identificado pelo tipo do corpo (`billing_error`, 402),
     // nunca pela mensagem humana. Não re-tenta; reprocessa após recarga.
     if (e.type === "billing_error" || status === 402 || saldoBaixoFormatoAntigo(e, status)) {
-      return { erro: new ErroLlm("SEM_CREDITO", { status }), retentavel: false };
+      return { erro: new ErroLlm("SEM_CREDITO", { status, detalhe: "sem crédito na API da Anthropic" }), retentavel: false };
     }
     return { erro: new ErroLlm("HTTP", { status }), retentavel: status !== undefined && status >= 500 };
   }
@@ -56,24 +56,18 @@ function traduzirErro(e: unknown): { erro: ErroLlm; retentavel: boolean } {
 export function criarProvedorAnthropic({ apiKey, modelo, fetch }: Opcoes): ProvedorLlm {
   const cliente = new Anthropic({ apiKey, timeout: TIMEOUT_LLM_MS, maxRetries: 0, ...(fetch ? { fetch } : {}) });
 
-  async function chamar(pedido: PedidoExtracao): Promise<Anthropic.Message> {
-    let ultimo: ErroLlm | undefined;
-    for (let i = 0; i < TENTATIVAS; i++) {
-      try {
-        return await cliente.messages.create({
+  function chamar(pedido: PedidoExtracao): Promise<Anthropic.Message> {
+    return comRetentativa(
+      () =>
+        cliente.messages.create({
           model: modelo,
           max_tokens: MAX_TOKENS_EXTRACAO,
           system: pedido.sistema,
           messages: [{ role: "user", content: pedido.usuario }],
           output_config: { effort: "low", format: { type: "json_schema", schema: pedido.schema } },
-        });
-      } catch (e) {
-        const { erro, retentavel } = traduzirErro(e);
-        ultimo = erro;
-        if (!retentavel) throw erro;
-      }
-    }
-    throw ultimo ?? new ErroLlm("REDE");
+        }),
+      traduzirErro,
+    );
   }
 
   return {

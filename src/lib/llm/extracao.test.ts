@@ -23,12 +23,39 @@ afterEach(() => {
 });
 
 describe("provedor por env", () => {
-  it("LLM_PROVEDOR=mock → mock; ausente → anthropic", () => {
+  it("LLM_PROVEDOR=mock → mock; ausente → openai; anthropic segue selecionável", () => {
     process.env.LLM_PROVEDOR = "mock";
     expect(provedorConfigurado().nome).toBe("mock");
     delete process.env.LLM_PROVEDOR;
+    delete process.env.LLM_EXTRACAO_MODELO;
+    process.env.OPENAI_API_KEY = "sk-x";
+    expect(provedorConfigurado().nome).toBe("openai");
+    process.env.LLM_PROVEDOR = "anthropic";
     process.env.ANTHROPIC_API_KEY = "sk-ant-x";
     expect(provedorConfigurado().nome).toBe("anthropic");
+  });
+
+  it("openai sem OPENAI_API_KEY → ErroLlm SEM_CHAVE (não quebra o processo)", async () => {
+    process.env.LLM_PROVEDOR = "openai";
+    delete process.env.OPENAI_API_KEY;
+    await expect(extrairAtualizacao("#crm x", CTX)).rejects.toMatchObject({
+      name: "ErroLlm",
+      codigo: "SEM_CHAVE",
+      message: expect.stringContaining("OPENAI_API_KEY ausente"),
+    });
+  });
+
+  it("modelo de outro provedor no LLM_EXTRACAO_MODELO → PROVEDOR_INVALIDO com o motivo (em vez de 404 a cada mensagem)", () => {
+    process.env.LLM_PROVEDOR = "openai";
+    process.env.OPENAI_API_KEY = "sk-x";
+    process.env.LLM_EXTRACAO_MODELO = "claude-haiku-5-5";
+    expect(() => provedorConfigurado()).toThrow(
+      expect.objectContaining({ codigo: "PROVEDOR_INVALIDO", message: expect.stringContaining("claude-haiku-5-5") }),
+    );
+    process.env.LLM_PROVEDOR = "anthropic";
+    process.env.ANTHROPIC_API_KEY = "sk-ant-x";
+    process.env.LLM_EXTRACAO_MODELO = "gpt-6.1-sol";
+    expect(() => provedorConfigurado()).toThrow(expect.objectContaining({ codigo: "PROVEDOR_INVALIDO" }));
   });
 
   it("anthropic sem ANTHROPIC_API_KEY → ErroLlm SEM_CHAVE (não quebra o processo)", async () => {
@@ -46,7 +73,7 @@ describe("provedor por env", () => {
   });
 
   it("valor desconhecido → PROVEDOR_INVALIDO", () => {
-    process.env.LLM_PROVEDOR = "openai";
+    process.env.LLM_PROVEDOR = "gemini";
     expect(() => provedorConfigurado()).toThrow(expect.objectContaining({ codigo: "PROVEDOR_INVALIDO" }));
   });
 });
@@ -75,6 +102,20 @@ describe("extrairAtualizacao (mock)", () => {
     expect(e.message).not.toContain("Segredo");
     expect(logs(console.info)).toMatch(/erro=SAIDA_INVALIDA campos=.*confianca/);
     expect(logs(console.info)).not.toContain("Segredo");
+  });
+
+  it("loga tokens de raciocínio quando o provedor informa", async () => {
+    const provedor = {
+      nome: "openai",
+      extrair: async () => ({
+        bruto: FIXTURES_EXTRACAO[0].saida,
+        uso: { provedor: "openai", modelo: "gpt-6.1-sol", tokensEntrada: 1500, tokensSaida: 260, tokensRaciocinio: 64, ms: 900 },
+      }),
+    };
+    await extrairAtualizacao("#crm x", CTX, { ref: "m3", provedor });
+    expect(logs(console.info)).toMatch(
+      /\[llm\] extracao ref=m3 provedor=openai modelo=gpt-6\.1-sol versao=extracao\.v1 ms=900 tokens_in=1500 tokens_out=260 tokens_reasoning=64 ok/,
+    );
   });
 
   it("classificar é stub: tudo que chega é relevante", async () => {
