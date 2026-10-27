@@ -114,7 +114,7 @@ describe("extrairAtualizacao (mock)", () => {
     };
     await extrairAtualizacao("#crm x", CTX, { ref: "m3", provedor });
     expect(logs(console.info)).toMatch(
-      /\[llm\] extracao ref=m3 provedor=openai modelo=gpt-6\.1-sol versao=extracao\.v1 ms=900 tokens_in=1500 tokens_out=260 tokens_reasoning=64 ok/,
+      /\[llm\] extracao ref=m3 provedor=openai modelo=gpt-6\.1-sol versao=extracao\.v2 ms=900 tokens_in=1500 tokens_out=260 tokens_reasoning=64 ok/,
     );
   });
 

@@ -119,39 +119,41 @@ function escapar(s: string): string {
 /** Mensagem do usuário: contexto em lista simples + a mensagem delimitada. */
 export function montarMensagemUsuario(textoMensagem: string, ctx: ContextoExtracao): string {
   const linhas: string[] = [];
-  linhas.push(`Vendedor (remetente): ${ctx.remetente}`);
-  linhas.push(`Enviada em: ${DATA_SP.format(ctx.recebidaEm)} (horário de Brasília)`);
-  linhas.push("");
-  linhas.push("Fases do funil de vendas (chave — nome):");
-  for (const f of ctx.fases) linhas.push(`- ${f.chave} — ${f.nome}${f.terminal ? " (fechamento)" : ""}`);
-  linhas.push("");
-  linhas.push("Contatos candidatos (casaram por telefone/email exato citado na mensagem):");
-  if (ctx.contatos.length === 0) linhas.push("- nenhum");
-  for (const c of ctx.contatos) linhas.push(`- id=${c.id} nome=${JSON.stringify(c.nome)} empresa=${JSON.stringify(c.empresa)} via=${c.via}`);
-  linhas.push("");
-  linhas.push("Empresas candidatas (cnpj = mesma empresa com certeza; dominio = só sugestão):");
-  if (ctx.empresas.length === 0) linhas.push("- nenhuma");
-  for (const e of ctx.empresas) linhas.push(`- id=${e.id} nome=${JSON.stringify(e.nome)} via=${e.via}`);
-  linhas.push("");
-  linhas.push(
+  // Todo dado do contexto (nomes do CRM, texto respondido) passa por `escapar`.
+  const add = (l: string) => linhas.push(escapar(l));
+  add(`Vendedor (remetente): ${ctx.remetente}`);
+  add(`Enviada em: ${DATA_SP.format(ctx.recebidaEm)} (horário de Brasília)`);
+  add("");
+  add("Fases do funil de vendas (chave — nome):");
+  for (const f of ctx.fases) add(`- ${f.chave} — ${f.nome}${f.terminal ? " (fechamento)" : ""}`);
+  add("");
+  add("Contatos candidatos (casaram por telefone/email exato citado na mensagem):");
+  if (ctx.contatos.length === 0) add("- nenhum");
+  for (const c of ctx.contatos) add(`- id=${c.id} nome=${JSON.stringify(c.nome)} empresa=${JSON.stringify(c.empresa)} via=${c.via}`);
+  add("");
+  add("Empresas candidatas (cnpj = mesma empresa com certeza; dominio = só sugestão):");
+  if (ctx.empresas.length === 0) add("- nenhuma");
+  for (const e of ctx.empresas) add(`- id=${e.id} nome=${JSON.stringify(e.nome)} via=${e.via}`);
+  add("");
+  add(
     "Oportunidades candidatas (cards de vendas: dos contatos/empresas acima, e as que o remetente mexeu nos últimos 30 min = recente; resposta = card da confirmação respondida):",
   );
-  if (ctx.oportunidades.length === 0) linhas.push("- nenhuma");
+  if (ctx.oportunidades.length === 0) add("- nenhuma");
   for (const o of ctx.oportunidades) {
-    linhas.push(
-      `- id=${o.id} titulo=${escapar(JSON.stringify(o.titulo))} fase=${JSON.stringify(o.faseNome)}${o.terminal ? " (fechada)" : ""} via=${o.via.join(",")} tocada=${HORA_SP.format(o.tocadaEm)}`,
+    add(
+      `- id=${o.id} titulo=${JSON.stringify(o.titulo)} fase=${JSON.stringify(o.faseNome)}${o.terminal ? " (fechada)" : ""} via=${o.via.join(",")} tocada=${HORA_SP.format(o.tocadaEm)}`,
     );
   }
   if (ctx.alvoResposta) {
-    linhas.push("");
-    linhas.push(`Card da confirmação respondida: id=${ctx.alvoResposta}`);
+    add("");
+    add(`Card da confirmação respondida: id=${ctx.alvoResposta}`);
   }
-  linhas.push("");
+  add("");
   if (ctx.respondendoA) {
     linhas.push("<respondendo_a>");
-    linhas.push(escapar(ctx.respondendoA));
+    add(ctx.respondendoA);
     linhas.push("</respondendo_a>");
-    linhas.push("");
+    add("");
   }
   linhas.push("<mensagem>");
   linhas.push(escapar(textoMensagem));
