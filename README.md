@@ -634,31 +634,155 @@ erro do Prisma só loga `code` + `target`/`modelName` (a mensagem ecoa dados da 
 "Sem conexão com o servidor" = a chamada nem chegou (rede/servidor fora). Helper:
 `src/lib/erros/registrar.ts` (`comTratamento` / `comTratamentoForm`).
 
-## Produção
+## Produção e deploy
 
-Deploy, rollback, backup/restore, QR da Evolution e troca do número do bot:
-[`docs/runbook.md`](docs/runbook.md) (`compose.prod.yml` + `scripts/deploy.sh`).
-As imagens são buildadas no GitHub Actions a cada push na `main` e publicadas no
-GHCR; a VPS só baixa (`scripts/deploy.sh [sha-<commit>]`). **O deploy é
-automático**: depois do build, o job `deploy` assume uma role da AWS por OIDC
-(sem chave guardada) e manda por **SSM Run Command** o documento
-`deploy/ssm-deploy.yaml` com a tag e os digests das imagens; na VPS,
-`scripts/deploy-remoto.sh` confere que o commit está na `main` e roda
-`scripts/deploy.sh`, que baixa por digest e usa compose/scripts do mesmo commit.
-Porta 22 fechada (admin pelo Session Manager). Deploy que falha (mesmo com
-rollback automático) deixa o workflow vermelho. Pausar: variável de repositório
-`DEPLOY_AUTOMATICO=false`. Configuração (IAM, documento SSM, environment
-`producao`): runbook, "Deploy automático (GitHub Actions + AWS SSM)". Limites de
-memória e instância mínima: runbook §11.
+Este é o guia de uso. Comandos completos, IAM e casos raros ficam no
+[`docs/runbook.md`](docs/runbook.md), que é a referência.
+
+### Como funciona (visão geral)
+
+```
+merge de PR na main
+   │
+   ▼
+GitHub Actions (.github/workflows/imagens.yml)
+   1. checa migrations perigosas (scripts/checar-migrations.sh)
+   2. builda as imagens e publica no GHCR:
+        ghcr.io/gabriel-marques-tech/ij-crm-app   (o CRM, ~400 MB)
+        ghcr.io/gabriel-marques-tech/ij-crm-ops   (migrations e restore, ~2 GB)
+      com a tag sha-<commit> (fixa) e latest
+   3. job "deploy": pede ao AWS SSM para rodar o deploy na máquina
+   │
+   ▼
+AWS (EC2, /opt/ij-crm, usuário deploy)
+   scripts/deploy-remoto.sh  →  confere tag, digests e que o commit está na main
+   scripts/deploy.sh         →  baixa as imagens, faz backup, roda migrations,
+                                sobe a versão nova e checa /api/health;
+                                se falhar, volta sozinho para a versão anterior
+```
+
+- **Nada é compilado na AWS.** A máquina só baixa as imagens prontas.
+- **Não existe chave guardada no GitHub.** O GitHub assume um papel da AWS por
+  OIDC, e esse papel só pode rodar o documento de deploy naquela instância.
+- **A porta 22 fica fechada.** Abertas, só 80 e 443. O acesso de admin é pelo
+  Session Manager.
+- **Mudanças na `main` só entram por PR,** e os testes de deploy e a checagem
+  de migrations rodam em cada PR.
+
+### No dia a dia: fazer um deploy
+
+**Mergeie a PR na `main`. Só isso.** Uns 5 a 10 minutos depois, a versão nova
+está no ar.
+
+Para acompanhar, abra **GitHub → Actions → `imagens`** e veja o último run da
+`main`:
+
+| Job | O que significa |
+|---|---|
+| `build` verde | Imagens publicadas no GHCR |
+| `deploy` verde | Versão no ar. O resumo do job mostra tag, commit e "ok" |
+| `deploy` vermelho | O deploy falhou e o GitHub manda email. Veja o código no resumo (tabela abaixo) |
+| `deploy` *skipped* | O deploy automático está pausado ou a AWS ainda não foi configurada (o resumo avisa) |
+
+Códigos de saída do deploy, que aparecem no resumo:
+
+| Código | O que aconteceu | O que fazer |
+|---|---|---|
+| `0` | Deploy ok | Nada |
+| `1` | Falhou **antes** de trocar a versão; a anterior continua no ar | Ver o log e corrigir (imagem, `.env`, migration) |
+| `10` | A versão nova não passou no health e o **rollback automático** voltou a anterior | Corrigir o bug em uma PR nova |
+| `11` | O app **não voltou** | Entrar na máquina e agir (seção "À mão" abaixo) |
+| `2` | Comando recusado (tag, digest ou commit que não está na `main`) | Ver o resumo do job |
+
+O log completo de cada deploy fica na máquina, em
+`/var/log/ij-crm/deploy-<data>-<tag>.log`.
+
+### Pausar o deploy automático
+
+Use durante uma manutenção ou **depois de um rollback manual**. Sem isso, o
+próximo merge sobe a versão nova por cima do rollback.
+
+```bash
+gh variable set DEPLOY_AUTOMATICO --body false   # pausa (o build continua publicando imagens)
+gh variable delete DEPLOY_AUTOMATICO             # volta ao automático
+```
+
+### À mão: entrar na máquina, deploy de uma versão, rollback
+
+Não há SSH. Entre pelo console da AWS (EC2 → instância → **Connect → Session
+Manager**) ou pela CLI:
+
+```bash
+aws ssm start-session --target <id-da-instância>
+sudo -iu deploy
+cd /opt/ij-crm
+
+scripts/deploy.sh sha-1a2b3c4      # sobe uma versão específica (precisa estar na main)
+scripts/deploy.sh rollback         # volta para a versão boa anterior
+scripts/deploy.sh rollback sha-1a2b3c4   # ou para uma versão específica
+docker compose -f compose.prod.yml ps          # estado dos serviços
+docker compose -f compose.prod.yml logs app    # log do app
+```
+
+As tags disponíveis (`sha-…`) aparecem em **GitHub → Packages → ij-crm-app** e
+no resumo de cada run do `imagens`. Deploy manual e automático usam a mesma
+trava, então quem chegar depois espera o outro terminar (até 15 min).
 
 ### Migrations: expand/contract
 
-O rollback troca só o app; o schema não volta. Toda migration tem de rodar com a
-versão **anterior** do app: adicionar tabela/coluna/índice é livre; remover,
-renomear ou trocar tipo vai em **duas releases** (1ª: o código para de usar;
-2ª: a migration remove, com a linha `-- destrutiva-ok: <motivo>`). O CI
-(`scripts/checar-migrations.sh`) recusa migration nova com `DROP TABLE`,
-`DROP COLUMN`, `ALTER COLUMN … TYPE` ou `RENAME` sem o marcador. Runbook §2.
+O rollback troca só o app; o schema do banco não volta. Por isso, toda migration
+tem de funcionar também com a versão **anterior** do app:
+
+- **Livre:** adicionar tabela, coluna ou índice.
+- **Em duas releases:** remover, renomear ou trocar tipo. Na 1ª, o código para
+  de usar o campo. Na 2ª, a migration remove, com a linha
+  `-- destrutiva-ok: <motivo>`.
+
+O CI (`scripts/checar-migrations.sh`) recusa migration nova com `DROP TABLE`,
+`DROP COLUMN`, `ALTER COLUMN … TYPE` ou `RENAME` sem esse marcador. Detalhes no
+runbook §2.
+
+### Trocar o provedor de LLM (OpenAI ↔ Gemini ↔ Anthropic)
+
+No `.env` da máquina, defina `LLM_PROVEDOR=gemini` (ou `openai`/`anthropic`) e a
+chave correspondente (`GEMINI_API_KEY`, `OPENAI_API_KEY` ou
+`ANTHROPIC_API_KEY`), e rode `scripts/deploy.sh`. O deploy recusa subir se faltar
+a chave do provedor escolhido. Depois, confirme que o provedor responde:
+
+```bash
+docker compose -f compose.prod.yml --profile ops run --rm llm-smoke   # tem que terminar em "[llm-smoke] ok"
+```
+
+Também dá para trocar provedor e modelo em **Gestão → Admin → Configuração**, sem
+deploy. As chaves, porém, ficam só no `.env`. Detalhes no runbook §10.
+
+### Primeira instalação (uma vez só)
+
+Siga o **[Checklist de go-live](docs/runbook.md#checklist-de-go-live-aws)** do
+runbook, de cima para baixo. Resumindo:
+
+1. **Instância EC2** `t3.small` (2 GB + 2 GB de swap, Ubuntu 24.04), com só as
+   portas 80 e 443 abertas e o agente SSM ativo.
+2. **Docker + compose** e o usuário `deploy`.
+3. **Clonar** o repositório em `/opt/ij-crm`.
+4. **Criar o `.env`** a partir de `.env.prod.example`: segredos, domínio e chave
+   do LLM.
+5. **DNS** do domínio apontando para a instância.
+6. **Primeiro deploy** com `scripts/deploy.sh --no-pull`, seed, e
+   `llm-smoke` ok.
+7. **Criar o admin** com `scripts/criar-admin.ts`.
+8. **Parear o WhatsApp** pelo QR em Gestão → Admin.
+9. **Escolher o grupo** de vendas, também em Gestão → Admin.
+10. **Aviso de privacidade** da IJ publicado, **antes** de ligar o webhook.
+11. **Ligar o webhook** com `scripts/evolution.sh webhook`.
+12. **Crontab**: backup diário e manutenção a cada 10 min.
+13. **Backup off-site** configurado e restore testado uma vez.
+14. **Deploy automático**: na AWS, provedor OIDC, papel IAM e documento SSM; no
+    GitHub, o environment `producao` com 3 variáveis. Comandos prontos em
+    `deploy/iam/` e no runbook.
+15. **Por último**, `NOTIFICATIONS_ENABLED=true` e um `#crm` de teste no grupo.
+
+Limites de memória e medições da instância: runbook §11.
 
 ## Testes
 
