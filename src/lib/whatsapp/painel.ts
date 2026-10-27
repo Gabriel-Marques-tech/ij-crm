@@ -13,6 +13,7 @@ import { db } from "@/lib/db";
 import { travarPipelines } from "@/lib/fases/fases";
 import { ErroDeRegra, type ErroOportunidade } from "@/lib/oportunidades/erros";
 import { criarCardTravado } from "@/lib/oportunidades/oportunidades";
+import { PIPELINE_VENDAS } from "@/lib/oportunidades/terminal-regras";
 import { mascararJid, mascararTelefone } from "./mascarar";
 
 export const POR_PAGINA_FILA = 20;
@@ -142,6 +143,19 @@ export async function carregarPainel(): Promise<Painel> {
       };
     }),
   };
+}
+
+/** Opções dos diálogos: fases abertas de Vendas (criar card) e usuários ativos (vincular remetente). */
+export async function opcoesDoPainel(): Promise<{ fases: { id: string; nome: string }[]; usuarios: { id: string; nome: string }[] }> {
+  const [fases, usuarios] = await Promise.all([
+    db.fase.findMany({
+      where: { pipeline: { chave: PIPELINE_VENDAS }, arquivadaEm: null, isTerminal: false },
+      orderBy: [{ ordem: "asc" }, { criadoEm: "asc" }],
+      select: { id: true, nome: true },
+    }),
+    db.usuario.findMany({ where: { ativo: true }, orderBy: { nome: "asc" }, select: { id: true, nome: true } }),
+  ]);
+  return { fases, usuarios };
 }
 
 /** Autocomplete do "vincular a card existente": cards vivos por título. */
