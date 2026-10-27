@@ -7,7 +7,8 @@
 # travada (> 5 min), FALHA com < 3 tentativas ou sem crédito (mantendo `erro`,
 # que marca a resposta como "Reprocessada"), no máximo 20 por execução; apaga o
 # JSON da LLM com mais de 90 dias, prévias de import vencidas e sessões
-# expiradas; apaga sem-#crm não confirmadas com mais de 30 dias. Uma execução
+# expiradas; apaga sem-#crm não confirmadas com mais de 30 dias; gera/limpa os
+# resumos do contexto de 12 h (GAB-49). Uma execução
 # por vez (trava por aluguel em trava_cron, 9 min): se a anterior ainda roda,
 # responde 200 sem fazer nada. 500 = algum passo falhou (ref no log do app).
 # O segredo vai pelo stdin do curl (`-H @-`), não pela linha de comando: não

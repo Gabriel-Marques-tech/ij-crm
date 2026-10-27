@@ -369,10 +369,11 @@ Passos (`src/lib/cron/manutencao.ts`, cada um isolado, erro ⇒ ref + HTTP 500):
    **Sem #crm não confirmada, 30 dias**: `sem_tag` em `FALHA`/`PENDENTE_REVISAO` com mais de 30 dias é
    apagada inteira (linha e texto) — conversa do grupo que ninguém validou como venda.
 2. Prévias de import vencidas (`purgarVencidas`, GAB-37) e sessões expiradas.
-3. Resumos do contexto de 12 h (GAB-49): **TODO** — gancho marcado em `manutencao.ts`, entra quando o
-   GAB-49 estiver na main.
+3. Contexto de 12 h (GAB-49): `aplicarRetencaoResumos()` (apaga resumos de janelas antigas) e
+   `gerarResumosPendentes(agora, { prazoMs: 60 s })` (resumo da janela fechada de cada vendedor), cada um
+   isolado, só contagens (`resumosApagados`, `resumos.gerados`). Rodam antes do reprocessamento.
 4. **Reprocessamento** (`retomarPendentes`), no máximo 20 por execução, mais antigas primeiro, nada novo
-   depois de 4 min: `RECEBIDA` parada > 2 min (órfã); `PROCESSANDO` > 5 min volta a `RECEBIDA` (nunca
+   depois de 4 min contados do início da execução: `RECEBIDA` parada > 2 min (órfã); `PROCESSANDO` > 5 min volta a `RECEBIDA` (nunca
    antes); travada/órfã que já tem 3+ tentativas vai para `FALHA` `TENTATIVAS_ESGOTADAS ref=…` (sem laço); `FALHA` com < 3 tentativas; `FALHA` por sem crédito (`aplicacao.codigo = LLM_SEM_CREDITO`)
    sempre — mas a execução **para no 1º sem crédito de novo** (1 chamada por execução enquanto não
    recarregar). Banco/config fora (`ERRO`) também interrompe e a ref entra em `erros` (HTTP 500).

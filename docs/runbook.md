@@ -334,7 +334,8 @@ A rota (GAB-41, `src/app/api/cron/reprocessar/route.ts`):
 - uma execução por vez (trava por aluguel de linha em `trava_cron`, 9 min, sem
   segurar conexão do banco): se a anterior ainda roda, `200 {"ok":true,"emAndamento":true}`
   sem fazer nada. Se o app morrer no meio, a trava vence sozinha em 9 min;
-- passos extras: mensagens **sem #crm** não confirmadas (`FALHA`/`PENDENTE_REVISAO`)
+- passos extras: resumos do contexto de 12 h (GAB-49: gera os da janela fechada,
+  teto de 60 s, e apaga os antigos); mensagens **sem #crm** não confirmadas (`FALHA`/`PENDENTE_REVISAO`)
   com mais de 30 dias são apagadas; travadas que já gastaram 3 tentativas viram
   `FALHA` `TENTATIVAS_ESGOTADAS` (aparecem em Gestão → WhatsApp);
 - passos: retenção de 90 dias do JSON da LLM, prévias de import vencidas,

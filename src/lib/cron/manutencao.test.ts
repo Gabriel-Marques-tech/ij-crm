@@ -9,6 +9,8 @@ const m = vi.hoisted(() => ({
   apagarSemTagNaoConfirmadas: vi.fn(),
   purgarVencidas: vi.fn(),
   apagarSessoesExpiradas: vi.fn(),
+  gerarResumosPendentes: vi.fn(),
+  aplicarRetencaoResumos: vi.fn(),
 }));
 
 vi.mock("./trava", () => ({ pegarTrava: m.pegarTrava, soltarTrava: m.soltarTrava }));
@@ -17,8 +19,9 @@ vi.mock("@/lib/whatsapp/retencao", () => ({ apagarJsonLlmVencido: m.apagarJsonLl
 vi.mock("@/lib/importacao/pipefy/servico", () => ({ purgarVencidas: m.purgarVencidas }));
 vi.mock("@/lib/auth/sessao", () => ({ apagarSessoesExpiradas: m.apagarSessoesExpiradas }));
 vi.mock("@/lib/db", () => ({ db: {} }));
+vi.mock("@/lib/contexto/resumo", () => ({ gerarResumosPendentes: m.gerarResumosPendentes, aplicarRetencaoResumos: m.aplicarRetencaoResumos }));
 
-const { rodarManutencao, DURACAO_TRAVA_MS } = await import("./manutencao");
+const { rodarManutencao, DURACAO_TRAVA_MS, PRAZO_RESUMOS_MS } = await import("./manutencao");
 
 const RETOMADA = { esgotadas: 0, destravadas: 0, tentadas: 1, processadas: 0, pendentes: 0, descartadas: 0, falhas: 0, ignoradas: 0, erros: 0, interrompida: false, refs: [] as string[] };
 
@@ -31,6 +34,8 @@ beforeEach(() => {
   m.apagarSemTagNaoConfirmadas.mockResolvedValue(3);
   m.purgarVencidas.mockResolvedValue(0);
   m.apagarSessoesExpiradas.mockResolvedValue(0);
+  m.gerarResumosPendentes.mockResolvedValue({ gerados: 2, interrompido: false });
+  m.aplicarRetencaoResumos.mockResolvedValue(5);
 });
 
 describe("rodarManutencao", () => {
@@ -64,5 +69,31 @@ describe("rodarManutencao", () => {
     expect(r.resumo.erros).toHaveLength(1);
     expect(m.retomarPendentes).toHaveBeenCalled();
     expect(m.soltarTrava).toHaveBeenCalledTimes(1);
+  });
+
+  it("GAB-49: resumos das janelas fechadas e retenção dos resumos, só contagens; prazo dentro dos 4 min", async () => {
+    const r = await rodarManutencao();
+    if (r.tipo !== "OK") throw new Error();
+    expect(r.resumo.resumos).toEqual({ gerados: 2, interrompido: false });
+    expect(r.resumo.resumosApagados).toBe(5);
+    const [agora, opts] = m.gerarResumosPendentes.mock.calls[0] as [Date, { prazoMs: number }];
+    expect(agora).toBeInstanceOf(Date);
+    expect(opts.prazoMs).toBe(PRAZO_RESUMOS_MS);
+    expect(PRAZO_RESUMOS_MS).toBeLessThanOrEqual(90_000);
+    // Resumos antes do reprocessamento (o contexto das reprocessadas já vê o resumo),
+    // e o reprocessamento recebe o prazo global (início + 4 min), não um novo.
+    expect(m.gerarResumosPendentes.mock.invocationCallOrder[0]).toBeLessThan(m.retomarPendentes.mock.invocationCallOrder[0]);
+    const prazo = (m.retomarPendentes.mock.calls[0][0] as { prazo: Date }).prazo;
+    expect(prazo.getTime() - Date.now()).toBeLessThanOrEqual(240_000);
+  });
+
+  it("falha nos resumos não derruba o resto", async () => {
+    m.gerarResumosPendentes.mockRejectedValue(new Error("x"));
+    m.aplicarRetencaoResumos.mockRejectedValue(new Error("y"));
+    const r = await rodarManutencao();
+    if (r.tipo !== "OK") throw new Error();
+    expect(r.resumo).toMatchObject({ resumos: null, resumosApagados: null });
+    expect(r.resumo.erros).toHaveLength(2);
+    expect(m.retomarPendentes).toHaveBeenCalled();
   });
 });
