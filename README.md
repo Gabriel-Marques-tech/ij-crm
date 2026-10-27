@@ -48,6 +48,63 @@ vale 7 dias, e quem abre define a própria senha. Papéis: `VENDEDOR` (opera),
 `GESTOR` (+ usuários, fases, import), `ADMIN` (+ config técnica). Sessões vivem no
 banco (`sessao`): desativar alguém derruba o acesso na hora.
 
+## Como funciona a conexão com o WhatsApp
+
+Visão geral para quem vai ligar o WhatsApp em produção. Os comandos e detalhes
+técnicos estão na seção seguinte e no [runbook §5](docs/runbook.md#5-ler-o-qr-da-evolution-criarreconectar-a-instância).
+
+**A ideia:** a IJ tem um **número dedicado** (chip próprio, não o celular de alguém)
+que entra no **grupo de vendas** como um participante comum. O CRM "lê" o grupo
+por esse número. Não usa a API oficial do WhatsApp Business: é o mesmo pareamento
+do WhatsApp Web ("Dispositivos conectados"), feito pela **Evolution API**, que roda
+na nossa própria máquina da AWS.
+
+```
+celular do número da IJ ──(QR, uma vez)──► Evolution API (na VPS, sem porta pública)
+                                                │  cada mensagem nova do grupo
+                                                ▼
+                         webhook interno ──► app ij-crm ──► LLM ──► card no Kanban
+                                                │
+                     confirmação no grupo ◄─────┘ (só com NOTIFICATIONS_ENABLED=true)
+```
+
+1. **Pareamento (uma vez):** em **Gestão → Admin → "Mostrar QR"**, escaneie com o
+   celular do número: WhatsApp → Dispositivos conectados → Conectar dispositivo.
+   A sessão fica salva na Evolution; o celular pode ficar guardado, mas precisa
+   abrir o WhatsApp de vez em quando (o WhatsApp derruba aparelhos conectados se o
+   principal ficar ~14 dias sem internet).
+2. **Grupo:** adicione o número ao grupo de vendas. Em **Gestão → Admin → "Listar
+   grupos"**, escolha o grupo e salve. O CRM só olha esse grupo; o resto é ignorado.
+3. **Quem é quem:** o CRM reconhece o remetente pelo telefone cadastrado em
+   **Gestão → Usuários** (ou em **Meu perfil**). Mensagem de número não cadastrado
+   é contada e descartada, sem guardar o texto.
+4. **Webhook:** a Evolution avisa o app a cada mensagem nova, por rede interna do
+   Docker e com segredo (`scripts/evolution.sh webhook`, uma vez).
+5. **O que acontece com cada mensagem:**
+   - com `#crm` → a LLM cria ou atualiza o card ([#crm → card](#crm--card-llm));
+   - sem `#crm` → um classificador decide se é registro de venda; se for, segue o
+     mesmo fluxo com régua mais alta, e o que ficar em dúvida vai para a fila de
+     revisão em **Gestão → WhatsApp**, sem responder no grupo
+     ([Mensagens sem #crm](#mensagens-sem-crm-classificador-gab-39));
+   - figurinha, emoji solto ou remetente não cadastrado → descartada, sem LLM.
+6. **Resposta no grupo:** o bot só escreve no grupo (confirmação do card) com
+   `NOTIFICATIONS_ENABLED=true`. Sem isso é o **safe mode**: lê, processa e cria
+   cards, mas fica calado (aparece só no log). Ligar por último, depois de testar.
+
+**Sem o número ainda?** O CRM funciona inteiro sem WhatsApp: Kanban, cards,
+prazos, Calendário, Minha Semana, Contatos, Empresas, Tabela, Ranking e Gestão.
+O time lança e atualiza os cards à mão. Quando o número chegar, são só os passos
+1, 2, 4 e 6 acima; nada precisa ser refeito. Para testar antes, dá para parear um
+número pessoal/chip de teste no ambiente de dev (safe mode, nada é enviado).
+
+**Trocar de número** depois: `scripts/evolution.sh logout` + parear o novo
+([runbook §4](docs/runbook.md#4-trocar-o-número-do-bot)). O CRM guarda o grupo,
+não o número, então os cards e o histórico continuam.
+
+**Privacidade (LGPD):** a partir do webhook, o texto das mensagens do grupo vai
+para o provedor de LLM, mesmo em safe mode. Publique o aviso de privacidade da IJ
+**antes** de ligar o webhook ([runbook §10](docs/runbook.md#10-provedor-de-llm-e-crédito-da-openai--gemini)).
+
 ## WhatsApp (Evolution API)
 
 A Evolution API v2 (`evolution` + `evolution-db` + `evolution-redis`, em `127.0.0.1:8080`)
