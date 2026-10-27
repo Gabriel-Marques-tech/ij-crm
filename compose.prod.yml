@@ -13,7 +13,7 @@
 #
 # Memória (máquina pequena, ≤ 15 usuários): todo serviço tem `mem_limit` e os
 # processos são dimensionados para caber nele (heap do Node, buffers do Postgres,
-# maxmemory do Redis). Valores por variável com padrão para uma VPS de ~2 GB;
+# GOMEMLIMIT do Caddy). Valores por variável com padrão para uma VPS de ~2 GB;
 # medição e instância mínima no runbook §11. Para mudar, defina no .env.
 #
 # Redes (alcance mínimo; `internal` = sem saída para a internet):
@@ -145,7 +145,11 @@ services:
       - -c
       - shared_buffers=${DB_SHARED_BUFFERS:-64MB}
       - -c
-      - max_connections=${DB_MAX_CONNECTIONS:-20}
+      # 15 = 3 reservadas do superusuário + 12 normais: pool do app (5) + migrate
+      # (pool 5, usa 1–2; só no deploy, com o app antigo no ar) + pg_dump/psql do
+      # backup (1–2). Cada conexão custa ~5–10 MB fora do shared_buffers:
+      # 64 MB + 15 × ~8 MB ≈ 185 MB, cabe nos 256m. Pool maior → suba os dois.
+      - max_connections=${DB_MAX_CONNECTIONS:-15}
       - -c
       - work_mem=${DB_WORK_MEM:-4MB}
       - -c
@@ -233,8 +237,11 @@ services:
       LOG_COLOR: "false"
       # Heap do V8 abaixo do mem_limit (o boot roda `prisma migrate` + `generate` antes da API).
       NODE_OPTIONS: --max-old-space-size=${EVOLUTION_HEAP_MB:-256}
-      # Integrações que o CRM não usa, desligadas explicitamente (v2.3.7: todas
-      # `=== "true"`, exceto a telemetria, que é LIGADA por padrão e manda dados para fora).
+      # Integrações que o CRM não usa, desligadas explicitamente. Nomes conferidos
+      # no dist/main.js da imagem v2.3.7: todas são `=== "true"` (desligadas por
+      # padrão), exceto a telemetria, LIGADA por padrão e que manda dados para fora.
+      # PROVIDER = servidor externo de auth-state; com false as credenciais do
+      # Baileys seguem no Redis/banco como hoje (não desliga o canal WhatsApp).
       TELEMETRY_ENABLED: "false"
       PROMETHEUS_METRICS: "false"
       CHATWOOT_ENABLED: "false"
@@ -304,17 +311,14 @@ services:
     logging: *logging
     mem_limit: ${REDIS_MEM_LIMIT:-96m}
     # AOF: guarda as chaves Signal do Baileys (ver comentário da `evolution`).
-    # maxmemory + noeviction: perto do teto o Redis RECUSA escrita em vez de
-    # apagar chaves — despejar (LRU) apagaria chaves Signal e quebraria a sessão
-    # do WhatsApp em silêncio. Os dados reais cabem em poucos MB.
+    # Sem `maxmemory`: com teto + noeviction o Redis passaria a recusar escrita
+    # (a Evolution quebraria do mesmo jeito), e com LRU apagaria chaves Signal e
+    # derrubaria a sessão do WhatsApp em silêncio. Os dados reais cabem em poucos
+    # MB; o mem_limit só segura um vazamento. Conferir `docker stats` (runbook §11).
     command:
       - redis-server
       - --appendonly
       - "yes"
-      - --maxmemory
-      - ${REDIS_MAXMEMORY:-64mb}
-      - --maxmemory-policy
-      - noeviction
       - --requirepass
       - ${EVOLUTION_REDIS_PASSWORD:?defina EVOLUTION_REDIS_PASSWORD no .env}
     environment:

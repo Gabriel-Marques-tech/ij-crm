@@ -440,23 +440,26 @@ mencionar essa transferência ao provedor de LLM — decisão jurídica do usuá
 
 Alvo: ≤ 15 usuários, numa instância pequena que também roda o site da IJ. Todo
 serviço do `compose.prod.yml` tem `mem_limit`, e o processo dentro dele é
-dimensionado para caber (heap do Node, buffers do Postgres, `maxmemory` do
-Redis, `GOMEMLIMIT` do Caddy). Os valores são variáveis com padrão para uma
+dimensionado para caber (heap do Node, buffers e conexões do Postgres,
+`GOMEMLIMIT` do Caddy). Os valores são variáveis com padrão para uma
 VPS de ~2 GB (lista comentada no `.env.prod.example`).
 
 | Serviço | Limite | Ajustes |
 |---|---|---|
 | `app` | 512m | `--max-old-space-size=256`, pool Prisma 5 conexões |
-| `db` | 256m | `shared_buffers=64MB`, `max_connections=20`, `work_mem=4MB`, `effective_cache_size=256MB`, sem workers paralelos |
+| `db` | 256m | `shared_buffers=64MB`, `max_connections=15` (app 5 + migrate + backup + 3 reservadas), `work_mem=4MB`, `effective_cache_size=256MB`, sem workers paralelos |
 | `evolution` | 512m | heap 256 MB, pool Prisma 5, integrações e telemetria desligadas, log `ERROR,WARN` |
 | `evolution-db` | 192m | `shared_buffers=32MB`, `max_connections=20`, `work_mem=2MB` |
-| `evolution-redis` | 96m | `maxmemory 64mb`, `noeviction` (despejar apagaria chaves Signal da sessão) |
+| `evolution-redis` | 96m | AOF, sem `maxmemory`: teto com `noeviction` recusaria escrita e com LRU apagaria chaves Signal da sessão; o `mem_limit` só segura vazamento |
 | `caddy` | 128m | `GOMEMLIMIT=96MiB` |
 | `migrate` (one-shot) | 512m | herda o ambiente do app |
 
 Soma dos limites: ~1,7 GB (teto, não consumo). Consumo real abaixo.
 
 ### Medição (2026-10-26)
+
+Medido com a 1ª versão dos limites (`max_connections=20`, Redis com `maxmemory
+64mb`); nenhum dos dois chegou perto: `db` ≤ 35 MiB e Redis ≤ 8 MiB.
 
 Stack de produção local (§8, projeto `ijcrm-medicao`), seed + 15 usuários e 300
 oportunidades, sessão válida. Carga: 15 clientes em paralelo, 4 voltas por
@@ -488,8 +491,11 @@ heap. Com o limite, o pico do boot medido foi 162 MiB, sem OOM.
 - Healthchecks de todos os serviços passaram com os limites; `OOMKilled=false`
   e 0 restarts em tudo.
 - Não medido: Evolution com um número **pareado** (sessão real, metadados de
-  grupo). Por isso o limite dela ficou em 512m, folgado. Confira `docker stats`
-  na primeira semana.
+  grupo). Por isso o limite dela ficou em 512m, folgado.
+- **Primeira semana em produção:** confira `docker stats --no-stream` da
+  `evolution` e do `evolution-redis` (sessão pareada; chaves Signal e metadados
+  de grupo crescem com o uso). Redis perto de 96m = suba `REDIS_MEM_LIMIT` antes
+  de virar OOM-kill (o AOF recupera os dados, mas a Evolution perde a conexão).
 
 Imagens (disco):
 
