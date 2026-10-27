@@ -36,6 +36,7 @@ import { modeloDoProvedorConfigurado, limiarConfianca } from "@/lib/config/env";
 import { encontrarContatoPorIdentificador, encontrarEmpresa } from "@/lib/contatos/match";
 import { db } from "@/lib/db";
 import { registrarErro } from "@/lib/erros/registrar";
+import { alertarSeSemCredito, marcarCreditoOk } from "@/lib/llm/alerta-credito";
 import { ErroLlm, extrairAtualizacao, type ContextoExtracao, type ResultadoExtracao } from "@/lib/llm/extracao";
 import type { ContatoCandidato, EmpresaCandidata } from "@/lib/llm/prompts/extracao.v2";
 import { VERSAO_EXTRACAO } from "@/lib/llm/prompts/extracao.v2";
@@ -229,6 +230,7 @@ async function falhar(
   if (count === 0) return { tipo: "IGNORADA" };
   const confirmacao = textoFalha(ref);
   await responder(m, confirmacao, null, participantJid);
+  await alertarSeSemCredito(e, ref); // GAB-46: avisa ops se for SEM_CREDITO; nunca lança
   return { tipo: "FALHA", ref, codigo, confirmacao };
 }
 
@@ -269,6 +271,7 @@ async function processar(id: string, opts: { participantJid?: string | null }): 
     return falhar(m, tentativa, e, registroLlm(null, e instanceof ErroLlm ? e.bruto : undefined, e instanceof ErroLlm ? e.uso : undefined), opts.participantJid);
   }
   const llm = registroLlm(r);
+  await marcarCreditoOk(); // GAB-46: LLM respondeu → some o banner de sem crédito; nunca lança
 
   let desfecho: Desfecho;
   try {
