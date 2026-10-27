@@ -19,6 +19,7 @@ export function proxy(req: NextRequest) {
   return NextResponse.redirect(url);
 }
 
+// Ícones (src/app/icon.png, apple-icon.png) e a marca em public/images/ aparecem no login, sem sessão.
 export const config = {
-  matcher: ["/((?!_next/static/|_next/image|favicon.ico$|images/).*)"],
+  matcher: ["/((?!_next/static/|_next/image|favicon.ico$|icon.png$|apple-icon.png$|images/).*)"],
 };

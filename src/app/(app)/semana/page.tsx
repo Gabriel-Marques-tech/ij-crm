@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Avatar } from "@/components/avatar";
 import { ErroCarregamento } from "@/components/erro-carregamento";
+import { EstadoVazio } from "@/components/estado-vazio";
 import { PageHeader } from "@/components/shell/page-header";
 import { db } from "@/lib/db";
 import { exigirUsuario } from "@/lib/auth/atual";
@@ -76,19 +77,19 @@ export default async function MinhaSemanaPage({ searchParams }: { searchParams: 
           {s.destaque && s.destaqueFaixa ? (
             <Destaque c={s.destaque} faixa={s.destaqueFaixa} agora={agora} hoje={hoje} />
           ) : (
-            <section className="rounded-xl border border-border bg-surface p-5 md:p-6">
-              <p className="eyebrow mb-3 flex items-center gap-2">
-                <span aria-hidden className="size-1.5 rounded-full bg-success" />
-                tudo em dia
-              </p>
-              <p className="text-2xl font-semibold tracking-tight">Nada vencido, nada para hoje.</p>
-              <p className="mt-2 text-sm text-fg-mute">
-                {nada
-                  ? proprio
-                    ? "Você não tem cards abertos agora. Crie um no Kanban quando surgir um lead."
-                    : `${primeiroNome} não tem cards abertos agora.`
-                  : "Nenhuma próxima ação nos próximos 7 dias. Bom momento para revisar os cards sem próxima ação abaixo."}
-              </p>
+            <section className="rounded-xl border border-border bg-surface">
+              <EstadoVazio
+                mascote="relax"
+                titulo="Tudo em dia por aqui"
+                className="py-8"
+                texto={
+                  nada
+                    ? proprio
+                      ? "Nada vencido, nada para hoje. Você não tem cards abertos agora: crie um no Kanban quando surgir um lead."
+                      : `Nada vencido, nada para hoje. ${primeiroNome} não tem cards abertos agora.`
+                    : "Nada vencido, nada para hoje, nem nos próximos 7 dias. Bom momento para revisar os cards sem próxima ação abaixo."
+                }
+              />
             </section>
           )}
 

@@ -43,3 +43,15 @@ describe("proxy", () => {
     expect(proxy(comCookie).status).toBe(200);
   });
 });
+
+describe("proxy: matcher", () => {
+  it("não intercepta ícones nem a marca (login sem sessão precisa deles)", async () => {
+    const { unstable_doesMiddlewareMatch } = await import("next/experimental/testing/server");
+    const { config } = await import("./proxy");
+    const casa = (url: string) => unstable_doesMiddlewareMatch({ config, url });
+    expect(casa("/icon.png")).toBe(false);
+    expect(casa("/apple-icon.png")).toBe(false);
+    expect(casa("/images/marca/mascote-em-pe.webp")).toBe(false);
+    expect(casa("/kanban")).toBe(true);
+  });
+});
