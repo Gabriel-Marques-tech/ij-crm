@@ -16,6 +16,8 @@ const SEMANA = ["SEG", "TER", "QUA", "QUI", "SEX", "SÁB", "DOM"];
 
 /** Itens por célula antes do "+N" (prazos primeiro, depois ações). */
 export const MAX_POR_DIA = 3;
+/** Pontinhos por célula no celular antes do "+N". */
+export const MAX_PONTOS = 6;
 
 /**
  * Grade mensal (mês e 15 dias): semanas em linhas, seg–dom em colunas. Dias
@@ -43,7 +45,12 @@ export function GradeMes({
 }) {
   const { novo, abrir } = useEditorPrazo();
   const [abertos, setAbertos] = useState<ReadonlySet<string>>(new Set());
-  const expandir = (dia: string) => setAbertos((s) => new Set(s).add(dia));
+  const alternar = (dia: string) =>
+    setAbertos((s) => {
+      const n = new Set(s);
+      if (!n.delete(dia)) n.add(dia);
+      return n;
+    });
 
   return (
     <div data-testid="grade-mes" className="overflow-hidden rounded-xl border border-border bg-surface">
@@ -60,10 +67,16 @@ export function GradeMes({
           const ehHoje = dia === hoje;
           const dentro = inicio <= dia && dia <= fim;
           const total = prazos.length + acoes.length;
-          const limite = abertos.has(dia) ? Infinity : total > MAX_POR_DIA ? MAX_POR_DIA - 1 : MAX_POR_DIA;
+          const aberto = abertos.has(dia);
+          const limite = aberto ? Infinity : total > MAX_POR_DIA ? MAX_POR_DIA - 1 : MAX_POR_DIA;
           const prazosVis = prazos.slice(0, limite);
           const acoesVis = acoes.slice(0, Math.max(0, limite - prazosVis.length));
           const resto = total - prazosVis.length - acoesVis.length;
+          const pontos = [
+            ...prazos.map((p) => ({ k: `p-${p.id}`, cls: cn("rounded-[1px]", p.estado === "vencido" ? "bg-primary" : p.estado === "feito" ? "bg-fg-faint" : "bg-fg-soft") })),
+            ...acoes.map((a) => ({ k: `a-${a.cardId}`, cls: cn("rounded-full", a.vencida ? COR_ACAO_VENCIDA : COR_ACAO) })),
+          ];
+          const pontosVis = pontos.length > MAX_PONTOS ? pontos.slice(0, MAX_PONTOS - 1) : pontos;
           return (
             <section
               key={dia}
@@ -102,13 +115,15 @@ export function GradeMes({
 
               {/* Celular: pontinhos que levam ao dia na agenda. */}
               {total > 0 ? (
-                <a href={`#agenda-${dia}`} aria-label={`${total} ${total === 1 ? "item" : "itens"} em ${r.ddmm}`} className="flex flex-wrap gap-0.5 px-0.5 md:hidden">
-                  {prazos.map((p) => (
-                    <span key={p.id} aria-hidden className={cn("size-1.5 rounded-[1px]", p.estado === "vencido" ? "bg-primary" : p.estado === "feito" ? "bg-fg-faint" : "bg-fg-soft")} />
+                <a href={`#agenda-${dia}`} aria-label={`${total} ${total === 1 ? "item" : "itens"} em ${r.ddmm}`} className="flex flex-wrap items-center gap-0.5 px-0.5 md:hidden">
+                  {pontosVis.map((d) => (
+                    <span key={d.k} data-ponto aria-hidden className={cn("size-1.5", d.cls)} />
                   ))}
-                  {acoes.map((a) => (
-                    <span key={a.cardId} aria-hidden className={cn("size-1.5 rounded-full", a.vencida ? COR_ACAO_VENCIDA : COR_ACAO)} />
-                  ))}
+                  {pontos.length > pontosVis.length ? (
+                    <span aria-hidden className="font-mono text-[9px] leading-none text-fg-mute">
+                      +{pontos.length - pontosVis.length}
+                    </span>
+                  ) : null}
                 </a>
               ) : null}
 
@@ -148,13 +163,15 @@ export function GradeMes({
                     {mostrarResponsavel ? <Avatar nome={a.responsavel.nome} usuarioId={a.responsavel.id} fotoEm={a.responsavel.fotoEm} className="size-4 text-[8px]" /> : null}
                   </Link>
                 ))}
-                {resto > 0 ? (
+                {total > MAX_POR_DIA ? (
                   <button
                     type="button"
-                    onClick={() => expandir(dia)}
+                    onClick={() => alternar(dia)}
+                    aria-expanded={aberto}
+                    aria-label={aberto ? `Recolher ${r.ddmm}` : `Mostrar mais ${resto} ${resto === 1 ? "item" : "itens"} em ${r.ddmm}`}
                     className="rounded px-1 py-0.5 text-left font-mono text-[10px] text-fg-mute outline-none hover:bg-surface-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
                   >
-                    +{resto} {resto === 1 ? "item" : "itens"}
+                    {aberto ? "Recolher" : `+${resto} ${resto === 1 ? "item" : "itens"}`}
                   </button>
                 ) : null}
                 {dentro ? (

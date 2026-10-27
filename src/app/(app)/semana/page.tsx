@@ -70,11 +70,11 @@ export default async function MinhaSemanaPage({ searchParams }: { searchParams: 
   if (ehInesperado(dados)) return <ErroCarregamento codigo={dados.ref} />;
   const ranking = await top3;
   const { escolha, s, cards, itens, foto, responsaveis } = dados;
-  // O destaque (Mais urgente) também aparece na grade, marcado como urgente.
-  const { dias, proxima } = dividirSemana(semana, itens);
+  // O destaque (Mais urgente) também aparece na grade, marcado como urgente; não se repete na "Próxima semana".
+  const { dias, proxima } = dividirSemana(semana, itens, s.destaque?.id ?? null);
   // Vencidas de antes desta semana não cabem nas colunas: seguem em lista (com "marcar feita").
   const vencidasAntes = s.vencidas.filter((c) => diaEmFuso(c.proximaAcaoEm!) < semana.segunda);
-  const depois = cards.filter((c) => c.proximaAcaoEm && diaEmFuso(c.proximaAcaoEm) > ate).length;
+  const depois = cards.filter((c) => c.proximaAcaoEm && diaEmFuso(c.proximaAcaoEm) > ate && c.id !== s.destaque?.id).length;
   const proprio = escolha.alvo.id === ator.id;
   const primeiroNome = escolha.alvo.nome.split(" ")[0];
   const nada = s.destaque === null && s.sem.length === 0;

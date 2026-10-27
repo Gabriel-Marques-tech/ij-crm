@@ -53,9 +53,27 @@ describe("GradeMes", () => {
     const c = celula(dia);
     expect(within(c).getByRole("button", { name: /Prazo p/ })).toBeInTheDocument();
     expect(within(c).getAllByRole("link", { name: /^Ação/ })).toHaveLength(1);
-    fireEvent.click(within(c).getByRole("button", { name: "+2 itens" }));
+    const botao = within(c).getByRole("button", { name: "Mostrar mais 2 itens em 29/10" });
+    expect(botao).toHaveTextContent("+2 itens");
+    expect(botao).toHaveAttribute("aria-expanded", "false");
+    botao.focus();
+    fireEvent.click(botao);
     expect(within(c).getAllByRole("link", { name: /^Ação/ })).toHaveLength(3);
-    expect(within(c).queryByRole("button", { name: /^\+/ })).toBeNull();
+    // O mesmo botão continua montado (o foco não cai no body) e vira "Recolher".
+    expect(botao).toBeInTheDocument();
+    expect(botao).toHaveFocus();
+    expect(botao).toHaveAttribute("aria-expanded", "true");
+    expect(botao).toHaveTextContent("Recolher");
+    fireEvent.click(botao);
+    expect(within(c).getAllByRole("link", { name: /^Ação/ })).toHaveLength(1);
+  });
+
+  it("celular: no máximo 6 pontinhos por dia, o resto vira '+N'", () => {
+    const dia = "2026-10-15";
+    montar(Array.from({ length: 9 }, (_, i) => acao(`x${i}`, dia)), []);
+    const pontos = within(celula(dia)).getByRole("link", { name: "9 itens em 15/10" });
+    expect(pontos.querySelectorAll("[data-ponto]")).toHaveLength(5);
+    expect(pontos).toHaveTextContent("+4");
   });
 
   it("ação liga ao card; vencida em coral", () => {
