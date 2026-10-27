@@ -93,7 +93,7 @@ function carregar(id: string) {
 }
 
 /** Contexto do passo 6: remetente, msg respondida, fases de vendas, candidatos por identificador exato. */
-export async function montarContexto(m: Pick<Bruta, "texto" | "recebidaEm" | "respondendoEventoId" | "remetenteUsuario">): Promise<ContextoExtracao> {
+export async function montarContexto(m: Pick<Bruta, "texto" | "recebidaEm" | "respondendoEventoId" | "remetenteUsuario"> & { semTag?: boolean }): Promise<ContextoExtracao> {
   let respondendoA: string | null = null;
   if (m.respondendoEventoId) {
     const anterior =
@@ -128,6 +128,7 @@ export async function montarContexto(m: Pick<Bruta, "texto" | "recebidaEm" | "re
     fases: fases.map((f) => ({ chave: f.chave, nome: f.nome, terminal: f.isTerminal })),
     contatos,
     empresas,
+    semTag: m.semTag ?? false,
   };
 }
 

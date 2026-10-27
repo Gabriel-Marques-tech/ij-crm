@@ -141,6 +141,8 @@ export type ContextoExtracao = {
   fases: FaseContexto[];
   contatos: ContatoCandidato[];
   empresas: EmpresaCandidata[];
+  /** GAB-39: veio sem `#crm` (o classificador achou que pode ser venda). */
+  semTag?: boolean;
 };
 
 const DATA_SP = new Intl.DateTimeFormat("pt-BR", {
@@ -174,6 +176,10 @@ export function montarMensagemUsuario(textoMensagem: string, ctx: ContextoExtrac
     linhas.push("<respondendo_a>");
     linhas.push(escaparDelimitadores(ctx.respondendoA));
     linhas.push("</respondendo_a>");
+    linhas.push("");
+  }
+  if (ctx.semTag) {
+    linhas.push("Atenção: mensagem sem #crm, já pré-classificada como possivelmente sobre vendas; responda IGNORAR se não for registro de venda.");
     linhas.push("");
   }
   linhas.push("<mensagem>");
