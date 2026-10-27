@@ -92,16 +92,20 @@ checar_arvore() {
   fi
 }
 
+# Até HEALTH_TENTATIVAS × 3 s (padrão 20 = 60 s): no 1º deploy o Caddy ainda
+# está emitindo o certificado do Let's Encrypt quando o `up --wait` termina.
 verificar_health() {
+  local i tentativas="${HEALTH_TENTATIVAS:-20}"
+  [[ "$tentativas" =~ ^[1-9][0-9]*$ ]] || falhar "HEALTH_TENTATIVAS inválido: $tentativas"
   log "health pelo Caddy: /api/health"
-  local i
-  for i in 1 2 3 4 5 6 7 8 9 10; do
+  for ((i = 1; i <= tentativas; i++)); do
     if curl_app /api/health -f -o /dev/null; then
       log "health 200"
       return 0
     fi
     sleep 3
   done
+  log "health sem 200 em $((tentativas * 3))s. Se for TLS: DNS de APP_DOMAIN aponta para este host e as portas 80/443 estão abertas? (dc logs caddy)" >&2
   return 1
 }
 
@@ -298,6 +302,8 @@ deploy() {
     else
       log "ERRO: rollback automático para $anterior também falhou — intervenção manual (runbook §2)" >&2
     fi
+  elif [[ "$anterior" == "$APP_TAG" ]]; then
+    log "o bom atual já é $APP_TAG: nada para voltar (o problema é config/infra, não a imagem)" >&2
   else
     log "sem deploy bom anterior para voltar automaticamente" >&2
   fi

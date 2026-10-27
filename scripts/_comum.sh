@@ -25,7 +25,7 @@ _AMBIENTE_COMPOSE=""
 _AMBIENTE_CARREGADO=0
 carregar_ambiente() {
   _AMBIENTE_COMPOSE="$("${COMPOSE[@]}" config --environment)" \
-    || falhar "docker compose config falhou (variável obrigatória ausente no .env?)"
+    || falhar "docker compose config falhou (variável obrigatória ausente no .env? plugin compose v2 ausente ou antigo? runbook §0)"
   _AMBIENTE_CARREGADO=1
 }
 ler_env() {

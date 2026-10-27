@@ -1,7 +1,7 @@
 # Produção (GAB-30) — VPS Linux, docker compose puro (design §4.1).
 #
 #   cp .env.prod.example .env    # e preencha (ver comentários lá)
-#   scripts/deploy.sh            # checa → build → backup → migrations (one-shot) → up -d → health
+#   scripts/deploy.sh            # checa → git pull → docker pull (GHCR) → backup → migrations (one-shot) → up -d → health
 #
 # Migrations NÃO rodam no boot do app: são o serviço one-shot `migrate`
 # (perfil `ops`), chamado pelo deploy.sh antes de subir a imagem nova.

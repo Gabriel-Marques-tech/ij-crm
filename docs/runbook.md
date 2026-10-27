@@ -5,6 +5,49 @@ públicas: 80/443, só o app), `app`, `db` (Postgres 16), `evolution` +
 `evolution-db` + `evolution-redis` (sem rota pública: porta só em `127.0.0.1`
 da VPS) e o one-shot `migrate` (perfil `ops`). Repo em `/opt/ij-crm`.
 
+## Checklist de go-live (AWS)
+
+Do zero ao ar, em ordem. Cada passo aponta para a seção com os comandos
+(`dc` = alias definido logo abaixo; tudo roda em `/opt/ij-crm`).
+
+1. **Instância**: EC2 `t3.small` (x86_64, 2 GiB), Ubuntu 24.04 LTS, disco gp3 de
+   20–30 GiB e **2 GiB de swap** em arquivo ([§11](#11-recursos-limites-medição-e-instância-mínima)).
+   IP elástico. Security group: 22 só do seu IP; 80 e 443 TCP abertos (443 UDP opcional,
+   HTTP/3). **Não** abra 8080 nem 3000.
+2. **Docker Engine + plugin compose v2** e o usuário no grupo `docker`
+   ([§0, "Docker na VPS"](#docker-na-vps)).
+3. **Clonar em `/opt/ij-crm`** e criar `/var/backups/ij-crm` e `/var/log/ij-crm`
+   ([§0](#0-primeira-instalação-vps-limpa)).
+4. **`.env`**: `cp .env.prod.example .env && chmod 600 .env`; `APP_DOMAIN`,
+   `ACME_EMAIL`, um `openssl rand -hex 32` para cada segredo, `OPENAI_API_KEY`
+   (conta com crédito pré-pago e auto-reload desligado, [§10](#10-provedor-de-llm-e-crédito-da-openai)).
+   `NOTIFICATIONS_ENABLED=false` por enquanto. Cópia offline do `.env` no
+   gerenciador de senhas da IJ (sem ela um backup não sobe numa VPS nova).
+5. **DNS**: registro `A` (e `AAAA`, se usar IPv6) de `APP_DOMAIN` para o IP
+   elástico, já propagado (`dig +short <domínio>`) **antes** do 1º deploy: o
+   Caddy emite o certificado do Let's Encrypt na subida.
+6. **Primeiro deploy** + seed: `scripts/deploy.sh --no-pull` e
+   `dc --profile ops run --rm migrate prisma db seed` ([§0](#0-primeira-instalação-vps-limpa)).
+   Conferir `dc ps` (tudo `healthy`) e `https://<domínio>/login` no navegador.
+7. **Criar o admin** (`scripts/criar-admin.ts`, [§0](#0-primeira-instalação-vps-limpa)) e entrar no CRM.
+8. **WhatsApp**: `scripts/evolution.sh criar` (uma vez) e parear o número dedicado
+   em **Gestão → Admin → "Mostrar QR"** (ou `scripts/evolution.sh qr`, [§5](#5-ler-o-qr-da-evolution-criarreconectar-a-instância)).
+   Estado "conectado" na mesma tela.
+9. **Grupo**: com o número já no grupo de vendas, **Gestão → Admin → "Listar grupos"**,
+   escolher e salvar (dispensa `GRUPO_JID` no `.env`).
+10. **Webhook da Evolution**: `scripts/evolution.sh webhook` ([§5](#5-ler-o-qr-da-evolution-criarreconectar-a-instância)).
+    Teste: mensagem `#crm` no grupo → aparece em Gestão → Admin → Logs (bot ainda calado).
+11. **Crontab**: `crontab deploy/crontab.example` e `crontab -l` ([§7](#7-cron-do-host)).
+    Em até 10 min, `/var/log/ij-crm/cron.log` mostra `reprocessar HTTP 200`.
+12. **Backup off-site testado**: rclone configurado, `BACKUP_REMOTE` no `.env`,
+    `scripts/backup.sh` mostrando `off-site: rclone copy` e o arquivo listado no
+    remote ([§3, "Backup off-site"](#backup-off-site-rclone)). Restore testado uma vez ([§3](#3-restaurar-backup)).
+    **Não entrar em produção sem isso.**
+13. **Antes de ligar**: aviso de privacidade da IJ menciona o envio do texto das
+    mensagens `#crm` ao provedor de LLM nos EUA ([§10](#10-provedor-de-llm-e-crédito-da-openai), "LGPD").
+14. **Por último**: `NOTIFICATIONS_ENABLED=true` no `.env` e `scripts/deploy.sh`.
+    Mandar um `#crm` de teste e conferir a confirmação no grupo.
+
 Atalho usado em todo este documento (rode na raiz do repo):
 
 ```bash
@@ -28,36 +71,39 @@ alcança `db` e `evolution`; a Evolution alcança `evolution-db`,
 
 ---
 
-## Checklist de go-live (bloqueios)
-
-- [ ] DNS `A`/`AAAA` de `APP_DOMAIN` apontando para a VPS; portas 80/443 abertas.
-- [ ] `.env` preenchido (todos os segredos com `openssl rand -hex 32`) e **cópia
-      offline do `.env` no gerenciador de senhas da IJ**. Sem ela, o backup não
-      sobe numa VPS nova (as senhas dos bancos e as chaves estão só lá).
-- [ ] **Backup off-site funcionando**: `rclone config` com um remote, `BACKUP_REMOTE`
-      no `.env`, e `scripts/backup.sh` rodado à mão mostrando `off-site: rclone copy`.
-      Sem isso o disco da VPS é ponto único de falha. **Não entrar em produção sem.**
-- [ ] Crontab instalado (`crontab -l`), primeiro backup do cron no log.
-- [ ] Teste de restore feito uma vez na VPS (§3).
-- [ ] Número dedicado pareado (§5), webhook configurado, `GRUPO_JID` preenchido.
-- [ ] Conta da OpenAI com crédito pré-pago, **auto-reload desligado** e
-      `OPENAI_API_KEY` no `.env` (§10). O `deploy.sh` recusa se o provedor
-      selecionado em `LLM_PROVEDOR` (padrão `openai`) estiver sem chave.
-- [ ] Aviso de privacidade da IJ menciona a transferência internacional do
-      texto das mensagens `#crm` ao provedor de LLM (§10, "LGPD").
-- [ ] `NOTIFICATIONS_ENABLED=true` no `.env` da VPS **por último**, e `scripts/deploy.sh`.
-
 ## 0. Primeira instalação (VPS limpa)
 
-Pré-requisitos: Linux com Docker Engine + plugin compose v2, `git`, `curl`,
-`flock` (util-linux), `rclone` (off-site) e de preferência `qrencode` e `jq`;
-usuário de deploy no grupo `docker`. Instância mínima e swap: §11.
+Pré-requisitos: Linux x86_64 com Docker Engine + plugin compose **recente**
+(o deploy usa `docker compose config --environment` e `up --wait --wait-timeout`;
+ensaiado com Docker 29.8 + Compose 5.6; um compose v2 antigo falha logo no
+`config` do deploy, antes de mexer em algo), `git`, `curl`, `flock` (util-linux), `rclone` (off-site) e de
+preferência `qrencode` e `jq`; usuário de deploy no grupo `docker`. Instância
+mínima e swap: §11.
+
+### Docker na VPS
+
+Ubuntu 24.04 (recomendado; o pacote `docker.io` da distro pode vir sem o plugin
+compose, então use o repositório oficial da Docker):
+
+```bash
+curl -fsSL https://get.docker.com | sudo sh        # Docker Engine + plugin compose
+sudo usermod -aG docker "$USER"                    # depois saia e entre de novo na sessão SSH
+sudo apt-get install -y git curl util-linux qrencode jq
+curl -fsSL https://rclone.org/install.sh | sudo bash   # rclone atual (o da distro é velho)
+docker compose version                             # o get.docker.com instala a versão atual
+```
+
+Amazon Linux 2023: `dnf install docker` **não** traz o plugin compose; instale o
+binário `docker-compose-linux-x86_64` do GitHub em `/usr/local/lib/docker/cli-plugins/docker-compose`.
+
+### Imagens e primeira subida
 
 As imagens vêm prontas do GHCR (`ghcr.io/gabriel-marques-tech/ij-crm-app` e
-`…-ops`, buildadas pelo CI): a VPS **não builda**. Se os pacotes forem privados
-(padrão do GHCR para pacote novo), faça login uma vez com um PAT clássico só de
-leitura. No GitHub: Settings → Developer settings → Personal access tokens →
-Tokens (classic) → escopo **apenas** `read:packages`. Na VPS:
+`…-ops`, buildadas pelo CI, só `linux/amd64`): a VPS **não builda**. Os pacotes
+são **públicos**: `docker pull` funciona sem login. Se algum dia virarem
+privados, faça login uma vez com um PAT clássico só de leitura (GitHub: Settings
+→ Developer settings → Personal access tokens → Tokens (classic) → escopo
+**apenas** `read:packages`):
 
 ```bash
 read -rs -p "PAT read:packages: " GHCR_PAT && echo
@@ -65,13 +111,15 @@ printf '%s' "$GHCR_PAT" | docker login ghcr.io -u <usuario-github> --password-st
 unset GHCR_PAT    # credencial fica em ~/.docker/config.json (chmod 600)
 ```
 
-Pacotes públicos (Package settings → Change visibility → Public) dispensam o login.
+O repo também é público: o `git clone`/`git pull` da VPS usa HTTPS sem chave.
 
 ```bash
-sudo git clone <url-do-repo> /opt/ij-crm && sudo chown -R "$USER" /opt/ij-crm
+sudo git clone https://github.com/Gabriel-Marques-tech/ij-crm.git /opt/ij-crm && sudo chown -R "$USER" /opt/ij-crm
 cd /opt/ij-crm
 cp .env.prod.example .env && chmod 600 .env
-# preencher: APP_DOMAIN, ACME_EMAIL e um `openssl rand -hex 32` para cada segredo
+# preencher: APP_DOMAIN, ACME_EMAIL, OPENAI_API_KEY e um `openssl rand -hex 32` para cada segredo:
+for v in POSTGRES_PASSWORD EVOLUTION_DB_PASSWORD EVOLUTION_REDIS_PASSWORD EVOLUTION_API_KEY \
+  EVOLUTION_WEBHOOK_SECRET CRON_SECRET; do sed -i "s|^$v=$|$v=$(openssl rand -hex 32)|" .env; done
 sudo mkdir -p /var/backups/ij-crm /var/log/ij-crm && sudo chown "$USER" /var/backups/ij-crm /var/log/ij-crm
 scripts/deploy.sh --no-pull                       # 1º deploy: baixa :latest do GHCR (banco vazio: sem backup)
 dc --profile ops run --rm migrate prisma db seed  # pipelines/fases do Pipefy (só na 1ª vez)
@@ -85,7 +133,12 @@ unset ADMIN_SENHA
 crontab deploy/crontab.example   # substitui o crontab do usuário; confira com crontab -l
 ```
 
-Depois: parear o WhatsApp (§5) e fechar o checklist acima.
+Depois: parear o WhatsApp (§5) e seguir o checklist de go-live do topo.
+
+Ensaio deste §0 (2026-10-27, clone limpo, imagens do GHCR, sem build): o 1º
+deploy levou ~85 s (≈ 40 s baixando a `ops` de 2 GB), `latest` virou
+`sha-<commit>`, todos os serviços `healthy` dentro dos `mem_limit` (app 74 MiB,
+evolution 206 MiB ociosos). Deploys seguintes da mesma tag: ~10 s.
 
 > `docker compose -f compose.prod.yml up -d` sozinho também sobe a stack (e
 > reinícios usam `restart: unless-stopped`), mas **não** roda migrations: elas
@@ -125,7 +178,8 @@ O script, na ordem:
 6. `prisma migrate deploy` no container one-shot `migrate`. Se falhar, para aqui:
    o app antigo segue no ar e o script mostra o dump do passo 5 (§2, "Migration falhou");
 7. `up -d --wait` com a imagem nova (espera todos os healthchecks) e
-   `GET https://APP_DOMAIN/api/health` pelo Caddy (TLS de verdade) = 200;
+   `GET https://APP_DOMAIN/api/health` pelo Caddy (TLS de verdade) = 200, por até
+   60 s (`HEALTH_TENTATIVAS` × 3 s; no 1º deploy o certificado ainda está sendo emitido);
 8. sucesso: registra a tag em `.deploy/historico` e em `.deploy/atual`, marca `:latest` local e apaga
    as imagens `app`/`ops` fora das últimas `IMAGENS_MANTER` (padrão 5) tags do
    histórico, mais as camadas órfãs.
@@ -217,6 +271,24 @@ O script:
 
 Sessões voltam junto com o dump: quem logou depois do backup precisa logar de novo.
 
+### Backup off-site (rclone)
+
+Uma vez, **como o mesmo usuário do crontab e do deploy** (o rclone lê
+`~/.config/rclone/rclone.conf` desse usuário):
+
+```bash
+rclone config            # n → nome (ex.: b2) → tipo do provedor (B2, S3, R2, Drive…) → credenciais
+rclone mkdir b2:ij-crm-backups && rclone lsd b2:   # o bucket existe e a credencial funciona
+# no .env:  BACKUP_REMOTE=b2:ij-crm-backups
+scripts/backup.sh        # deve logar "off-site: rclone copy → b2:ij-crm-backups"
+rclone ls b2:ij-crm-backups                        # o dump recém-criado aparece
+```
+
+A credencial precisa de leitura, escrita **e apagar** no bucket (a retenção de 14
+dias roda `rclone delete --min-age 14d`). Prefira um bucket só para isso, em
+outra conta/região que não a da VPS. Sem `BACKUP_REMOTE`, `backup.sh` só avisa
+no log; com `BACKUP_REMOTE` e sem `rclone` instalado, falha.
+
 **O banco e o Redis da Evolution não entram no backup** (decisão do GAB-30).
 Eles guardam a sessão do WhatsApp (credenciais e chaves Signal do Baileys) e
 config da instância, nada do CRM. Num desastre (VPS nova, volumes perdidos), o
@@ -260,6 +332,11 @@ scripts/evolution.sh estado    # "open" = conectado (o QR expira em segundos; ro
 scripts/evolution.sh webhook   # 1ª vez: webhook → http://app:3000/api/webhooks/evolution, header x-webhook-secret
 scripts/evolution.sh grupos    # JID do grupo de vendas → GRUPO_JID no .env, depois scripts/deploy.sh
 ```
+
+Pelo CRM (depois do `criar`): **Gestão → Admin** mostra o estado da Evolution e o
+botão "Mostrar QR" (só ADMIN), e "Listar grupos" grava o grupo na configuração
+técnica — vale na hora, sem `.env` nem deploy (README "Admin: configuração técnica e logs").
+O webhook continua sendo pelo `scripts/evolution.sh webhook`.
 
 Sem `qrencode`, o `qr` grava o PNG num diretório `~/.ij-crm.XXXX` com permissão
 só do dono e **apaga ao apertar Enter**. Se precisar copiar para ver,
