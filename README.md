@@ -197,11 +197,12 @@ Mensagem do grupo **sem** `#crm` de vendedor cadastrado (design §4.3 passo 4, �
    `MensagemBruta`, só `contador_descartadas.total` +1 (dia civil de SP, só data + número).
 4. Relevante → grava `MensagemBruta` com `sem_tag = true` e segue o fluxo de [#crm → card](#crm--card-llm);
    a extração recebe o aviso "mensagem sem #crm… responda IGNORAR se não for registro de venda". Régua
-   mais alta (`regra-sem-tag.ts`):
+   mais alta (`regra-sem-tag.ts`). **Pendente sem tag é silencioso**: nenhuma resposta no grupo, só a fila
+   de revisão (painel do GAB-41); mensagens com `#crm` continuam recebendo o ⚠️ de sempre.
    - confiança da extração `< LLM_LIMIAR_SEM_TAG` (0.85; nunca abaixo de `LLM_LIMIAR_CONFIANCA`) →
-     `PENDENTE_REVISAO` ("⚠️ parece atualização de venda (sem #crm), mas não tive certeza…");
+     `PENDENTE_REVISAO` (`SEM_TAG_INCERTO`);
    - `IGNORAR` confiante → a linha é apagada e conta como descartada (`IGNORAR` incerto cai na regra acima);
-   - `CRIAR` sem telefone/email/CNPJ citado no texto → `PENDENTE_REVISAO` (defesa contra injeção: uma
+   - `CRIAR` sem telefone/email/CNPJ citado no texto → `PENDENTE_REVISAO` (`SEM_TAG_SEM_IDENTIFICADOR`; defesa contra injeção: uma
      mensagem que convença a LLM não cria card sozinha); `ATUALIZAR` segue as regras de alvo normais;
    - se agir, a confirmação começa com
      `↪️ entendi como atualização: Gustavo — Economia Sensata → Primeiro Contato. Resp: João.`
@@ -209,9 +210,9 @@ Mensagem do grupo **sem** `#crm` de vendedor cadastrado (design §4.3 passo 4, �
 **Falha na classificação** (sem crédito, provedor fora, saída inválida, `TRUNCADA` 2×, erro de banco
 ou inesperado, fila cheia): o texto **não** é gravado (guardar "por via das dúvidas" seria guardar
 conversa do grupo). Em troca: `contador_descartadas.nao_classificadas` +1, log `[sem-tag] ref=…`
-com o erro saneado (`erro-seguro.ts`; nunca o texto), alerta de ops se for `SEM_CREDITO` (GAB-46) e
-um aviso no grupo citando a mensagem, no máximo 1 a cada 30 min: "⚠️ não consegui avaliar mensagens
-sem #crm agora (ref: …). O que for para o CRM, mande com #crm." Limitação aceita: se o processo morrer
+com o erro saneado (`erro-seguro.ts`; nunca o texto) e alerta de ops se for `SEM_CREDITO` (GAB-46, que
+avisa que mensagens sem #crm não são reprocessadas). **Nada vai para o grupo** — nem aviso, nem citação
+da mensagem. Limitação aceita: se o processo morrer
 entre o 200 e o fim do `after()`, a mensagem sem tag se perde (não há cópia para retomar).
 
 Limiares (`LLM_LIMIAR_CONFIANCA`, `LLM_LIMIAR_CLASSIFICADOR`, `LLM_LIMIAR_SEM_TAG`) fora de 0–1 ou

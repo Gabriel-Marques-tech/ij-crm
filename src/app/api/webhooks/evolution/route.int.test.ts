@@ -358,6 +358,8 @@ describe("POST /api/webhooks/evolution — ingestão", () => {
     // Mock da extração sem fixture para este texto → confiança 0 → pendente, sem card.
     expect(brutas[0]).toMatchObject({ semTag: true, status: "PENDENTE_REVISAO", texto });
     expect(await contagens()).toMatchObject({ descartadas: 0 });
+    // Sem tag e pendente: nada no grupo (só a fila de revisão).
+    expect(logs(console.info)).not.toContain("SAFE MODE");
   });
 
   it("sem tag de número DESCONHECIDO → só o contador; nem a identidade é registrada", async () => {

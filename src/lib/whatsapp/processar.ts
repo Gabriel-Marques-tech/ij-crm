@@ -32,7 +32,8 @@
  *   fica para o GAB-41.
  * - Mensagem sem `#crm` (`semTag`, GAB-39): `regra-sem-tag.ts` decide antes
  *   de aplicar (IGNORAR confiante apaga a linha; confiança < `LLM_LIMIAR_SEM_TAG`
- *   ou CRIAR sem telefone/email/CNPJ no texto vira pendente) e a confirmação começa com "↪️ entendi como atualização:".
+ *   ou CRIAR sem telefone/email/CNPJ no texto vira pendente, SEM resposta no grupo) e a confirmação de quando age começa
+ *   com "↪️ entendi como atualização:".
  */
 import { Prisma } from "@prisma/client";
 import { modeloDoProvedorConfigurado, limiarConfianca } from "@/lib/config/env";
@@ -56,7 +57,8 @@ import { regraSemTag } from "./regra-sem-tag";
 export type ResultadoProcessamento =
   | { tipo: "IGNORADA" }
   | { tipo: "PROCESSADA"; oportunidadeId: string; confirmacao: string }
-  | { tipo: "PENDENTE_REVISAO"; confirmacao: string }
+  /** `confirmacao: null` = sem resposta no grupo (mensagem sem #crm pendente, GAB-39). */
+  | { tipo: "PENDENTE_REVISAO"; confirmacao: string | null }
   /** Sem #crm e a extração disse IGNORAR: linha apagada, só o contador (GAB-39). */
   | { tipo: "DESCARTADA" }
   | { tipo: "FALHA"; ref: string; codigo: string; confirmacao: string }
@@ -288,6 +290,9 @@ async function processar(id: string, opts: { participantJid?: string | null }): 
 
   if (desfecho === null) return { tipo: "DESCARTADA" };
   if (desfecho.tipo === "PENDENTE") {
+    // Sem #crm e pendente (incerto, sem identificador, IGNORAR incerto, …):
+    // silêncio no grupo — só a fila de revisão (decisão do usuário, GAB-39).
+    if (m.semTag) return { tipo: "PENDENTE_REVISAO", confirmacao: null };
     const confirmacao = textoPendente(desfecho.motivo, { reprocessada });
     await responder(m, confirmacao, null, opts.participantJid);
     return { tipo: "PENDENTE_REVISAO", confirmacao };

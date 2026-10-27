@@ -13,21 +13,22 @@
  *    nem `MensagemBruta`, nem log com texto.
  * 4. Relevante → grava `MensagemBruta` (`semTag = true`, RECEBIDA) e chama
  *    `processarMensagem`, que só AGE com confiança de extração ≥
- *    `LLM_LIMIAR_SEM_TAG` (senão `PENDENTE_REVISAO`), apaga a linha se a
- *    extração disser IGNORAR, e confirma com "↪️ entendi como atualização: …".
+ *    `LLM_LIMIAR_SEM_TAG` (senão `PENDENTE_REVISAO`, em silêncio no grupo —
+ *    só a fila de revisão), apaga a linha se a extração disser IGNORAR com
+ *    confiança, e, quando age, confirma com "↪️ entendi como atualização: …".
  *
  * Falha na etapa de classificação (sem crédito, provedor fora, saída
  * inválida, TRUNCADA 2×, banco ao ler a msg respondida, erro inesperado, ou
  * fila do limitador cheia):
  * decisão LGPD-segura — o texto NÃO é persistido (não dá para saber se é
  * dado de venda; guardar "por via das dúvidas" seria guardar conversa do
- * grupo). Em vez de sumir em silêncio:
+ * grupo). Para não sumir sem rastro:
  * - `naoClassificadas` +1 no contador do dia (só número);
  * - log `[sem-tag] ref=… LLM <código>` (nunca o texto);
  * - `SEM_CREDITO` dispara o alerta de ops do GAB-46 (`alertarSeSemCredito`);
- * - aviso no grupo, citando a mensagem, no máximo 1 a cada 30 min por
- *   processo: "⚠️ não consegui avaliar mensagens sem #crm agora (ref: …).
- *   O que for para o CRM, mande com #crm." — quem mandou venda sabe reenviar.
+ * - NADA no grupo (decisão do usuário): nem aviso, nem citação do texto. O
+ *   alerta de ops do GAB-46 diz que mensagens sem #crm não são
+ *   reprocessadas e quem precisar reenvia com #crm.
  * Limitação aceita: se o processo morrer entre o 200 e o fim do `after()`, a
  * mensagem sem tag se perde (não há cópia do texto para retomar).
  *
@@ -41,7 +42,6 @@ import { ErroLlm } from "@/lib/llm/tipos";
 import { erroSeguro } from "./erro-seguro";
 import { criarLimitador, type Limitador } from "./limitador";
 import { contarDescartada, contarNaoClassificada } from "./contadores";
-import { enviarWhatsApp } from "./enviar";
 import type { MensagemRecebida } from "./payload";
 import { processarMensagem, type ResultadoProcessamento } from "./processar";
 
@@ -51,18 +51,6 @@ export type ResultadoSemTag =
   | { tipo: "PERSISTIDA"; mensagemId: string; processamento: ResultadoProcessamento }
   | { tipo: "ERRO"; ref: string };
 
-export const INTERVALO_AVISO_MS = 30 * 60_000;
-const g = globalThis as unknown as { __ijUltimoAvisoSemTag?: number };
-
-/** Só para testes: zera o intervalo do aviso. */
-export function reiniciarAvisoSemTag() {
-  g.__ijUltimoAvisoSemTag = undefined;
-}
-
-export function textoNaoClassificada(ref: string): string {
-  return `⚠️ não consegui avaliar mensagens sem #crm agora (ref: ${ref}). O que for para o CRM, mande com #crm.`;
-}
-
 async function textoRespondido(eventoId: string | null): Promise<string | null> {
   if (!eventoId) return null;
   const anterior =
@@ -71,30 +59,14 @@ async function textoRespondido(eventoId: string | null): Promise<string | null> 
   return anterior?.texto ?? null;
 }
 
-async function avisarFalha(m: MensagemRecebida, ref: string) {
-  const agora = Date.now();
-  if (g.__ijUltimoAvisoSemTag !== undefined && agora - g.__ijUltimoAvisoSemTag < INTERVALO_AVISO_MS) return;
-  g.__ijUltimoAvisoSemTag = agora;
-  try {
-    await enviarWhatsApp({
-      para: m.grupoJid,
-      texto: textoNaoClassificada(ref),
-      citar: { eventoId: m.eventoId, participant: m.participantJid ?? undefined, texto: m.texto },
-    });
-  } catch (e) {
-    console.error(`[sem-tag] aviso ref=${ref} não enviado: ${e instanceof Error ? e.name : typeof e}`);
-  }
-}
-
 /**
  * Classificação falhou — LLM, banco ao ler a msg respondida, erro
- * inesperado ou fila cheia: conta, loga com ref (erro saneado, sem texto),
- * avisa o grupo (no máximo 1×/30 min) e, se for SEM_CREDITO, o ops (GAB-46).
+ * inesperado ou fila cheia: conta, loga com ref (erro saneado, sem texto)
+ * e, se for SEM_CREDITO, avisa o ops (GAB-46). Nada vai para o grupo.
  */
 async function naoClassificada(m: MensagemRecebida, e: unknown, codigo: string): Promise<ResultadoSemTag> {
   const ref = registrarErro("sem-tag", erroSeguro(e));
   await contarNaoClassificada(db, m.recebidaEm);
-  await avisarFalha(m, ref);
   await alertarSeSemCredito(e, ref); // GAB-46: mesmo alerta de ops do FALHA de `processar.ts`; nunca lança
   return { tipo: "NAO_CLASSIFICADA", ref, codigo };
 }

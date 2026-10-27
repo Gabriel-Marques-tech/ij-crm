@@ -21,7 +21,11 @@ export type MotivoPendente =
   | "CONTATO_EXCLUIDO"
   | "EMPRESA_EXCLUIDA"
   | "IDENTIFICADORES_CONFLITANTES"
-  /** GAB-39: sem #crm e a extração não atingiu `LLM_LIMIAR_SEM_TAG`. */
+  /**
+   * GAB-39: sem #crm e a extração não atingiu `LLM_LIMIAR_SEM_TAG`. Os
+   * `SEM_TAG_*` NÃO vão para o grupo (pendente sem tag é silencioso); o texto
+   * fica para o painel de revisão.
+   */
   | "SEM_TAG_INCERTO"
   /** GAB-39: sem #crm, CRIAR sem telefone/email/CNPJ citado (defesa contra injeção). */
   | "SEM_TAG_SEM_IDENTIFICADOR";
