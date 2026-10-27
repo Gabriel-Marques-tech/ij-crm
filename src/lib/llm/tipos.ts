@@ -1,14 +1,17 @@
 /**
  * Contrato dos provedores de LLM (design doc §4.4): o pipeline só conhece
- * esta interface; Anthropic, mock (e, no benchmark GAB-40, OpenAI) ficam
- * atrás dela, escolhidos por `LLM_PROVEDOR`.
+ * esta interface; OpenAI (padrão de produção, GAB-45), Anthropic e mock
+ * ficam atrás dela, escolhidos por `LLM_PROVEDOR`.
  */
 
 export type UsoLlm = {
   provedor: string;
   modelo: string;
   tokensEntrada: number;
+  /** Inclui os de raciocínio, quando o provedor os cobra como saída (OpenAI). */
   tokensSaida: number;
+  /** Parte de `tokensSaida` gasta em raciocínio (só quem informa: OpenAI). */
+  tokensRaciocinio?: number;
   ms: number;
 };
 
@@ -49,7 +52,8 @@ export type CodigoErroLlm =
  * que o operador precisa entender sem abrir o log.
  */
 const DETALHE_PADRAO: Partial<Record<CodigoErroLlm, string>> = {
-  // Reprocessável (GAB-41) depois de recarregar o saldo.
+  // Reprocessável (GAB-41) depois de recarregar o saldo. Os provedores
+  // passam o próprio `detalhe` ("... da OpenAI"/"... da Anthropic").
   SEM_CREDITO: "sem crédito na API da Anthropic",
 };
 
