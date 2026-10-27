@@ -50,7 +50,7 @@ function traduzirErro(e: unknown): TraducaoErro {
     }
     return { erro: new ErroLlm("HTTP", { status }), retentavel: status !== undefined && status >= 500 };
   }
-  return { erro: new ErroLlm("REDE", { detalhe: e instanceof Error ? e.name : typeof e }), retentavel: false };
+  return { erro: new ErroLlm("REDE", { detalhe: { codigo: e instanceof Error ? e.name : typeof e } }), retentavel: false };
 }
 
 export function criarProvedorAnthropic({ apiKey, modelo, fetch }: Opcoes): ProvedorLlm {

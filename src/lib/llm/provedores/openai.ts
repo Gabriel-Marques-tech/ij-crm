@@ -70,7 +70,7 @@ type Opcoes = { apiKey: string; modelo: string; fetch?: typeof fetch; timeoutMs?
 function traduzirErro(e: unknown, uso: (r: OpenAI.Responses.Response) => UsoLlm): TraducaoErro {
   if (e instanceof RespostaFalhou) {
     // Só o código; `error.message` da resposta não é copiado.
-    return { erro: new ErroLlm("FALHA_PROVEDOR", { detalhe: e.codigo, uso: uso(e.resposta) }), retentavel: FALHA_TRANSITORIA.has(e.codigo) };
+    return { erro: new ErroLlm("FALHA_PROVEDOR", { detalhe: { codigo: e.codigo }, uso: uso(e.resposta) }), retentavel: FALHA_TRANSITORIA.has(e.codigo) };
   }
   if (e instanceof OpenAI.APIConnectionTimeoutError) return { erro: new ErroLlm("TIMEOUT"), retentavel: true };
   if (e instanceof OpenAI.APIConnectionError) return { erro: new ErroLlm("REDE"), retentavel: true };
@@ -82,7 +82,7 @@ function traduzirErro(e: unknown, uso: (r: OpenAI.Responses.Response) => UsoLlm)
     }
     return { erro: new ErroLlm("HTTP", { status }), retentavel: status !== undefined && status >= 500 };
   }
-  return { erro: new ErroLlm("REDE", { detalhe: e instanceof Error ? e.name : typeof e }), retentavel: false };
+  return { erro: new ErroLlm("REDE", { detalhe: { codigo: e instanceof Error ? e.name : typeof e } }), retentavel: false };
 }
 
 export function criarProvedorOpenAI({ apiKey, modelo, fetch, timeoutMs }: Opcoes): ProvedorLlm {
@@ -124,10 +124,10 @@ export function criarProvedorOpenAI({ apiKey, modelo, fetch, timeoutMs }: Opcoes
       const uso = medir(resposta);
       if (resposta.status === "incomplete") {
         const motivo = resposta.incomplete_details?.reason;
-        if (motivo === "content_filter") throw new ErroLlm("RECUSA", { uso, detalhe: motivo });
-        throw new ErroLlm("TRUNCADA", { uso, detalhe: motivo ?? "incomplete" });
+        if (motivo === "content_filter") throw new ErroLlm("RECUSA", { uso, detalhe: { codigo: motivo } });
+        throw new ErroLlm("TRUNCADA", { uso, detalhe: { codigo: motivo ?? "incomplete" } });
       }
-      if (resposta.status && resposta.status !== "completed") throw new ErroLlm("FALHA_PROVEDOR", { uso, detalhe: `status=${resposta.status}` });
+      if (resposta.status && resposta.status !== "completed") throw new ErroLlm("FALHA_PROVEDOR", { uso, detalhe: { codigo: `status=${resposta.status}` } });
       let texto = "";
       for (const item of resposta.output ?? []) {
         if (item.type !== "message") continue;

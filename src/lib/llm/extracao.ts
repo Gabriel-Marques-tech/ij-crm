@@ -38,7 +38,7 @@ export function provedorConfigurado(finalidade: "extracao" | "classificacao" = "
   try {
     nome = provedorLlm();
   } catch (e) {
-    if (e instanceof ConfigInvalida) throw new ErroLlm("PROVEDOR_INVALIDO", { detalhe: e.message });
+    if (e instanceof ConfigInvalida) throw new ErroLlm("PROVEDOR_INVALIDO", { detalhe: "LLM_PROVEDOR=mock não é permitido em produção" });
     throw e;
   }
   if (nome === "mock") return criarProvedorMock();
@@ -61,7 +61,7 @@ export function provedorConfigurado(finalidade: "extracao" | "classificacao" = "
 
 /** `.env` trocou o provedor e esqueceu o modelo: falha clara em vez de um 404 da API por mensagem. */
 function modeloTrocado(modelo: string, provedor: string): ErroLlm {
-  return new ErroLlm("PROVEDOR_INVALIDO", { detalhe: `LLM_EXTRACAO_MODELO=${modelo} não é modelo do provedor ${provedor}` });
+  return new ErroLlm("PROVEDOR_INVALIDO", { detalhe: { modelo, provedor } });
 }
 
 function logUso(uso: UsoLlm | undefined, ref: string, resultado: string) {
@@ -99,9 +99,9 @@ export async function extrairAtualizacao(
   const r = esquemaExtracao.safeParse(resposta.bruto);
   if (!r.success) {
     // Só os caminhos dos campos (nunca valores) vão para o detalhe/log.
-    const caminhos = [...new Set(r.error.issues.map((i) => i.path.join(".") || "(raiz)"))].slice(0, 5).join(",");
-    logUso(resposta.uso, ref, `erro=SAIDA_INVALIDA campos=${caminhos}`);
-    throw new ErroLlm("SAIDA_INVALIDA", { bruto: resposta.bruto, uso: resposta.uso, detalhe: caminhos });
+    const campos = [...new Set(r.error.issues.map((i) => i.path.join(".") || "(raiz)"))].slice(0, 5);
+    logUso(resposta.uso, ref, `erro=SAIDA_INVALIDA campos=${campos.join(",")}`);
+    throw new ErroLlm("SAIDA_INVALIDA", { bruto: resposta.bruto, uso: resposta.uso, detalhe: { campos } });
   }
   logUso(resposta.uso, ref, "ok");
   return { extracao: r.data, bruto: resposta.bruto, uso: resposta.uso, versao: VERSAO_EXTRACAO };

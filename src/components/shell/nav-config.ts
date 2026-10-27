@@ -8,6 +8,7 @@ import {
   KanbanSquare,
   Settings2,
   Table2,
+  Trophy,
   type LucideIcon,
 } from "lucide-react";
 
@@ -31,6 +32,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/tabela", label: "Tabela", icon: Table2 },
   { href: "/contatos", label: "Contatos", icon: Contact },
   { href: "/empresas", label: "Empresas", icon: Building2 },
+  { href: "/ranking", label: "Ranking", icon: Trophy },
   { href: "/gestao", label: "Gestão", icon: Settings2, minPapel: "GESTOR" },
 ];
 

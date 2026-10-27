@@ -5,6 +5,12 @@
  * boundary no cliente (`error.digest`). Logamos a causa com ref = digest, então
  * a ref da tela é a do log: `grep 'ref=<digest>'`.
  *
+ * Limite: o Next só carimba `digest` no caminho de RENDER (páginas/layouts).
+ * Em route handler e server action não há digest nem error boundary: logamos
+ * com ref gerada, que não chega à UI. Por isso esses caminhos usam
+ * `comTratamento` e devolvem a própria ref (JSON/estado da action); este hook
+ * é só a rede de segurança para o que escapar.
+ *
  * Não logamos `request.path` (query/params podem ter email ou token): só o
  * molde da rota (`/(auth)/redefinir/[token]`).
  */

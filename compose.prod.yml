@@ -11,6 +11,11 @@
 # A Evolution NÃO tem rota pública: a porta dela é publicada só em 127.0.0.1 da
 # VPS, acessada por túnel SSH (runbook §5).
 #
+# Memória (máquina pequena, ≤ 15 usuários): todo serviço tem `mem_limit` e os
+# processos são dimensionados para caber nele (heap do Node, buffers do Postgres,
+# GOMEMLIMIT do Caddy). Valores por variável com padrão para uma VPS de ~2 GB;
+# medição e instância mínima no runbook §11. Para mudar, defina no .env.
+#
 # Redes (alcance mínimo; `internal` = sem saída para a internet):
 #   edge            caddy, app            — Caddy → app; saída do app (API da Anthropic)
 #   rede-app        app, db, migrate      — internal
@@ -28,6 +33,13 @@ x-logging: &logging
     max-size: "10m"
     max-file: "5"
 
+# Postgres para poucos usuários: poucas conexões e buffers pequenos. Os bancos
+# são minúsculos (MBs); o resto do cache fica com o page cache do kernel.
+x-postgres-leve: &postgres-leve
+  image: postgres:16-alpine
+  restart: unless-stopped
+  logging: *logging
+
 x-app-image: &app-build
   context: .
   dockerfile: Dockerfile
@@ -37,6 +49,7 @@ services:
     image: caddy:2.10-alpine
     restart: unless-stopped
     logging: *logging
+    mem_limit: ${CADDY_MEM_LIMIT:-128m}
     ports:
       - "${HTTP_PORT:-80}:80"
       - "${HTTPS_PORT:-443}:443"
@@ -44,6 +57,8 @@ services:
     environment:
       APP_DOMAIN: ${APP_DOMAIN:?defina APP_DOMAIN no .env}
       ACME_EMAIL: ${ACME_EMAIL:?defina ACME_EMAIL no .env}
+      # GC do Go mira abaixo do mem_limit (evita OOM-kill em pico).
+      GOMEMLIMIT: ${CADDY_GOMEMLIMIT:-96MiB}
     volumes:
       # :z = label SELinux (hosts Fedora/RHEL); inofensivo em Debian/Ubuntu.
       - ./Caddyfile:/etc/caddy/Caddyfile:ro,z
@@ -61,15 +76,22 @@ services:
       retries: 5
 
   app:
-    image: ${APP_IMAGE:-ij-crm/app}:${APP_TAG:-latest}
+    image: ${APP_IMAGE:-ghcr.io/gabriel-marques-tech/ij-crm-app}:${APP_TAG:-latest}
     build:
       <<: *app-build
       target: runtime
     restart: unless-stopped
     logging: *logging
+    mem_limit: ${APP_MEM_LIMIT:-512m}
     environment: &app-env
       NODE_ENV: production
-      DATABASE_URL: postgresql://ijcrm:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}@db:5432/ijcrm?schema=public
+      # Heap do V8 bem abaixo do mem_limit: o resto é código, buffers e o `node`
+      # do healthcheck. Sem isto o Node dimensiona o heap pela RAM do host e só
+      # coleta lixo tarde (medido: 1,3 GB depois de ~600 requests).
+      NODE_OPTIONS: --max-old-space-size=${APP_HEAP_MB:-256}
+      # connection_limit: o padrão do Prisma é 2×CPUs+1 por processo; fixo e pequeno
+      # para caber no max_connections do db junto com migrate/backup/psql.
+      DATABASE_URL: postgresql://ijcrm:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}@db:5432/ijcrm?schema=public&connection_limit=${APP_DB_POOL:-5}
       APP_URL: https://${APP_DOMAIN}
       EVOLUTION_API_URL: http://evolution:8080
       EVOLUTION_API_KEY: ${EVOLUTION_API_KEY:?defina EVOLUTION_API_KEY no .env}
@@ -106,12 +128,13 @@ services:
   # One-shot: `docker compose -f compose.prod.yml --profile ops run --rm migrate` (deploy.sh faz isso).
   # Também serve para seed e admin: `... run --rm migrate prisma db seed`.
   migrate:
-    image: ${OPS_IMAGE:-ij-crm/ops}:${APP_TAG:-latest}
+    image: ${OPS_IMAGE:-ghcr.io/gabriel-marques-tech/ij-crm-ops}:${APP_TAG:-latest}
     build:
       <<: *app-build
       target: ops
     profiles: ["ops"]
     logging: *logging
+    mem_limit: ${MIGRATE_MEM_LIMIT:-512m}
     environment: *app-env
     networks: [rede-app]
     depends_on:
@@ -120,9 +143,27 @@ services:
     command: ["./node_modules/.bin/prisma", "migrate", "deploy"]
 
   db:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    logging: *logging
+    <<: *postgres-leve
+    mem_limit: ${DB_MEM_LIMIT:-256m}
+    command:
+      - postgres
+      - -c
+      - shared_buffers=${DB_SHARED_BUFFERS:-64MB}
+      - -c
+      # 15 = 3 reservadas do superusuário + 12 normais: pool do app (5) + migrate
+      # (pool 5, usa 1–2; só no deploy, com o app antigo no ar) + pg_dump/psql do
+      # backup (1–2). Cada conexão custa ~5–10 MB fora do shared_buffers:
+      # 64 MB + 15 × ~8 MB ≈ 185 MB, cabe nos 256m. Pool maior → suba os dois.
+      - max_connections=${DB_MAX_CONNECTIONS:-15}
+      - -c
+      - work_mem=${DB_WORK_MEM:-4MB}
+      - -c
+      - maintenance_work_mem=${DB_MAINTENANCE_WORK_MEM:-32MB}
+      - -c
+      - effective_cache_size=${DB_EFFECTIVE_CACHE_SIZE:-256MB}
+      # Sem workers paralelos: em 1–2 vCPUs só gastam memória.
+      - -c
+      - max_parallel_workers_per_gather=0
     environment:
       POSTGRES_USER: ijcrm
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
@@ -149,6 +190,7 @@ services:
     image: evoapicloud/evolution-api:v2.3.7
     restart: unless-stopped
     logging: *logging
+    mem_limit: ${EVOLUTION_MEM_LIMIT:-512m}
     # SÓ loopback da VPS: acesso por túnel SSH (`ssh -L 8080:127.0.0.1:8080 vps`, runbook §5).
     ports:
       - "127.0.0.1:${EVOLUTION_HOST_PORT:-8080}:8080"
@@ -160,7 +202,7 @@ services:
       # O webhook autentica só pelo header x-webhook-secret (webhook.headers da instância).
       AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES: "false"
       DATABASE_PROVIDER: postgresql
-      DATABASE_CONNECTION_URI: postgresql://evolution:${EVOLUTION_DB_PASSWORD:?defina EVOLUTION_DB_PASSWORD no .env}@evolution-db:5432/evolution?schema=public
+      DATABASE_CONNECTION_URI: postgresql://evolution:${EVOLUTION_DB_PASSWORD:?defina EVOLUTION_DB_PASSWORD no .env}@evolution-db:5432/evolution?schema=public&connection_limit=${EVOLUTION_DB_POOL:-5}
       DATABASE_CONNECTION_CLIENT_NAME: ij-crm
       DATABASE_SAVE_DATA_INSTANCE: "true"
       # Design §2: conteúdo que não é venda não fica em lugar nenhum — nem no banco da Evolution.
@@ -197,6 +239,31 @@ services:
       # VERBOSE (messageRaw) e o payload do webhook em WEBHOOKS.
       LOG_LEVEL: ERROR,WARN
       LOG_BAILEYS: error
+      LOG_COLOR: "false"
+      # Heap do V8 abaixo do mem_limit (o boot roda `prisma migrate` + `generate` antes da API).
+      NODE_OPTIONS: --max-old-space-size=${EVOLUTION_HEAP_MB:-256}
+      # Integrações que o CRM não usa, desligadas explicitamente. Nomes conferidos
+      # no dist/main.js da imagem v2.3.7: todas são `=== "true"` (desligadas por
+      # padrão), exceto a telemetria, LIGADA por padrão e que manda dados para fora.
+      # PROVIDER = servidor externo de auth-state; com false as credenciais do
+      # Baileys seguem no Redis/banco como hoje (não desliga o canal WhatsApp).
+      TELEMETRY_ENABLED: "false"
+      PROMETHEUS_METRICS: "false"
+      CHATWOOT_ENABLED: "false"
+      TYPEBOT_ENABLED: "false"
+      OPENAI_ENABLED: "false"
+      DIFY_ENABLED: "false"
+      N8N_ENABLED: "false"
+      EVOAI_ENABLED: "false"
+      FLOWISE_ENABLED: "false"
+      S3_ENABLED: "false"
+      RABBITMQ_ENABLED: "false"
+      SQS_ENABLED: "false"
+      NATS_ENABLED: "false"
+      KAFKA_ENABLED: "false"
+      PUSHER_ENABLED: "false"
+      WEBSOCKET_ENABLED: "false"
+      PROVIDER_ENABLED: "false"
     volumes:
       - evolution_instances:/evolution/instances
     networks: [evolution-saida, rede-whatsapp, rede-evolution]
@@ -213,9 +280,23 @@ services:
       retries: 5
 
   evolution-db:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    logging: *logging
+    <<: *postgres-leve
+    mem_limit: ${EVOLUTION_DB_MEM_LIMIT:-192m}
+    # Só config da instância e credenciais do Baileys: menor ainda que o db do CRM.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=${EVOLUTION_DB_SHARED_BUFFERS:-32MB}
+      - -c
+      - max_connections=${EVOLUTION_DB_MAX_CONNECTIONS:-20}
+      - -c
+      - work_mem=${EVOLUTION_DB_WORK_MEM:-2MB}
+      - -c
+      - maintenance_work_mem=16MB
+      - -c
+      - effective_cache_size=${EVOLUTION_DB_EFFECTIVE_CACHE_SIZE:-128MB}
+      - -c
+      - max_parallel_workers_per_gather=0
     environment:
       POSTGRES_USER: evolution
       POSTGRES_PASSWORD: ${EVOLUTION_DB_PASSWORD:?defina EVOLUTION_DB_PASSWORD no .env}
@@ -233,8 +314,18 @@ services:
     image: redis:7-alpine
     restart: unless-stopped
     logging: *logging
+    mem_limit: ${REDIS_MEM_LIMIT:-96m}
     # AOF: guarda as chaves Signal do Baileys (ver comentário da `evolution`).
-    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${EVOLUTION_REDIS_PASSWORD:?defina EVOLUTION_REDIS_PASSWORD no .env}"]
+    # Sem `maxmemory`: com teto + noeviction o Redis passaria a recusar escrita
+    # (a Evolution quebraria do mesmo jeito), e com LRU apagaria chaves Signal e
+    # derrubaria a sessão do WhatsApp em silêncio. Os dados reais cabem em poucos
+    # MB; o mem_limit só segura um vazamento. Conferir `docker stats` (runbook §11).
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --requirepass
+      - ${EVOLUTION_REDIS_PASSWORD:?defina EVOLUTION_REDIS_PASSWORD no .env}
     environment:
       # redis-cli do healthcheck autentica por esta variável.
       REDISCLI_AUTH: ${EVOLUTION_REDIS_PASSWORD}
