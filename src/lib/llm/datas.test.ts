@@ -56,4 +56,58 @@ describe("resolverDataRelativa (America/Sao_Paulo)", () => {
     expect(resolverDataRelativa("até sexta", SEXTA)).toBe("2025-10-31");
     expect(resolverDataRelativa("na segunda-feira", SEXTA)).toBe("2025-10-27");
   });
+
+  // Segunda 27/10/2025 (12:00Z). "Semana que vem" = semana de segunda 03/11.
+  const SEGUNDA = new Date("2025-10-27T12:00:00Z");
+
+  it.each([
+    ["segunda da semana que vem", "2025-11-03"],
+    ["terça da semana que vem", "2025-11-04"],
+    ["quarta da semana que vem", "2025-11-05"],
+    ["quinta da semana que vem", "2025-11-06"],
+    ["sexta da semana que vem", "2025-11-07"],
+    ["sábado da semana que vem", "2025-11-08"],
+    ["domingo da semana que vem", "2025-11-09"],
+    ["terça da próxima semana", "2025-11-04"],
+    ["na sexta-feira da próxima semana", "2025-11-07"],
+    ["semana que vem na quarta", "2025-11-05"],
+    // Sozinhos, sem mudança.
+    ["sexta", "2025-10-31"],
+    ["semana que vem", "2025-11-03"],
+    ["próxima semana", "2025-11-03"],
+    ["sexta que vem", "2025-10-31"],
+    // "ter" (verbo) não é terça.
+    ["vou ter reunião semana que vem", "2025-11-03"],
+  ])("a partir de uma segunda: %j → %s", (expr, esperado) => {
+    expect(resolverDataRelativa(expr, SEGUNDA)).toBe(esperado);
+  });
+
+  it("dia da semana + semana que vem dito numa sexta", () => {
+    expect(resolverDataRelativa("terça da semana que vem", SEXTA)).toBe("2025-10-28");
+    expect(resolverDataRelativa("sexta da semana que vem", SEXTA)).toBe("2025-10-31");
+  });
+
+  it.each([
+    ["dia 3 de novembro", "2025-11-03"],
+    ["3 de novembro", "2025-11-03"],
+    ["3 de nov", "2025-11-03"],
+    ["dia 25 de outubro", "2025-10-25"],
+    ["03/11", "2025-11-03"],
+    ["3/11", "2025-11-03"],
+    ["dia 15 de dezembro", "2025-12-15"],
+    // Regra única para dia/mês sem ano: já passou neste ano → ano que vem
+    // (é a data de uma PRÓXIMA ação).
+    ["dia 10 de janeiro", "2026-01-10"],
+    ["dia 20 de outubro", "2026-10-20"],
+    ["20/10", "2026-10-20"],
+    ["dia 3 de março", "2026-03-03"],
+    // "de manhã/tarde/noite" não é mês.
+    ["dia 30 de manhã", "2025-10-30"],
+  ])("mês por nome ou número: %j → %s", (expr, esperado) => {
+    expect(resolverDataRelativa(expr, SEXTA)).toBe(esperado);
+  });
+
+  it.each(["dia 3 de novembrx", "3 de brumário", "dia 31 de novembro"])("mês textual não reconhecido ou dia inválido: %j → null", (expr) => {
+    expect(resolverDataRelativa(expr, SEXTA)).toBeNull();
+  });
 });
