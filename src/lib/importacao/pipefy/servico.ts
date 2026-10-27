@@ -12,7 +12,8 @@ import { createHash, randomBytes } from "node:crypto";
 import { db } from "@/lib/db";
 import { resolverContatos } from "@/lib/contatos/match";
 import { PIPELINE_PROJETOS, PIPELINE_VENDAS } from "@/lib/oportunidades/terminal-regras";
-import { aplicarCards, type Relatorio } from "./aplicar";
+import { aplicarCards, type GanchosTeste, type Relatorio } from "./aplicar";
+import { opcoesCanonicas, validarOpcoes, type OpcoesImport } from "./opcoes";
 import { emLotes } from "./lotes";
 import { interpretarCsv, type Interpretacao, type Ocorrencia } from "./interpretar";
 import type { Aliases } from "./colunas";
@@ -33,6 +34,9 @@ export type Previa = {
   duplicadas: number;
   /** Cards que geram (ou já têm) card em Projetos: ganho em Vendas ou fase de Projetos. */
   comProjeto: number;
+  /** Cards que entram em PERDIDO sem "Motivo da perda" no CSV (erro, salvo motivo padrão escolhido). */
+  perdidosSemMotivo: number;
+  opcoes: OpcoesImport;
   fases: { chave: string; nome: string; cardsAtuais: number; faseId: string | null }[];
   fasesCrm: FaseCrm[];
   responsaveisSemMatch: { nome: string; cards: number }[];
@@ -43,10 +47,12 @@ export type Previa = {
   colunasIgnoradas: string[];
 };
 
-export type ResultadoPrevia = { ok: true; previa: Previa; interpretacao: Interpretacao; mapeamento: Mapeamento } | { ok: false; erro: string };
+export type ResultadoPrevia =
+  | { ok: true; previa: Previa; interpretacao: Interpretacao; mapeamento: Mapeamento; opcoes: OpcoesImport }
+  | { ok: false; erro: string };
 
-export function hashPrevia(conteudo: string, m: Mapeamento): string {
-  return createHash("sha256").update(conteudo).update("\0").update(canonico(m)).digest("hex");
+export function hashPrevia(conteudo: string, m: Mapeamento, o: OpcoesImport = {}): string {
+  return createHash("sha256").update(conteudo).update("\0").update(canonico(m)).update("\0").update(opcoesCanonicas(o)).digest("hex");
 }
 
 export async function listarFasesCrm(): Promise<FaseCrm[]> {
@@ -61,8 +67,11 @@ export async function listarFasesCrm(): Promise<FaseCrm[]> {
 /** Prévia sem gravar nada (nem a `import_previa`): o CLI em dry-run usa direto. */
 export async function calcularPrevia(
   conteudo: string,
-  opts: { nomeArquivo: string; mapeamento?: unknown; aliases?: Aliases },
+  opts: { nomeArquivo: string; mapeamento?: unknown; aliases?: Aliases; opcoes?: unknown },
 ): Promise<ResultadoPrevia> {
+  const op = validarOpcoes(opts.opcoes);
+  if (!op.ok) return op;
+  const opcoes = op.opcoes;
   const interp = interpretarCsv(conteudo, { aliases: opts.aliases });
   if (!interp.ok) return interp;
   const fasesCrm = await listarFasesCrm();
@@ -77,7 +86,7 @@ export async function calcularPrevia(
 
   const ids = interp.cards.map((c) => c.pipefyId);
   const existentes = new Map(
-    (await emLotes(ids, (lote) => db.oportunidade.findMany({ where: { pipefyId: { in: lote } }, select: { pipefyId: true, deletadoEm: true, contatoId: true } }))).map((o) => [
+    (await emLotes(ids, (lote) => db.oportunidade.findMany({ where: { pipefyId: { in: lote } }, select: { pipefyId: true, deletadoEm: true, contatoId: true, faseId: true } }))).map((o) => [
       o.pipefyId!,
       o,
     ]),
@@ -98,6 +107,7 @@ export async function calcularPrevia(
   let novos = 0;
   let nExistentes = 0;
   let comProjeto = 0;
+  let perdidosSemMotivo = 0;
   for (const c of interp.cards) {
     const erro = (mensagem: string) => erros.push({ linha: c.linha, pipefyId: c.pipefyId, mensagem });
     const ex = existentes.get(c.pipefyId);
@@ -115,6 +125,14 @@ export async function calcularPrevia(
       erro(`Contato excluído na lixeira (${bloq.valorOriginal}). Restaure ou mescle o contato e importe de novo.`);
       continue;
     }
+    // Só precisa de motivo quem ENTRA no perdido (já estar lá não chama o gancho).
+    if (destino.tipoTerminal === "PERDIDO" && !c.motivoPerda?.trim() && ex?.faseId !== destino.id) {
+      perdidosSemMotivo++;
+      if (!opcoes.motivoPerdaPadrao) {
+        erro("PERDIDO sem motivo no export.");
+        continue;
+      }
+    }
     if (ex) nExistentes++;
     else novos++;
     if (destino.pipelineChave === PIPELINE_PROJETOS || (destino.pipelineChave === PIPELINE_VENDAS && destino.tipoTerminal === "GANHO")) comProjeto++;
@@ -127,7 +145,7 @@ export async function calcularPrevia(
 
   const previa: Previa = {
     nomeArquivo: opts.nomeArquivo,
-    hash: hashPrevia(conteudo, mapeamento),
+    hash: hashPrevia(conteudo, mapeamento, opcoes),
     separador: interp.separador,
     totalLinhas: interp.totalLinhas,
     cards: interp.cards.length,
@@ -135,6 +153,8 @@ export async function calcularPrevia(
     existentes: nExistentes,
     duplicadas: interp.duplicadas,
     comProjeto,
+    perdidosSemMotivo,
+    opcoes,
     fases: interp.fases.map((f) => ({ ...f, faseId: mapeamento[f.chave] })),
     fasesCrm,
     responsaveisSemMatch: [...semMatch.entries()].map(([nome, cards]) => ({ nome, cards })).sort((a, b) => b.cards - a.cards || a.nome.localeCompare(b.nome)),
@@ -144,33 +164,33 @@ export async function calcularPrevia(
     colunasHistorico: interp.colunasHistorico,
     colunasIgnoradas: interp.colunasIgnoradas,
   };
-  return { ok: true, previa, interpretacao: interp, mapeamento };
+  return { ok: true, previa, interpretacao: interp, mapeamento, opcoes };
 }
 
 export type PreviaSalva = { token: string; expiraEm: Date; previa: Previa };
 
 /** Calcula a prévia e guarda (CSV + mapeamento) para a confirmação. Limpa prévias vencidas. */
 export async function criarPrevia(
-  dados: { conteudo: string; nomeArquivo: string; mapeamento?: unknown },
+  dados: { conteudo: string; nomeArquivo: string; mapeamento?: unknown; opcoes?: unknown },
   por: { id: string },
   agora = new Date(),
 ): Promise<({ ok: true } & PreviaSalva) | { ok: false; erro: string }> {
-  const r = await calcularPrevia(dados.conteudo, { nomeArquivo: dados.nomeArquivo, mapeamento: dados.mapeamento });
+  const r = await calcularPrevia(dados.conteudo, { nomeArquivo: dados.nomeArquivo, mapeamento: dados.mapeamento, opcoes: dados.opcoes });
   if (!r.ok) return r;
   await db.importPrevia.deleteMany({ where: { OR: [{ expiraEm: { lt: agora } }, { usuarioId: por.id, usadaEm: null }] } });
   const token = randomBytes(32).toString("hex");
   const expiraEm = new Date(agora.getTime() + VALIDADE_PREVIA_MS);
   await db.importPrevia.create({
-    data: { id: token, usuarioId: por.id, hash: r.previa.hash, nomeArquivo: dados.nomeArquivo.slice(0, 255), conteudo: dados.conteudo, mapeamento: r.mapeamento, expiraEm },
+    data: { id: token, usuarioId: por.id, hash: r.previa.hash, nomeArquivo: dados.nomeArquivo.slice(0, 255), conteudo: dados.conteudo, mapeamento: r.mapeamento, opcoes: r.opcoes, expiraEm },
   });
   return { ok: true, token, expiraEm, previa: r.previa };
 }
 
-/** Novo mapeamento sobre o mesmo arquivo: nova prévia (novo token e hash). */
-export async function remapearPrevia(token: string, mapeamento: unknown, por: { id: string }, agora = new Date()) {
+/** Novo mapeamento/opções sobre o mesmo arquivo: nova prévia (novo token e hash). */
+export async function remapearPrevia(token: string, mapeamento: unknown, por: { id: string }, agora = new Date(), opcoes?: unknown) {
   const p = await db.importPrevia.findFirst({ where: { id: token, usuarioId: por.id, usadaEm: null, expiraEm: { gt: agora } } });
   if (!p) return { ok: false as const, erro: ERRO_PREVIA };
-  return criarPrevia({ conteudo: p.conteudo, nomeArquivo: p.nomeArquivo, mapeamento }, por, agora);
+  return criarPrevia({ conteudo: p.conteudo, nomeArquivo: p.nomeArquivo, mapeamento, opcoes }, por, agora);
 }
 
 const ERRO_PREVIA = "Prévia expirada ou já usada. Envie o arquivo de novo.";
@@ -192,26 +212,38 @@ export async function confirmarPrevia(token: string, hash: string, por: { id: st
   // O CSV (dados pessoais) não fica guardado depois de usado; a linha fica até vencer (auditoria do uso único).
   await db.importPrevia.update({ where: { id: token }, data: { conteudo: "" } });
   const mapeamento = p.mapeamento as Mapeamento;
-  if (hashPrevia(p.conteudo, mapeamento) !== hash) return { ok: false, erro: ERRO_PREVIA };
-  return importarConteudo(p.conteudo, mapeamento, por, agora);
+  const opcoes = p.opcoes as OpcoesImport;
+  if (hashPrevia(p.conteudo, mapeamento, opcoes) !== hash) return { ok: false, erro: ERRO_PREVIA };
+  return importarConteudo(p.conteudo, mapeamento, por, agora, { opcoes });
 }
 
+export type ExtrasImport = { aliases?: Aliases; opcoes?: OpcoesImport; tamanhoLote?: number; ganchosTeste?: GanchosTeste };
+
 /** CSV + mapeamento já validados → banco. O CLI com `--confirmar` chama direto. */
-export async function importarConteudo(conteudo: string, mapeamento: unknown, por: { id: string }, agora = new Date(), aliases?: Aliases): Promise<ResultadoImport> {
-  const r = await calcularPrevia(conteudo, { nomeArquivo: "", mapeamento, aliases });
+export async function importarConteudo(conteudo: string, mapeamento: unknown, por: { id: string }, agora = new Date(), extras: ExtrasImport = {}): Promise<ResultadoImport> {
+  const r = await calcularPrevia(conteudo, { nomeArquivo: "", mapeamento, aliases: extras.aliases, opcoes: extras.opcoes });
   if (!r.ok) return r;
   const interp = r.interpretacao;
-  const ap = await aplicarCards(interp.cards, {
-    mapeamento: r.mapeamento,
-    nomesFase: new Map(interp.fases.map((f) => [f.chave, f.nome])),
-    admin: por,
-    agora,
-  });
+  // Linhas que a prévia já recusa (fase sem mapa, perdido sem motivo, contato na lixeira…) não vão para o banco.
+  const recusadas = new Set(r.previa.erros.map((e) => e.linha));
+  const ap = await aplicarCards(
+    interp.cards.filter((c) => !recusadas.has(c.linha)),
+    {
+      mapeamento: r.mapeamento,
+      nomesFase: new Map(interp.fases.map((f) => [f.chave, f.nome])),
+      admin: por,
+      agora,
+      opcoes: r.opcoes,
+      tamanhoLote: extras.tamanhoLote,
+      ganchosTeste: extras.ganchosTeste,
+    },
+  );
   const relatorio: Relatorio = {
     ...ap,
+    total: interp.cards.length,
     duplicadas: interp.duplicadas,
-    pulados: ap.pulados + interp.erros.length,
-    erros: [...interp.erros, ...ap.erros].sort((a, b) => a.linha - b.linha),
+    pulados: ap.pulados + r.previa.erros.length,
+    erros: [...r.previa.erros, ...ap.erros].sort((a, b) => a.linha - b.linha),
     avisos: [...interp.avisos, ...ap.avisos].sort((a, b) => a.linha - b.linha),
   };
   return { ok: true, relatorio };

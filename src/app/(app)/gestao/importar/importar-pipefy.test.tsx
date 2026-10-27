@@ -27,6 +27,8 @@ function previa(extra: Partial<Previa> = {}): Previa {
     existentes: 0,
     duplicadas: 1,
     comProjeto: 1,
+    perdidosSemMotivo: 0,
+    opcoes: {},
     fases: [
       { chave: "lead", nome: "Lead", cardsAtuais: 2, faseId: "f-lead" },
       { chave: "fase misteriosa", nome: "Fase misteriosa", cardsAtuais: 1, faseId: null },
