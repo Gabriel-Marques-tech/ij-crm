@@ -191,13 +191,17 @@ responde. Cron fica só para reprocessar `FALHA` e para backup.
   esforço (mais um serviço e RAM na VPS para ≤ 15 usuários e poucas mensagens
   por dia). `classificar` continua só com o provedor LLM.
 - **Contexto de 12 h (GAB-49):** janelas fixas de 12 h em SP (00–12, 12–24).
-  A extração recebe o **ledger** do remetente na janela atual (as mensagens
-  de venda dele já gravadas em `mensagem_bruta`, com o card que cada uma
-  mexeu; orçamento de caracteres, as mais recentes primeiro) e o **resumo da
-  janela anterior** (gerado pela LLM na 1ª mensagem da janela seguinte, uma
-  vez por vendedor e janela; falha → segue sem resumo). Cards do ledger
-  viram candidatas (`via: ledger`): podem ser escolhidos com `revisar`, e um
-  2º card na janela tira o ✅ do "único card recente".
+  A extração recebe o **ledger** do remetente na janela atual (mensagens
+  `#crm` em qualquer status, com a situação, e sem tag só `PROCESSADA`, lidas
+  de `mensagem_bruta`, com o card que cada uma mexeu; orçamento de
+  caracteres, as mais recentes primeiro) e o **resumo da janela anterior**,
+  só se já estiver pronto — gerado fora do caminho da mensagem (em paralelo,
+  dentro do `after()`, ou pelo cron), uma vez por vendedor e janela, só com a
+  janela sem mensagem em voo; falha → segue sem resumo. Cards do ledger
+  viram candidatas (`via: ledger`): podem ser escolhidos com `revisar`, um
+  2º card na janela tira o ✅ do "único card recente", e card fechado só pelo
+  ledger nunca reabre. Dinheiro e data só entram se escritos na mensagem
+  atual (nada copiado do histórico).
 
 ### 4.5 App web
 - **Kanban** por pipeline: drag-and-drop entre qualquer fase; card mostra
@@ -301,9 +305,10 @@ Matriz de papéis:
   classificador achou relevante; conversa descartada nunca entra) e segue a
   retenção de 90 dias dela. O resumo por vendedor (`resumo_janela`) guarda só
   o texto curto da LLM (nomes de pessoas/empresas, cards, próximos passos),
-  **sem telefone, email nem CPF/CNPJ** (pedido no prompt e removido por
-  código antes de gravar); só o da janela anterior à atual existe — os mais
-  antigos são apagados ao gerar o próximo e pelo cron. Os textos do ledger
+  **sem telefone, email, endereço, dados bancários nem documentos** (proibido
+  no prompt; formatos de telefone/CPF/CNPJ/email removidos por código antes
+  de gravar); só o da janela anterior à atual existe — os mais antigos são
+  apagados no começo de cada geração e pelo cron. Os textos do ledger
   vão ao mesmo provedor de LLM (mesma transferência acima). Log só com
   ids, versão, tokens e ms.
 - Google OAuth depois, sem quebrar o modelo (Usuario ganha `google_sub`).
