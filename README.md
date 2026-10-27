@@ -320,6 +320,9 @@ erro do Prisma só loga `code` + `target`/`modelName` (a mensagem ecoa dados da 
 
 Deploy, rollback, backup/restore, QR da Evolution e troca do número do bot:
 [`docs/runbook.md`](docs/runbook.md) (`compose.prod.yml` + `scripts/deploy.sh`).
+As imagens são buildadas no GitHub Actions a cada push na `main` e publicadas no
+GHCR; a VPS só baixa (`scripts/deploy.sh [sha-<commit>]`). Limites de memória e
+instância mínima: runbook §10.
 
 ## Testes
 
