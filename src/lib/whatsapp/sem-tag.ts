@@ -25,7 +25,7 @@
  * grupo). Para não sumir sem rastro:
  * - `naoClassificadas` +1 no contador do dia (só número);
  * - log `[sem-tag] ref=… LLM <código>` (nunca o texto);
- * - `SEM_CREDITO` dispara o alerta de ops do GAB-46 (`alertarSeSemCredito`);
+ * - `SEM_CREDITO`/`COTA_DIARIA` dispara o alerta de ops do GAB-46 (`alertarSeSemCredito`);
  * - NADA no grupo (decisão do usuário): nem aviso, nem citação do texto. O
  *   alerta de ops do GAB-46 diz que mensagens sem #crm não são
  *   reprocessadas e quem precisar reenvia com #crm.
@@ -62,7 +62,7 @@ async function textoRespondido(eventoId: string | null): Promise<string | null> 
 /**
  * Classificação falhou — LLM, banco ao ler a msg respondida, erro
  * inesperado ou fila cheia: conta, loga com ref (erro saneado, sem texto)
- * e, se for SEM_CREDITO, avisa o ops (GAB-46). Nada vai para o grupo.
+ * e, se for SEM_CREDITO/COTA_DIARIA, avisa o ops (GAB-46). Nada vai para o grupo.
  */
 async function naoClassificada(m: MensagemRecebida, e: unknown, codigo: string): Promise<ResultadoSemTag> {
   const ref = registrarErro("sem-tag", erroSeguro(e));

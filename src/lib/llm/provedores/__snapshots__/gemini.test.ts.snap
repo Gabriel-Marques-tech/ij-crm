@@ -1,0 +1,319 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`paraSchemaGemini (subconjunto de JSON Schema do responseJsonSchema) > trava os schemas convertidos (extração v2, classificação, resumo) > classificacao 1`] = `
+{
+  "additionalProperties": false,
+  "properties": {
+    "confianca": {
+      "description": "0 a 1: quão seguro você está da resposta em \`relevante\`.",
+      "type": "number",
+    },
+    "relevante": {
+      "description": "true se a mensagem registra algo de venda (lead, cliente, proposta, reunião, fechamento, perda).",
+      "type": "boolean",
+    },
+  },
+  "required": [
+    "relevante",
+    "confianca",
+  ],
+  "type": "object",
+}
+`;
+
+exports[`paraSchemaGemini (subconjunto de JSON Schema do responseJsonSchema) > trava os schemas convertidos (extração v2, classificação, resumo) > extracao 1`] = `
+{
+  "additionalProperties": false,
+  "properties": {
+    "campos": {
+      "additionalProperties": false,
+      "properties": {
+        "cidade": {
+          "anyOf": [
+            {
+              "type": "string",
+            },
+            {
+              "type": "null",
+            },
+          ],
+          "description": "cidade do cliente, se citada.",
+        },
+        "dor": {
+          "anyOf": [
+            {
+              "type": "string",
+            },
+            {
+              "type": "null",
+            },
+          ],
+          "description": "problema/necessidade do cliente, curto, em português.",
+        },
+        "estado": {
+          "anyOf": [
+            {
+              "type": "string",
+            },
+            {
+              "type": "null",
+            },
+          ],
+          "description": "UF do cliente com 2 letras (ex.: SP), se citada ou óbvia pela cidade.",
+        },
+        "motivo_perda": {
+          "anyOf": [
+            {
+              "type": "string",
+            },
+            {
+              "type": "null",
+            },
+          ],
+          "description": "motivo, se a mensagem diz que a venda foi perdida.",
+        },
+        "orcamento_previsto": {
+          "anyOf": [
+            {
+              "type": "string",
+            },
+            {
+              "type": "null",
+            },
+          ],
+          "description": "valor do orçamento COMO ESCRITO na mensagem (ex.: '15k', 'uns 15 mil', 'R$ 15.000'); null se não citado.",
+        },
+        "origem": {
+          "anyOf": [
+            {
+              "enum": [
+                "COLD_CALL",
+                "RD",
+                "INDICACAO",
+                "EVENTO",
+                "OUTRO",
+              ],
+              "type": "string",
+            },
+            {
+              "type": "null",
+            },
+          ],
+          "description": "Como o lead chegou: COLD_CALL (prospecção ativa), RD (RD Station/inbound), INDICACAO, EVENTO, OUTRO. null se não dá para inferir.",
+        },
+        "proxima_acao": {
+          "anyOf": [
+            {
+              "type": "string",
+            },
+            {
+              "type": "null",
+            },
+          ],
+          "description": "próximo passo do vendedor, curto e no infinitivo (ex.: 'mandar proposta').",
+        },
+        "proxima_acao_em": {
+          "anyOf": [
+            {
+              "type": "string",
+            },
+            {
+              "type": "null",
+            },
+          ],
+          "description": "quando, COMO ESCRITO na mensagem (ex.: 'sexta', 'semana que vem', '31/10', 'amanhã'); null se não citado.",
+        },
+        "valor_fechado": {
+          "anyOf": [
+            {
+              "type": "string",
+            },
+            {
+              "type": "null",
+            },
+          ],
+          "description": "valor COMO ESCRITO, se a mensagem diz que a venda foi fechada.",
+        },
+      },
+      "required": [
+        "origem",
+        "dor",
+        "orcamento_previsto",
+        "cidade",
+        "estado",
+        "proxima_acao",
+        "proxima_acao_em",
+        "motivo_perda",
+        "valor_fechado",
+      ],
+      "type": "object",
+    },
+    "confianca": {
+      "description": "0 a 1: quão seguro você está da extração inteira.",
+      "type": "number",
+    },
+    "contato": {
+      "additionalProperties": false,
+      "properties": {
+        "email": {
+          "anyOf": [
+            {
+              "type": "string",
+            },
+            {
+              "type": "null",
+            },
+          ],
+          "description": "email do contato exatamente como aparece na mensagem; null se não aparece.",
+        },
+        "id": {
+          "anyOf": [
+            {
+              "type": "string",
+            },
+            {
+              "type": "null",
+            },
+          ],
+          "description": "id de um CONTATO CANDIDATO do contexto se for a mesma pessoa; senão null. Nunca invente ids.",
+        },
+        "nome": {
+          "anyOf": [
+            {
+              "type": "string",
+            },
+            {
+              "type": "null",
+            },
+          ],
+          "description": "nome da pessoa com quem o vendedor falou, como escrito; null se não citado.",
+        },
+        "telefone": {
+          "anyOf": [
+            {
+              "type": "string",
+            },
+            {
+              "type": "null",
+            },
+          ],
+          "description": "telefone do contato exatamente como aparece na mensagem; null se não aparece.",
+        },
+      },
+      "required": [
+        "id",
+        "nome",
+        "telefone",
+        "email",
+      ],
+      "type": "object",
+    },
+    "empresa": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "anyOf": [
+            {
+              "type": "string",
+            },
+            {
+              "type": "null",
+            },
+          ],
+          "description": "id de uma EMPRESA CANDIDATA do contexto se for a mesma; senão null. Nunca invente ids.",
+        },
+        "nome": {
+          "anyOf": [
+            {
+              "type": "string",
+            },
+            {
+              "type": "null",
+            },
+          ],
+          "description": "nome da empresa do lead, como escrito; null se não citado.",
+        },
+      },
+      "required": [
+        "id",
+        "nome",
+      ],
+      "type": "object",
+    },
+    "fase_chave": {
+      "anyOf": [
+        {
+          "type": "string",
+        },
+        {
+          "type": "null",
+        },
+      ],
+      "description": "chave de uma das fases listadas no contexto, se a mensagem indicar a etapa; senão null.",
+    },
+    "intencao": {
+      "description": "CRIAR = lead/oportunidade nova; ATUALIZAR = novidade sobre um card que já existe (uma das OPORTUNIDADES CANDIDATAS); IGNORAR = não é sobre venda.",
+      "enum": [
+        "CRIAR",
+        "ATUALIZAR",
+        "IGNORAR",
+      ],
+      "type": "string",
+    },
+    "oportunidade_id": {
+      "anyOf": [
+        {
+          "type": "string",
+        },
+        {
+          "type": "null",
+        },
+      ],
+      "description": "Em ATUALIZAR: id de uma das OPORTUNIDADES CANDIDATAS do contexto (copie exatamente). Em CRIAR/IGNORAR: null. Nunca invente ids.",
+    },
+    "responsavel_nome": {
+      "anyOf": [
+        {
+          "type": "string",
+        },
+        {
+          "type": "null",
+        },
+      ],
+      "description": "nome do vendedor responsável SÓ se a mensagem atribui o lead a outra pessoa do time; senão null.",
+    },
+    "resumo": {
+      "description": "uma frase em português resumindo a mensagem.",
+      "type": "string",
+    },
+  },
+  "required": [
+    "intencao",
+    "oportunidade_id",
+    "contato",
+    "empresa",
+    "fase_chave",
+    "campos",
+    "responsavel_nome",
+    "confianca",
+    "resumo",
+  ],
+  "type": "object",
+}
+`;
+
+exports[`paraSchemaGemini (subconjunto de JSON Schema do responseJsonSchema) > trava os schemas convertidos (extração v2, classificação, resumo) > resumo 1`] = `
+{
+  "additionalProperties": false,
+  "properties": {
+    "resumo": {
+      "description": "Resumo curto (até ~600 caracteres) em português: cards mexidos, decisões e próximos passos.",
+      "type": "string",
+    },
+  },
+  "required": [
+    "resumo",
+  ],
+  "type": "object",
+}
+`;

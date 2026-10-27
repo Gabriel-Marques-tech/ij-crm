@@ -93,6 +93,34 @@ describe("validarCombinacao", () => {
     expect(validarCombinacao(efetivo({ provedor: "anthropic", modeloExtracao: "claude-sonnet-5-5" }))).toBeNull();
   });
 
+  it("gemini: aceita modelo gemini-* (ou o padrão) e recusa gpt-*/claude-*", () => {
+    expect(efetivo({ provedor: "gemini" }).modeloExtracao).toEqual({ valor: "gemini-3.8-flash", origem: "padrao" });
+    expect(validarCombinacao(efetivo({ provedor: "gemini" }))).toBeNull();
+    expect(validarCombinacao(efetivo({ provedor: "gemini", modeloExtracao: "gemini-3.6-flash" }))).toBeNull();
+    expect(validarCombinacao(efetivo({ provedor: "gemini", modeloExtracao: "gpt-6.1-sol" }))).toMatch(/modelo de extração.*não é do provedor gemini.*gemini-/);
+    expect(validarCombinacao(efetivo({ provedor: "gemini", modeloExtracao: "claude-haiku-5-5" }))).toMatch(/não é do provedor gemini/);
+    expect(validarCombinacao(efetivo({ provedor: "openai", modeloExtracao: "gemini-3.8-flash" }))).toMatch(/não é do provedor openai/);
+    expect(validarCombinacao(efetivo({ provedor: "gemini", modeloClassificacao: "gpt-6.1-sol" }))).toMatch(/modelo de classificação.*não é do provedor gemini/);
+    // Classificação gpt-* herdada do env com gemini é ignorada (usa a da extração).
+    process.env.LLM_CLASSIFICACAO_MODELO = "gpt-6.1-sol";
+    expect(efetivo({ provedor: "gemini" }).modeloClassificacao).toEqual({ valor: "gemini-3.8-flash", origem: "padrao" });
+  });
+
+  it("provedor no env com nome de propriedade de objeto (constructor, toString) é inválido, sem modelo padrão", () => {
+    for (const p of ["constructor", "toString", "__proto__"]) {
+      process.env.LLM_PROVEDOR = p;
+      const r = efetivo({});
+      expect(r.modeloExtracao, p).toEqual({ valor: null, origem: "padrao" });
+      expect(validarCombinacao(r), p).toMatch(/LLM_PROVEDOR/);
+    }
+  });
+
+  it("gemma-* não passa como modelo da OpenAI nem do Gemini", () => {
+    expect(validarCombinacao(efetivo({ provedor: "openai", modeloExtracao: "gemma-4-31b-it" }))).toMatch(/não é do provedor openai/);
+    expect(validarCombinacao(efetivo({ provedor: "gemini", modeloExtracao: "gemma-4-31b-it" }))).toMatch(/não é do provedor gemini/);
+    expect(validarCombinacao(efetivo({ provedor: "gemini", modeloExtracao: "models/gemini-3.8-flash" }))).toBeNull();
+  });
+
   it("recusa modelo de outro provedor (config ou env herdado)", () => {
     expect(validarCombinacao(efetivo({ provedor: "anthropic", modeloExtracao: "gpt-6.1-sol" }))).toMatch(/modelo de extração.*não é do provedor anthropic/);
     process.env.LLM_EXTRACAO_MODELO = "gpt-6.1-sol";
@@ -123,7 +151,7 @@ describe("validarCombinacao", () => {
       (process.env as Record<string, string | undefined>).NODE_ENV = original;
     }
     expect(validarCombinacao(efetivo({ provedor: "mock" }))).toBeNull();
-    process.env.LLM_PROVEDOR = "gemini";
+    process.env.LLM_PROVEDOR = "cohere";
     expect(validarCombinacao(efetivo({}))).toMatch(/LLM_PROVEDOR/);
     expect(validarCombinacao(efetivo({ provedor: "openai" }))).toBeNull();
   });

@@ -33,6 +33,36 @@ describe("provedor por env", () => {
     process.env.LLM_PROVEDOR = "anthropic";
     process.env.ANTHROPIC_API_KEY = "sk-ant-x";
     expect(provedorConfigurado().nome).toBe("anthropic");
+    process.env.LLM_PROVEDOR = "gemini";
+    process.env.GEMINI_API_KEY = "AIza-x";
+    expect(provedorConfigurado().nome).toBe("gemini");
+    expect(provedorConfigurado("classificacao").nome).toBe("gemini");
+  });
+
+  it("gemini sem GEMINI_API_KEY → ErroLlm SEM_CHAVE (não quebra o processo)", async () => {
+    process.env.LLM_PROVEDOR = "gemini";
+    delete process.env.GEMINI_API_KEY;
+    await expect(extrairAtualizacao("#crm x", CTX)).rejects.toMatchObject({
+      name: "ErroLlm",
+      codigo: "SEM_CHAVE",
+      message: expect.stringContaining("GEMINI_API_KEY ausente"),
+    });
+  });
+
+  it("gemini com modelo de outro provedor (gpt-/claude-) → PROVEDOR_INVALIDO; openai com gemini-* também", () => {
+    process.env.LLM_PROVEDOR = "gemini";
+    process.env.GEMINI_API_KEY = "AIza-x";
+    for (const m of ["gpt-6.1-sol", "claude-haiku-5-5"]) {
+      process.env.LLM_EXTRACAO_MODELO = m;
+      expect(() => provedorConfigurado(), m).toThrow(expect.objectContaining({ codigo: "PROVEDOR_INVALIDO", message: expect.stringContaining(m) }));
+    }
+    process.env.LLM_EXTRACAO_MODELO = "gemini-3.6-flash";
+    expect(provedorConfigurado().nome).toBe("gemini");
+    process.env.LLM_EXTRACAO_MODELO = "gemma-4-31b-it";
+    expect(() => provedorConfigurado()).toThrow(expect.objectContaining({ codigo: "PROVEDOR_INVALIDO" }));
+    process.env.LLM_PROVEDOR = "openai";
+    process.env.OPENAI_API_KEY = "sk-x";
+    expect(() => provedorConfigurado()).toThrow(expect.objectContaining({ codigo: "PROVEDOR_INVALIDO" }));
   });
 
   it("openai sem OPENAI_API_KEY → ErroLlm SEM_CHAVE (não quebra o processo)", async () => {
@@ -73,7 +103,7 @@ describe("provedor por env", () => {
   });
 
   it("valor desconhecido → PROVEDOR_INVALIDO", () => {
-    process.env.LLM_PROVEDOR = "gemini";
+    process.env.LLM_PROVEDOR = "cohere";
     expect(() => provedorConfigurado()).toThrow(expect.objectContaining({ codigo: "PROVEDOR_INVALIDO" }));
   });
 });

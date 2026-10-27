@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ErroEnvioWhatsApp, ErroPosEnvio } from "@/lib/whatsapp/enviar";
 import { dbTeste, limparBanco } from "@/test/db";
-import { alertarSeSemCredito, estadoSemCredito, marcarCreditoOk, textoAlertaSemCredito } from "./alerta-credito";
+import { alertarSeSemCredito, estadoSemCredito, marcarCreditoOk, textoAlertaCotaDiaria, textoAlertaSemCredito } from "./alerta-credito";
 import { ErroLlm } from "./tipos";
 
 const dbT = dbTeste();
@@ -115,6 +115,29 @@ describe("alertarSeSemCredito", () => {
     expect(await alertarSeSemCredito(new Error("x"), "r", { enviar })).toBe("IGNORADO");
     expect(enviar).not.toHaveBeenCalled();
     expect(await linha()).toBeNull();
+  });
+
+  it("COTA_DIARIA também avisa, com texto próprio (sem texto do grupo), e divide o cooldown com SEM_CREDITO", async () => {
+    expect(textoAlertaCotaDiaria("abc12345")).toBe(
+      "⚠️ Cota diária da API de LLM (Gemini) esgotada. Mensagens do grupo estão ficando em FALHA e serão reprocessadas quando a cota voltar (no próximo dia) ou depois de aumentar o limite no AI Studio. Mensagens sem #crm não são reprocessadas; quem precisar, reenvie com #crm. ref: abc12345",
+    );
+    const enviar = enviarFalso();
+    const cota = new ErroLlm("COTA_DIARIA", { status: 429 });
+    expect(await alertarSeSemCredito(cota, "ref00001", { enviar })).toBe("ENVIADO");
+    expect(enviar.mock.calls[0][0]).toEqual({ para: OPS, texto: textoAlertaCotaDiaria("ref00001") });
+    // Mesmo cooldown: nem outra cota nem sem crédito avisam de novo dentro das 6 h.
+    expect(await alertarSeSemCredito(cota, "ref00002", { enviar })).toBe("EM_COOLDOWN");
+    expect(await alertarSeSemCredito(SEM_CREDITO, "ref00003", { enviar })).toBe("EM_COOLDOWN");
+    expect(enviar).toHaveBeenCalledTimes(1);
+    expect(await estadoSemCredito()).not.toBeNull();
+  });
+
+  it("COTA_DIARIA em safe mode só loga, com motivo próprio", async () => {
+    process.env.NOTIFICATIONS_ENABLED = "false";
+    const enviar = enviarFalso();
+    expect(await alertarSeSemCredito(new ErroLlm("COTA_DIARIA", { status: 429 }), "ref00009", { enviar })).toBe("SO_LOG");
+    expect(enviar).not.toHaveBeenCalled();
+    expect(logs(console.warn)).toMatch(/cota diária ref=ref00009/);
   });
 
   it("aceita SEM_CREDITO de qualquer provedor (só olha o código)", async () => {

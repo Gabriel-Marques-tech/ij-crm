@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { dbTeste, limparBanco } from "@/test/db";
-import { grupoJid, limiarConfianca, provedorLlm, timeoutEnvioMs } from "./env";
+import { grupoJid, limiarConfianca, modeloExtracao, provedorLlm, timeoutEnvioMs } from "./env";
 import { definirSobrescritas } from "./sobrescritas";
 import { ErroEvolutionAdmin } from "@/lib/whatsapp/evolution-admin";
 import { carregarConfigTecnica, invalidarConfigTecnica, restaurarConfigTecnica, salvarConfigTecnica } from "./tecnica";
@@ -97,6 +97,16 @@ describe("config técnica com cache", () => {
     expect(await salvarConfigTecnica({ grupoJid: "222222@g.us" }, gestor, null, GRUPOS())).toEqual({ ok: false, erro: "SEM_PERMISSAO" });
     expect(await restaurarConfigTecnica(gestor, null)).toEqual({ ok: false, erro: "SEM_PERMISSAO" });
     expect(await dbT.configuracao.count()).toBe(0);
+  });
+
+  it("aceita gemini + modelo gemini-* e recusa gemini + modelo gpt-*", async () => {
+    const ruim = await salvarConfigTecnica({ provedor: "gemini", modeloExtracao: "gpt-6.1-sol" }, admin, null, GRUPOS());
+    expect(ruim).toMatchObject({ ok: false, erro: "DADOS_INVALIDOS", mensagem: expect.stringMatching(/não é do provedor gemini/) });
+    expect(await dbT.configuracao.count()).toBe(0);
+    const ok = await salvarConfigTecnica({ provedor: "gemini", modeloExtracao: "gemini-3.8-flash" }, admin, null, GRUPOS());
+    expect(ok).toMatchObject({ ok: true, valor: { provedor: "gemini", modeloExtracao: "gemini-3.8-flash" } });
+    expect(provedorLlm()).toBe("gemini");
+    expect(modeloExtracao("gemini")).toBe("gemini-3.8-flash");
   });
 
   it("combinação inválida é recusada em português e não grava", async () => {

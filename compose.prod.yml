@@ -17,7 +17,7 @@
 # medição e instância mínima no runbook §11. Para mudar, defina no .env.
 #
 # Redes (alcance mínimo; `internal` = sem saída para a internet):
-#   edge            caddy, app            — Caddy → app; saída do app (API da Anthropic)
+#   edge            caddy, app, llm-smoke — Caddy → app; saída do app (API do provedor de LLM)
 #   rede-app        app, db, migrate      — internal
 #   rede-whatsapp   app, evolution        — internal; app → Evolution e webhook Evolution → app
 #   rede-evolution  evolution, evolution-db, evolution-redis — internal
@@ -103,7 +103,8 @@ services:
       EVOLUTION_TIMEOUT_ENVIO_MS: ${EVOLUTION_TIMEOUT_ENVIO_MS:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      # Vazio = padrão do provedor (gpt-6.1-sol / claude-haiku-5-5).
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      # Vazio = padrão do provedor (gpt-6.1-sol / claude-haiku-5-5 / gemini-3.8-flash).
       LLM_EXTRACAO_MODELO: ${LLM_EXTRACAO_MODELO:-}
       LLM_PROVEDOR: ${LLM_PROVEDOR:-openai}
       LLM_LIMIAR_CONFIANCA: ${LLM_LIMIAR_CONFIANCA:-0.7}
@@ -142,6 +143,21 @@ services:
       db:
         condition: service_healthy
     command: ["./node_modules/.bin/prisma", "migrate", "deploy"]
+
+  # Smoke do provedor de LLM (runbook §10): `dc --profile ops run --rm llm-smoke`.
+  # Imagem `ops` (tem tsx e o código-fonte; a do app não) com o MESMO env do app,
+  # na rede `edge` só para sair à API do provedor. Sem banco: chama o provedor direto.
+  llm-smoke:
+    image: ${OPS_IMAGE:-ghcr.io/gabriel-marques-tech/ij-crm-ops}:${APP_TAG:-latest}
+    build:
+      <<: *app-build
+      target: ops
+    profiles: ["ops"]
+    logging: *logging
+    mem_limit: ${MIGRATE_MEM_LIMIT:-512m}
+    environment: *app-env
+    networks: [edge]
+    command: ["tsx", "scripts/smoke-llm.ts"]
 
   db:
     <<: *postgres-leve

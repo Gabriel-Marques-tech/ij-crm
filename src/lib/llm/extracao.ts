@@ -4,12 +4,12 @@
  * - `classificar(texto, contexto)` → `{ relevante, confianca }` em
  *   `classificacao.ts` (GAB-39), sobre o mesmo `provedorConfigurado`.
  *
- * Provedor por `LLM_PROVEDOR` (`openai` padrão | `anthropic` | `mock`). Cada
+ * Provedor por `LLM_PROVEDOR` (`openai` padrão | `anthropic` | `gemini` | `mock`). Cada
  * chamada loga provedor, modelo, versão do prompt, latência e tokens (incl.
  * raciocínio) — NUNCA o texto.
  */
 import { registrarLogLlm } from "@/lib/logs/tecnicos";
-import { ConfigInvalida, chaveAnthropic, chaveOpenAI, modeloClassificacao, modeloExtracao, provedorLlm } from "@/lib/config/env";
+import { ConfigInvalida, chaveAnthropic, chaveGemini, chaveOpenAI, modeloClassificacao, modeloDoProvedor, modeloExtracao, provedorLlm } from "@/lib/config/env";
 import {
   JSON_SCHEMA_EXTRACAO,
   PROMPT_SISTEMA,
@@ -20,6 +20,7 @@ import {
   type Extracao,
 } from "./prompts/extracao.v2";
 import { criarProvedorAnthropic } from "./provedores/anthropic";
+import { criarProvedorGemini } from "./provedores/gemini";
 import { criarProvedorMock } from "./provedores/mock";
 import { criarProvedorOpenAI } from "./provedores/openai";
 import { ErroLlm, type ProvedorLlm, type UsoLlm } from "./tipos";
@@ -47,17 +48,24 @@ export function provedorConfigurado(finalidade: "extracao" | "classificacao" = "
     const apiKey = chaveOpenAI();
     if (!apiKey) throw new ErroLlm("SEM_CHAVE", { detalhe: "OPENAI_API_KEY ausente" });
     const modelo = modeloPara("openai");
-    if (modelo.startsWith("claude-")) throw modeloTrocado(modelo, "openai");
+    if (!modeloDoProvedor(modelo, "openai")) throw modeloTrocado(modelo, "openai");
     return criarProvedorOpenAI({ apiKey, modelo });
   }
   if (nome === "anthropic") {
     const apiKey = chaveAnthropic();
     if (!apiKey) throw new ErroLlm("SEM_CHAVE", { detalhe: "ANTHROPIC_API_KEY ausente" });
     const modelo = modeloPara("anthropic");
-    if (!modelo.startsWith("claude-")) throw modeloTrocado(modelo, "anthropic");
+    if (!modeloDoProvedor(modelo, "anthropic")) throw modeloTrocado(modelo, "anthropic");
     return criarProvedorAnthropic({ apiKey, modelo });
   }
-  throw new ErroLlm("PROVEDOR_INVALIDO", { detalhe: "LLM_PROVEDOR deve ser openai, anthropic ou mock" });
+  if (nome === "gemini") {
+    const apiKey = chaveGemini();
+    if (!apiKey) throw new ErroLlm("SEM_CHAVE", { detalhe: "GEMINI_API_KEY ausente" });
+    const modelo = modeloPara("gemini");
+    if (!modeloDoProvedor(modelo, "gemini")) throw modeloTrocado(modelo, "gemini");
+    return criarProvedorGemini({ apiKey, modelo });
+  }
+  throw new ErroLlm("PROVEDOR_INVALIDO", { detalhe: "LLM_PROVEDOR deve ser openai, anthropic, gemini ou mock" });
 }
 
 /** `.env` trocou o provedor e esqueceu o modelo: falha clara em vez de um 404 da API por mensagem. */
