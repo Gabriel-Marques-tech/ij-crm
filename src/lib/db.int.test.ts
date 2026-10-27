@@ -21,6 +21,7 @@ function semSegredo(e: Error) {
   expect(e.message).not.toContain(EMAIL);
   expect(e.message).not.toContain("segredo");
   expect(e.stack ?? "").not.toContain(EMAIL);
+  expect(JSON.stringify((e as { meta?: unknown }).meta ?? {})).not.toContain(EMAIL);
 }
 
 describe("db: erros do Prisma saem sem os argumentos da query (LGPD)", () => {
@@ -53,5 +54,42 @@ describe("db: erros do Prisma saem sem os argumentos da query (LGPD)", () => {
     const cru = await capturar(db.$executeRawUnsafe(`INSERT INTO usuario (id, nome, email, atualizado_em) VALUES ('x2', 'Ana', '${EMAIL}', now())`));
     expect(cru).toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
     semSegredo(cru);
+  });
+
+  it("SQL cru com template ($queryRaw/$executeRaw): Postgres ecoa o valor em meta → sai", async () => {
+    await db.usuario.create({ data: { nome: "Ana", email: EMAIL } });
+    const exec = await capturar(db.$executeRaw`INSERT INTO usuario (id, nome, email, atualizado_em) VALUES ('x3', 'Ana', ${EMAIL}, now())`);
+    expect((exec as Prisma.PrismaClientKnownRequestError).code).toBe("P2010");
+    semSegredo(exec);
+    const query = await capturar(db.$queryRaw`SELECT * FROM usuario WHERE email = ${EMAIL} AND id = ${EMAIL}::int`);
+    semSegredo(query);
+  });
+
+  it("$transaction em lote e escrita aninhada", async () => {
+    await db.usuario.create({ data: { nome: "Ana", email: EMAIL } });
+    const lote = await capturar(db.$transaction([db.usuario.create({ data: { nome: "Ana 2", email: EMAIL } })]));
+    expect((lote as Prisma.PrismaClientKnownRequestError).code).toBe("P2002");
+    semSegredo(lote);
+    const aninhada = await capturar(
+      // erro no nível aninhado ecoa os args do pai e do filho
+      db.usuario.create({ data: { nome: "Bia", email: `bia.${EMAIL}`, sessoes: { create: [{ id: EMAIL, expiraEm: "nao-e-data" }] } } as never }),
+    );
+    expect(aninhada).toBeInstanceOf(Prisma.PrismaClientValidationError);
+    semSegredo(aninhada);
+  });
+
+  it("timeout de transação interativa no commit (P2028) mantém classe/código", async () => {
+    const e = await capturar(
+      db.$transaction(
+        async (tx) => {
+          await tx.usuario.count();
+          await new Promise((r) => setTimeout(r, 300));
+        },
+        { timeout: 50 },
+      ),
+    );
+    expect(e).toBeInstanceOf(Prisma.PrismaClientKnownRequestError);
+    expect((e as Prisma.PrismaClientKnownRequestError).code).toBe("P2028");
+    expect(e.message).toMatch(/^Prisma P2028/);
   });
 });
