@@ -726,6 +726,66 @@ AWS (EC2, /opt/ij-crm, usuário deploy)
 - **Mudanças na `main` só entram por PR,** e os testes de deploy e a checagem
   de migrations rodam em cada PR.
 
+### Como o GitHub se conecta à AWS
+
+São três peças. Nenhuma depende de senha, chave de acesso ou porta aberta:
+
+```
+GitHub Actions (job deploy)
+   │ 1. "sou o job deploy do repo ij-crm, branch main" → token OIDC assinado pelo GitHub
+   ▼
+AWS IAM (role ij-crm-deploy-gha)
+   │ 2. confere o token (repo + id do repo/dono + environment producao) e devolve
+   │    credenciais temporárias (~1 h) que só servem para o passo 3
+   ▼
+AWS SSM Run Command (documento ij-crm-deploy)
+   │ 3. "rode o deploy com a tag sha-xxx e estes digests" na instância i-…
+   ▼
+Agente SSM dentro da EC2 (já vem instalado no Ubuntu/Amazon Linux)
+   │ 4. a máquina busca o comando na AWS (conexão de SAÍDA, porta 443)
+   ▼
+deploy-remoto.sh → deploy.sh (usuário deploy) → resultado volta pro GitHub
+```
+
+1. **OIDC (identidade do GitHub):** cada run do Actions recebe do GitHub um
+   token assinado dizendo de qual repo, branch e environment ele veio. A AWS
+   confia no GitHub como "provedor de identidade" (cadastrado uma vez no IAM).
+2. **Role da AWS:** a role `ij-crm-deploy-gha` só aceita tokens do job `deploy`
+   deste repositório (pelo id numérico, então renomear ou recriar o repo com o
+   mesmo nome não engana), no environment `producao`, a partir da `main`. As
+   credenciais que ela devolve expiram sozinhas e só podem mandar (e acompanhar) **um**
+   documento para **uma** instância; não dá para abrir shell, ler segredos nem
+   mexer em outra coisa da conta.
+3. **SSM (o "mensageiro"):** o agente SSM na EC2 fica conectado à AWS por uma
+   conexão de saída. Por isso a máquina não precisa de porta 22 nem de IP
+   liberado para o GitHub: ela mesma busca o comando. A instância precisa do
+   instance profile `ij-crm-ec2-ssm` (`AmazonSSMManagedInstanceCore`) para o
+   agente funcionar.
+4. **Na máquina:** o documento roda `deploy-remoto.sh` como o usuário `deploy`
+   (sem herdar variáveis), que confere que o commit está na `main` e que os
+   digests batem, e chama `deploy.sh`. O código de saída e o fim do log voltam
+   para o resumo do job no GitHub.
+
+**O que configurar uma vez** (passo a passo com comandos no
+[runbook, "Deploy automático"](docs/runbook.md#deploy-automático-github-actions--aws-ssm)):
+
+| Onde | O quê |
+|---|---|
+| AWS IAM | provedor OIDC `token.actions.githubusercontent.com` |
+| AWS IAM | role `ij-crm-deploy-gha` (confiança só neste repo/environment + permissão de `ssm:SendCommand`) |
+| AWS IAM / EC2 | instance profile `ij-crm-ec2-ssm` na instância |
+| AWS SSM | documento `ij-crm-deploy` (de `deploy/ssm-deploy.yaml`) |
+| EC2 security group | só 80/443 de entrada; porta 22 removida |
+| GitHub → Settings → Environments → `producao` | variáveis `AWS_DEPLOY_ROLE_ARN`, `AWS_REGION`, `DEPLOY_INSTANCE_ID` (não são segredos) |
+
+Enquanto essas variáveis não existirem, o job `deploy` aparece como *skipped*
+e o build continua publicando as imagens normalmente.
+
+**Testar a conexão sem fazer deploy:** no console da AWS, **Systems Manager →
+Fleet Manager** deve listar a instância como *Online*. Pela CLI:
+`aws ssm describe-instance-information` (ping `Online`). Se não aparecer, quase
+sempre falta o instance profile ou a máquina não tem saída para a internet.
+
 ### No dia a dia: fazer um deploy
 
 **Mergeie a PR na `main`. Só isso.** Uns 5 a 10 minutos depois, a versão nova
