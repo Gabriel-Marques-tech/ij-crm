@@ -24,7 +24,7 @@ import { contarDescartada } from "./contadores";
 import { mascararJid, mascararTelefone } from "./mascarar";
 import type { MensagemRecebida, Remetente } from "./payload";
 import { temTagCrm } from "./payload";
-import { ruidoObvio } from "./sem-tag";
+import { ruidoObvio } from "./ruido";
 
 export type ResultadoIngestao =
   | { tipo: "DUPLICADO" }

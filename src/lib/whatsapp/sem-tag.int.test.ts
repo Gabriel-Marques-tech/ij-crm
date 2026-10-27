@@ -7,7 +7,7 @@ import { ErroLlm } from "@/lib/llm/tipos";
 import { dbTeste, limparBanco } from "@/test/db";
 import { semear } from "../../../prisma/seed";
 import type { MensagemRecebida } from "./payload";
-import { avaliarSemTag, reiniciarAvisoSemTag, ruidoObvio } from "./sem-tag";
+import { avaliarSemTag, reiniciarAvisoSemTag } from "./sem-tag";
 
 const dbT = dbTeste();
 const GRUPO = "120363000000000001@g.us";
@@ -79,19 +79,6 @@ afterEach(() => {
   definirClassificacaoMock(null);
   vi.restoreAllMocks();
   process.env = { ...envOriginal };
-});
-
-describe("ruidoObvio (não chama a LLM)", () => {
-  it.each([
-    ["ok", true],
-    ["  kkkk  ", true],
-    ["👍👍👍👍👍👍👍👍", true],
-    ["!!! ??? ...", true],
-    ["valeu galera", false],
-    ["fechei 20k", false],
-  ])("%j → %s", (texto, esperado) => {
-    expect(ruidoObvio(texto)).toBe(esperado);
-  });
 });
 
 describe("avaliarSemTag", () => {

@@ -49,6 +49,7 @@ import { aplicarExtracao, type Desfecho } from "./aplicar";
 import { textoCriado, textoCriadoSemTag, textoFalha, textoPendente } from "./confirmacao";
 import { contarDescartada } from "./contadores";
 import { enviarWhatsApp } from "./enviar";
+import { erroSeguro } from "./erro-seguro";
 import { extrairIdentificadores } from "./identificadores";
 import { regraSemTag } from "./regra-sem-tag";
 
@@ -138,20 +139,6 @@ function codigoDe(e: unknown): string {
   if (e instanceof ErroDeRegra) return `REGRA_${e.erro}`;
   if (e instanceof Prisma.PrismaClientKnownRequestError) return `PRISMA_${e.code}`;
   return "INESPERADO";
-}
-
-/**
- * Erro que pode ir para `registrarErro` sem vazar texto: ErroLlm/ErroDeRegra
- * têm mensagem só de código; Prisma conhecido é descrito por código. Qualquer
- * outro (ex.: PrismaClientValidationError, que ecoa os argumentos) perde a
- * mensagem e mantém nome + frames.
- */
-function erroSeguro(e: unknown): unknown {
-  if (e instanceof ErroLlm || e instanceof ErroDeRegra || e instanceof Prisma.PrismaClientKnownRequestError) return e;
-  const s = new Error("(mensagem omitida)");
-  s.name = e instanceof Error ? e.name : typeof e;
-  if (e instanceof Error && e.stack) s.stack = e.stack;
-  return s;
 }
 
 function registroLlm(r: ResultadoExtracao | null, bruto?: unknown, uso?: ResultadoExtracao["uso"]) {

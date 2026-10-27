@@ -40,15 +40,6 @@ import { enviarWhatsApp } from "./enviar";
 import type { MensagemRecebida } from "./payload";
 import { processarMensagem, type ResultadoProcessamento } from "./processar";
 
-/** Abaixo disto (sem espaços nas pontas) nem chama a LLM: "ok", "kkkk", "👍👍". */
-export const MIN_CARACTERES_SEM_TAG = 8;
-
-/** Curto demais, ou sem nenhuma letra/dígito (só emoji, pontuação, símbolo). */
-export function ruidoObvio(texto: string): boolean {
-  const t = texto.trim();
-  return [...t].length < MIN_CARACTERES_SEM_TAG || !/[\p{L}\p{N}]/u.test(t);
-}
-
 export type ResultadoSemTag =
   | { tipo: "DESCARTADA" }
   | { tipo: "NAO_CLASSIFICADA"; ref: string; codigo: string }

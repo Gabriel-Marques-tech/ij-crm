@@ -9,8 +9,8 @@
  * 2. Semente do benchmark (GAB-40): rótulo para comparar modelos reais com o
  *    mesmo prompt (`classificacao.v1.ts`).
  *
- * Nenhuma tem menos de 8 caracteres: as triviais nem chegam à LLM
- * (`ruidoObvio` em `src/lib/whatsapp/sem-tag.ts`).
+ * Todas têm letra/dígito: só-emoji nem chega à LLM (`ruidoObvio` em
+ * `src/lib/whatsapp/ruido.ts`).
  */
 import type { Classificacao } from "../prompts/classificacao.v1";
 

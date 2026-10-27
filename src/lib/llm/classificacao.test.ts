@@ -26,12 +26,11 @@ afterEach(() => {
 });
 
 describe("fixtures do classificador (stub determinístico)", () => {
-  it("são 20: 10 relevantes e 10 ruído, todas válidas no schema e com ≥ 8 caracteres", () => {
+  it("são 20: 10 relevantes e 10 ruído, todas válidas no schema", () => {
     expect(FIXTURES_CLASSIFICACAO).toHaveLength(20);
     expect(FIXTURES_CLASSIFICACAO.filter((f) => f.saida.relevante)).toHaveLength(10);
     for (const f of FIXTURES_CLASSIFICACAO) {
       expect(esquemaClassificacao.safeParse(f.saida).success).toBe(true);
-      expect(f.texto.trim().length).toBeGreaterThanOrEqual(8);
     }
   });
 
