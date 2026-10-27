@@ -9,21 +9,32 @@ import type { DiaAgrupado } from "@/lib/calendario/semana";
 import type { PrazoItem } from "@/lib/prazos/prazos";
 import { useEditorPrazo } from "./editor-prazo";
 
-/** Agenda lateral (~220px, como a do ICS): os itens da semana agrupados por dia. */
-export function Agenda({ dias, hoje }: { dias: DiaAgrupado<AcaoItem, PrazoItem>[]; hoje: string }) {
+/** Agenda lateral (~220px, como a do ICS): os itens do período agrupados por dia. */
+export function Agenda({
+  dias,
+  hoje,
+  rotulo = "Esta semana",
+  vazio = "Nada nesta semana.",
+}: {
+  dias: DiaAgrupado<AcaoItem, PrazoItem>[];
+  hoje: string;
+  /** Cabeçalho: "Esta semana", "Este mês", "Próximos 15 dias"… */
+  rotulo?: string;
+  vazio?: string;
+}) {
   const { abrir } = useEditorPrazo();
   const comItens = dias.filter((d) => d.acoes.length || d.prazos.length);
   const total = comItens.reduce((n, d) => n + d.acoes.length + d.prazos.length, 0);
   return (
     <aside className={comItens.length ? "space-y-6" : "space-y-4"}>
       <p className="eyebrow">
-        Esta semana · <span className="tabular">{total}</span> {total === 1 ? "item" : "itens"}
+        {rotulo} · <span className="tabular">{total}</span> {total === 1 ? "item" : "itens"}
       </p>
-      {comItens.length === 0 ? <p className="text-sm text-fg-mute">Nada nesta semana.</p> : null}
+      {comItens.length === 0 ? <p className="text-sm text-fg-mute">{vazio}</p> : null}
       {comItens.map(({ dia, acoes, prazos }) => {
         const r = rotuloDia(dia);
         return (
-          <div key={dia} className="space-y-2">
+          <div key={dia} id={`agenda-${dia}`} className="scroll-mt-20 space-y-2">
             <p className={cn("font-mono text-xs font-medium", dia === hoje ? "text-primary" : "text-fg-mute")}>
               {r.semana} <span className="tabular">{r.ddmm}</span>
               {dia === hoje ? " · hoje" : ""}
