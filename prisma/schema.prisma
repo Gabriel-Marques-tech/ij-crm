@@ -377,6 +377,7 @@ model MensagemBruta {
 
   @@index([status])
   @@index([remetenteUsuarioId, recebidaEm])
+  @@index([recebidaEm]) // GAB-49: remetentes de uma janela (gerarResumosPendentes)
   @@index([respondendoEventoId])
   @@map("mensagem_bruta")
 }

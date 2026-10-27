@@ -125,13 +125,40 @@ describe("ledger da janela atual no contexto", () => {
 });
 
 describe("resumo da janela anterior no contexto", () => {
-  it("1ª mensagem da janela gera o resumo da anterior e ele vai no prompt", async () => {
+  it("1ª mensagem da janela NÃO espera o resumo: extrai sem ele; o resumo fica pronto em paralelo e entra na 2ª", async () => {
     const agora = new Date();
     await bruta("#crm falei com o Gustavo", new Date(janelaAnterior(agora).inicio.getTime() + MIN), { status: "PROCESSADA" });
-    definirResumoMock(() => ({ resumo: "Gustavo (Economia Sensata): proposta sexta." }));
-    const r = await enviar("#crm é da Economia Sensata", agora, () => saida({ confianca: 0 }));
-    expect(r.prompt).toContain("<resumo_anterior>\nGustavo (Economia Sensata): proposta sexta.\n</resumo_anterior>");
-    expect(await dbT.resumoJanela.count()).toBe(1);
+    let soltar!: () => void;
+    const portao = new Promise<void>((r) => (soltar = r));
+    let resumoPronto = false;
+    definirResumoMock(async () => {
+      await portao; // só termina depois que a extração já rodou
+      resumoPronto = true;
+      return { resumo: "Gustavo (Economia Sensata): proposta sexta." };
+    });
+    let extraiuAntesDoResumo = false;
+    const r1 = await enviar("#crm é da Economia Sensata", agora, () => {
+      extraiuAntesDoResumo = !resumoPronto;
+      soltar();
+      return saida({ confianca: 0 });
+    });
+    expect(extraiuAntesDoResumo).toBe(true);
+    expect(r1.prompt).not.toContain("<resumo_anterior>");
+    expect(await dbT.resumoJanela.findFirstOrThrow()).toMatchObject({ status: "PRONTO" });
+
+    const r2 = await enviar("#crm mando proposta sexta", new Date(agora.getTime() + 1000), () => saida({ confianca: 0 }));
+    expect(r2.prompt).toContain("<resumo_anterior>\nGustavo (Economia Sensata): proposta sexta.\n</resumo_anterior>");
+  });
+
+  it("resumo ainda GERANDO (outro worker) → extrai sem ele e não dispara outra geração", async () => {
+    const agora = new Date();
+    await bruta("#crm x", new Date(janelaAnterior(agora).inicio.getTime() + MIN), { status: "PROCESSADA" });
+    await dbT.resumoJanela.create({ data: { usuarioId: joao.id, janelaInicio: janelaAnterior(agora).inicio, status: "GERANDO", atualizadoEm: new Date() } });
+    const fn = vi.fn(() => ({ resumo: "x" }));
+    definirResumoMock(fn);
+    const r = await enviar("#crm algo", agora, () => saida({ confianca: 0 }));
+    expect(r.prompt).not.toContain("<resumo_anterior>");
+    expect(fn).not.toHaveBeenCalled();
   });
 
   it("falha do resumo não bloqueia: a extração segue sem a seção", async () => {

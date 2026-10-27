@@ -4,7 +4,7 @@ import { definirResumoMock } from "@/lib/llm/provedores/mock";
 import { ErroLlm } from "@/lib/llm/tipos";
 import { dbTeste, limparBanco } from "@/test/db";
 import { janelaAnterior, janelaDe } from "./janela";
-import { aplicarRetencaoResumos, gerarResumosPendentes, resumoJanelaAnterior } from "./resumo";
+import { aplicarRetencaoResumos, gerarResumoJanelaAnterior as resumoJanelaAnterior, gerarResumosPendentes, lerResumoJanelaAnterior } from "./resumo";
 
 const dbT = dbTeste();
 const TABELAS = ["resumo_janela", "timeline", "mensagem_bruta", "usuario"];
@@ -126,6 +126,41 @@ describe("resumoJanelaAnterior — gerado sob demanda, idempotente, nunca lança
     await dbT.resumoJanela.update({ where: { id: linha.id }, data: { atualizadoEm: new Date(Date.now() - 6 * 60_000) } });
     expect(await resumoJanelaAnterior(joao.id, AGORA)).toBe("novo");
   });
+
+  it("GERANDO abandonado também respeita o teto de tentativas", async () => {
+    await bruta(joao.id, "x", naAnterior(1));
+    await dbT.resumoJanela.create({
+      data: { usuarioId: joao.id, janelaInicio: ANTERIOR.inicio, status: "GERANDO", tentativas: 3, atualizadoEm: new Date(Date.now() - 60 * 60_000) },
+    });
+    const fn = vi.fn(() => ({ resumo: "novo" }));
+    definirResumoMock(fn);
+    expect(await resumoJanelaAnterior(joao.id, AGORA)).toBeNull();
+    expect(fn).not.toHaveBeenCalled();
+  });
+
+  it("janela anterior com mensagem do vendedor ainda em voo (RECEBIDA/PROCESSANDO) → não gera agora", async () => {
+    const fn = vi.fn(() => ({ resumo: "completo" }));
+    definirResumoMock(fn);
+    await bruta(joao.id, "x", naAnterior(1));
+    const emVoo = await bruta(joao.id, "y", naAnterior(2), { status: "PROCESSANDO" });
+    expect(await resumoJanelaAnterior(joao.id, AGORA)).toBeNull();
+    expect(fn).not.toHaveBeenCalled();
+    expect(await dbT.resumoJanela.count()).toBe(0);
+    await dbT.mensagemBruta.update({ where: { id: emVoo.id }, data: { status: "PROCESSADA" } });
+    expect(await resumoJanelaAnterior(joao.id, AGORA)).toBe("completo");
+  });
+
+  it("lerResumoJanelaAnterior só lê (PRONTO) e nunca chama a LLM", async () => {
+    const fn = vi.fn(() => ({ resumo: "x" }));
+    definirResumoMock(fn);
+    await bruta(joao.id, "x", naAnterior(1));
+    expect(await lerResumoJanelaAnterior(joao.id, AGORA)).toBeNull();
+    await dbT.resumoJanela.create({ data: { usuarioId: joao.id, janelaInicio: ANTERIOR.inicio, status: "GERANDO" } });
+    expect(await lerResumoJanelaAnterior(joao.id, AGORA)).toBeNull();
+    await dbT.resumoJanela.updateMany({ data: { status: "PRONTO", texto: "pronto" } });
+    expect(await lerResumoJanelaAnterior(joao.id, AGORA)).toBe("pronto");
+    expect(fn).not.toHaveBeenCalled();
+  });
 });
 
 describe("retenção: só o resumo da janela anterior fica", () => {
@@ -138,6 +173,13 @@ describe("retenção: só o resumo da janela anterior fica", () => {
     expect(await resumoJanelaAnterior(joao.id, AGORA)).toBe("mock: resumo da janela anterior");
     const restam = await dbT.resumoJanela.findMany({ orderBy: { texto: "asc" } });
     expect(restam.map((r) => r.janelaInicio.getTime())).toEqual([ANTERIOR.inicio.getTime(), ANTERIOR.inicio.getTime()]);
+  });
+
+  it("a retenção roda no começo, mesmo quando o resumo da janela já existe", async () => {
+    await dbT.resumoJanela.create({ data: { usuarioId: maria.id, janelaInicio: janelaAnterior(ANTERIOR.inicio).inicio, status: "PRONTO", texto: "velho" } });
+    await dbT.resumoJanela.create({ data: { usuarioId: joao.id, janelaInicio: ANTERIOR.inicio, status: "PRONTO", texto: "atual" } });
+    expect(await resumoJanelaAnterior(joao.id, AGORA)).toBe("atual");
+    expect(await dbT.resumoJanela.findMany()).toMatchObject([{ texto: "atual" }]);
   });
 
   it("aplicarRetencaoResumos (para o cron) apaga o que é mais antigo que a janela anterior", async () => {
@@ -156,8 +198,20 @@ describe("gerarResumosPendentes (para o cron do GAB-41)", () => {
     await bruta(joao.id, "a", naAnterior(1));
     await bruta(maria.id, "b", naAnterior(2));
     await bruta(maria.id, "c", janelaDe(AGORA).inicio);
-    expect(await gerarResumosPendentes(AGORA)).toEqual({ gerados: 2 });
-    expect(await gerarResumosPendentes(AGORA)).toEqual({ gerados: 0 });
+    expect(await gerarResumosPendentes(AGORA)).toEqual({ gerados: 2, interrompido: false });
+    expect(await gerarResumosPendentes(AGORA)).toEqual({ gerados: 0, interrompido: false });
     expect(fn).toHaveBeenCalledTimes(2);
+  });
+
+  it("prazo total: para entre um vendedor e outro e deixa o resto para a próxima rodada", async () => {
+    definirResumoMock(async () => {
+      await new Promise((r) => setTimeout(r, 60));
+      return { resumo: "r" };
+    });
+    await bruta(joao.id, "a", naAnterior(1));
+    await bruta(maria.id, "b", naAnterior(2));
+    expect(await gerarResumosPendentes(AGORA, { prazoMs: 20 })).toEqual({ gerados: 1, interrompido: true });
+    expect(await gerarResumosPendentes(AGORA)).toEqual({ gerados: 1, interrompido: false });
+    expect(await dbT.resumoJanela.count({ where: { status: "PRONTO" } })).toBe(2);
   });
 });
