@@ -182,34 +182,54 @@ function Formulario({
         </div>
       </div>
       <MensagemErro falha={erro} />
-      <div className="flex flex-wrap items-center gap-2">
-        <Button type="submit" size="sm" disabled={pendente || !titulo.trim() || !dia}>
-          {prazo ? "Salvar" : (
-            <>
-              <Plus data-icon="inline-start" /> Criar prazo
-            </>
-          )}
-        </Button>
-        {prazo ? (
-          <Button type="button" size="sm" variant="outline" disabled={pendente} onClick={() => rodar(() => concluirPrazoAction(prazo.id, prazo.estado !== "feito"), prazo.estado === "feito" ? "reabrir o prazo" : "concluir o prazo")}>
-            {prazo.estado === "feito" ? <RotateCcw data-icon="inline-start" /> : <Check data-icon="inline-start" />}
-            {prazo.estado === "feito" ? "Reabrir" : "Concluir"}
-          </Button>
-        ) : null}
-        <span className="flex-1" />
-        {prazo ? (
-          <Button
-            type="button"
-            size="sm"
-            variant={confirmarExclusao ? "destructive" : "ghost"}
-            disabled={pendente}
-            onClick={() => (confirmarExclusao ? rodar(() => excluirPrazoAction(prazo.id), "excluir o prazo") : setConfirmarExclusao(true))}
-          >
-            <Trash2 data-icon="inline-start" />
-            {confirmarExclusao ? "Confirmar exclusão" : "Excluir"}
-          </Button>
+      {/* Confirmação explícita da exclusão, anunciada a leitores de tela. */}
+      <div aria-live="polite">
+        {prazo && confirmarExclusao ? (
+          <div className="grid gap-2 rounded-lg border border-danger/50 bg-danger-soft/30 p-3">
+            <p className="text-sm text-foreground">Excluir “{prazo.titulo}”? Ele some do Calendário e do card.</p>
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" size="sm" variant="destructive" disabled={pendente} onClick={() => rodar(() => excluirPrazoAction(prazo.id), "excluir o prazo")}>
+                <Trash2 data-icon="inline-start" /> Excluir prazo
+              </Button>
+              <Button type="button" size="sm" variant="ghost" disabled={pendente} onClick={() => setConfirmarExclusao(false)}>
+                Cancelar
+              </Button>
+            </div>
+          </div>
         ) : null}
       </div>
+      {confirmarExclusao ? null : (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button type="submit" size="sm" disabled={pendente || !titulo.trim() || !dia}>
+            {prazo ? (
+              "Salvar"
+            ) : (
+              <>
+                <Plus data-icon="inline-start" /> Criar prazo
+              </>
+            )}
+          </Button>
+          {prazo ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={pendente}
+              onClick={() => rodar(() => concluirPrazoAction(prazo.id, prazo.estado !== "feito"), prazo.estado === "feito" ? "reabrir o prazo" : "concluir o prazo")}
+            >
+              {prazo.estado === "feito" ? <RotateCcw data-icon="inline-start" /> : <Check data-icon="inline-start" />}
+              {prazo.estado === "feito" ? "Reabrir" : "Concluir"}
+            </Button>
+          ) : null}
+          <span className="flex-1" />
+          {prazo ? (
+            <Button type="button" size="sm" variant="ghost" disabled={pendente} onClick={() => setConfirmarExclusao(true)}>
+              <Trash2 data-icon="inline-start" />
+              Excluir
+            </Button>
+          ) : null}
+        </div>
+      )}
     </form>
   );
 }
