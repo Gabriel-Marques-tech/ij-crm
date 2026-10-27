@@ -19,10 +19,10 @@
 import { timingSafeEqual } from "node:crypto";
 import { after } from "next/server";
 import { chaveApiEvolution, diagnosticarSegredo, grupoJid, segredoWebhook } from "@/lib/config/env";
-import { enviarWhatsApp } from "@/lib/whatsapp/enviar";
-import { ingerirMensagem, TEXTO_CONFIRMACAO } from "@/lib/whatsapp/ingestao";
+import { ingerirMensagem } from "@/lib/whatsapp/ingestao";
 import { mascararJid } from "@/lib/whatsapp/mascarar";
 import { interpretarPayload } from "@/lib/whatsapp/payload";
+import { processarMensagem } from "@/lib/whatsapp/processar";
 
 export const runtime = "nodejs";
 
@@ -118,16 +118,16 @@ export async function POST(req: Request): Promise<Response> {
     case "DESCARTADA":
       return Response.json({ ok: true, descartada: true });
     case "PERSISTIDA": {
-      // 200 primeiro, confirmação depois: a Evolution não espera o envio.
+      // 200 primeiro, LLM + confirmação depois (GAB-34): a Evolution não espera.
+      // `processarMensagem` reivindica a linha RECEBIDA atomicamente e nunca
+      // lança por erro de LLM/aplicação (vira FALHA + "❌ … ref"); o catch é
+      // só para o inesperado (ex.: banco fora) — o cron (GAB-41) retoma.
+      const mensagemId = resultado.mensagemId;
       after(async () => {
         try {
-          await enviarWhatsApp({
-            para: mensagem.grupoJid,
-            texto: TEXTO_CONFIRMACAO,
-            citar: { eventoId: mensagem.eventoId, participant: mensagem.participantJid ?? undefined, texto: mensagem.texto },
-          });
+          await processarMensagem(mensagemId, { participantJid: mensagem.participantJid });
         } catch (e) {
-          console.error(`[webhook] confirmação do evento ${mensagem.eventoId} não enviada: ${descreverErro(e)}`);
+          console.error(`[webhook] processamento da mensagem ${mensagemId} falhou: ${descreverErro(e)}`);
         }
       });
       return Response.json({ ok: true, persistida: true, mensagemId: resultado.mensagemId });

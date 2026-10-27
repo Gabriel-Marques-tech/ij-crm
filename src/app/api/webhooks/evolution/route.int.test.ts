@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/lib/db";
 import { dbTeste, limparBanco } from "@/test/db";
 import { fixtureEvolution, GRUPO_FIXTURE, type NomeFixture } from "@/test/fixtures/evolution";
+import { FIXTURES_EXTRACAO } from "@/lib/llm/fixtures/extracao";
+import { semear } from "../../../../../prisma/seed";
 
 // `after()` do Next só funciona dentro de um request scope. Aqui o handler é
 // chamado direto, então a tarefa roda imediatamente e fica numa fila que o
@@ -18,7 +20,23 @@ import { POST } from "./route";
 
 const SEGREDO = "segredo-de-teste-com-tamanho-razoavel";
 const CHAVE_EVOLUTION = "chave-evolution-de-teste-0123456789abcdef";
-const TABELAS = ["inbox_evento", "mensagem_bruta", "mensagem_enviada", "remetente_desconhecido", "contador_descartadas", "sessao", "usuario"];
+const TABELAS = [
+  "inbox_evento",
+  "timeline",
+  "transicao_fase",
+  "mensagem_enviada",
+  "oportunidade",
+  "contato_ponto",
+  "contato",
+  "empresa",
+  "fase",
+  "pipeline",
+  "mensagem_bruta",
+  "remetente_desconhecido",
+  "contador_descartadas",
+  "sessao",
+  "usuario",
+];
 const dbT = dbTeste();
 const envOriginal = { ...process.env };
 
@@ -72,6 +90,8 @@ function logs(spy: unknown): string {
 
 beforeEach(async () => {
   await limparBanco(TABELAS);
+  await semear(dbT, { log: () => {} });
+  process.env.LLM_PROVEDOR = "mock";
   process.env.EVOLUTION_WEBHOOK_SECRET = SEGREDO;
   process.env.GRUPO_JID = GRUPO_FIXTURE;
   process.env.EVOLUTION_API_URL = "http://evolution.test:8080";
@@ -181,17 +201,20 @@ describe("POST /api/webhooks/evolution — filtros (200 sem efeito)", () => {
 });
 
 describe("POST /api/webhooks/evolution — ingestão", () => {
-  it("#crm de usuário conhecido → MensagemBruta RECEBIDA + InboxEvento PROCESSADO; safe mode não chama a Evolution", async () => {
+  it("#crm de usuário conhecido → MensagemBruta persistida + InboxEvento PROCESSADO; safe mode não chama a Evolution", async () => {
     const u = await vendedor();
     const fetchSpy = vi.spyOn(globalThis, "fetch");
     const r = await postar("texto-grupo");
     expect(r.status).toBe(200);
     expect(r.json).toMatchObject({ ok: true, persistida: true });
+    // Antes do after(): a ingestão comitou RECEBIDA; a LLM ainda não rodou.
+    expect((await dbT.mensagemBruta.findUniqueOrThrow({ where: { eventoId: "3EB0A1B2C3D4E5F60001" } })).status).toBe("RECEBIDA");
     await aguardarDepois();
 
     const bruta = await dbT.mensagemBruta.findUniqueOrThrow({ where: { eventoId: "3EB0A1B2C3D4E5F60001" } });
     expect(bruta).toMatchObject({
-      status: "RECEBIDA",
+      // Texto sem fixture no mock → sem nome identificado → fila de revisão.
+      status: "PENDENTE_REVISAO",
       grupoJid: GRUPO_FIXTURE,
       remetenteTelefone: "+5511999998888",
       remetenteLid: null,
@@ -379,7 +402,7 @@ describe("POST /api/webhooks/evolution — confirmação com NOTIFICATIONS_ENABL
     expect(init.signal).toBeInstanceOf(AbortSignal);
     expect(JSON.parse(init.body as string)).toEqual({
       number: GRUPO_FIXTURE,
-      text: "📥 recebido",
+      text: "⚠️ não identifiquei o lead — responde esta mensagem com o nome",
       quoted: {
         key: { id: "3EB0A1B2C3D4E5F60002", remoteJid: GRUPO_FIXTURE, fromMe: false, participant: "5511999998888@s.whatsapp.net" },
         message: { conversation: "é da Economia Sensata #CRM" },
@@ -387,7 +410,7 @@ describe("POST /api/webhooks/evolution — confirmação com NOTIFICATIONS_ENABL
     });
 
     const enviada = await dbT.mensagemEnviada.findUniqueOrThrow({ where: { eventoId: "BAE5ENVIADA0001" } });
-    expect(enviada).toMatchObject({ grupoJid: GRUPO_FIXTURE, texto: "📥 recebido", oportunidadeId: null });
+    expect(enviada).toMatchObject({ grupoJid: GRUPO_FIXTURE, texto: "⚠️ não identifiquei o lead — responde esta mensagem com o nome", oportunidadeId: null });
   });
 
   it("Evolution responde erro → nada em MensagemEnviada, erro só logado (mensagem já está salva)", async () => {
@@ -398,6 +421,87 @@ describe("POST /api/webhooks/evolution — confirmação com NOTIFICATIONS_ENABL
     expect(r.status).toBe(200);
     await aguardarDepois();
     expect(await contagens()).toMatchObject({ brutas: 1, enviadas: 0 });
-    expect(logs(console.error)).toContain("confirmação do evento 3EB0A1B2C3D4E5F60001 não enviada: ErroEnvioWhatsApp");
+    expect(logs(console.error)).toMatch(/confirmação da mensagem \S+ não enviada: ErroEnvioWhatsApp/);
+  });
+});
+
+describe("POST /api/webhooks/evolution — #crm vira card (GAB-34, LLM mockada)", () => {
+  const TICKET = FIXTURES_EXTRACAO[0];
+
+  function payloadTicket() {
+    const p = fixtureEvolution("texto-grupo");
+    (p.data as { message: { conversation: string } }).message.conversation = TICKET.texto;
+    return p;
+  }
+
+  it("safe mode: card criado com campos e Timeline; confirmação só logada (sem conteúdo)", async () => {
+    const u = await vendedor();
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const r = await postar(payloadTicket());
+    expect(r.json).toMatchObject({ ok: true, persistida: true });
+    await aguardarDepois();
+
+    const card = await dbT.oportunidade.findFirstOrThrow({ include: { fase: true, empresa: true, contato: true, timeline: { orderBy: { em: "asc" } } } });
+    expect(card).toMatchObject({
+      titulo: "Gustavo — Economia Sensata",
+      responsavelId: u.id,
+      dor: "relatório manual",
+      proximaAcao: "mandar proposta",
+      criadoVia: "WHATSAPP",
+      revisar: false,
+      empresa: { nome: "Economia Sensata" },
+      contato: { nome: "Gustavo" },
+    });
+    expect(card.fase.chave).toBe("primeiro_contato");
+    expect(card.orcamentoPrevisto?.toFixed(2)).toBe("15000.00");
+    expect(card.proximaAcaoEm?.toISOString()).toBe("2025-10-31T03:00:00.000Z");
+    expect(card.timeline.map((t) => t.tipo)).toEqual(["CRIACAO", "MENSAGEM_WHATSAPP"]);
+    expect(card.timeline[1].payload).toMatchObject({ texto: TICKET.texto, saida: TICKET.saida });
+
+    const bruta = await dbT.mensagemBruta.findFirstOrThrow();
+    expect(bruta).toMatchObject({ status: "PROCESSADA", erro: null, resultadoLlm: { saida: TICKET.saida, aplicacao: { tipo: "CRIADO", oportunidadeId: card.id } } });
+    expect(fetchSpy).not.toHaveBeenCalled();
+    const info = logs(console.info);
+    expect(info).toContain("[SAFE MODE] WhatsApp NÃO enviado");
+    expect(info).not.toContain("Gustavo");
+  });
+
+  it("NOTIFICATIONS_ENABLED=true: UMA resposta, citando a mensagem, com o texto exato e o card ligado", async () => {
+    process.env.NOTIFICATIONS_ENABLED = "true";
+    await vendedor();
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(JSON.stringify({ key: { id: "BAE5CONFIRMA01" } }), { status: 201 }));
+    await postar(payloadTicket());
+    await aguardarDepois();
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const corpo = JSON.parse((fetchSpy.mock.calls[0][1] as RequestInit).body as string);
+    expect(corpo.text).toBe("✅ Gustavo — Economia Sensata → Primeiro Contato. Resp: João. Próx.: mandar proposta (31/10)");
+    expect(corpo.quoted.key).toMatchObject({ id: "3EB0A1B2C3D4E5F60001", participant: "5511999998888@s.whatsapp.net" });
+    const card = await dbT.oportunidade.findFirstOrThrow();
+    expect(await dbT.mensagemEnviada.findUniqueOrThrow({ where: { eventoId: "BAE5CONFIRMA01" } })).toMatchObject({ oportunidadeId: card.id });
+  });
+
+  it("retry da Evolution (mesmo key.id) → duplicado: nenhuma segunda chamada à LLM nem segundo card", async () => {
+    await vendedor();
+    await postar(payloadTicket());
+    await aguardarDepois();
+    const b = await postar(payloadTicket());
+    await aguardarDepois();
+    expect(b.json).toEqual({ ok: true, duplicado: true });
+    expect(await dbT.oportunidade.count()).toBe(1);
+  });
+
+  it("sem ANTHROPIC_API_KEY (provedor anthropic) → FALHA com ref, 200 para a Evolution, nada quebra", async () => {
+    process.env.LLM_PROVEDOR = "anthropic";
+    delete process.env.ANTHROPIC_API_KEY;
+    await vendedor();
+    const r = await postar(payloadTicket());
+    expect(r.status).toBe(200);
+    await aguardarDepois();
+    const bruta = await dbT.mensagemBruta.findFirstOrThrow();
+    expect(bruta.status).toBe("FALHA");
+    expect(bruta.erro).toMatch(/SEM_CHAVE.*ref=[0-9a-f]{8}/);
+    expect(await dbT.oportunidade.count()).toBe(0);
   });
 });

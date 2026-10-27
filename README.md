@@ -87,7 +87,7 @@ Segredo ausente/fraco ⇒ aquela forma não existe; sem nenhuma ⇒ 401 para tud
 vazio ⇒ 503. Re-tentativas: o compose configura a Evolution v2.3.7 para 5 tentativas com
 backoff exponencial (5s → 120s) em 5xx/timeout e **nenhuma** em 400/401/403/404/422 — o app
 devolve 4xx só para erro definitivo e 500 quando vale re-tentar (o dedup é atômico).
-Em dev, `NOTIFICATIONS_ENABLED` fica ausente: a confirmação "📥 recebido" só aparece no
+Em dev, `NOTIFICATIONS_ENABLED` fica ausente: a confirmação do bot só aparece no
 log como `[SAFE MODE] WhatsApp NÃO enviado para 12****01@g.us`.
 
 A Evolution não guarda mensagens, contatos nem chats no banco dela (`DATABASE_SAVE_DATA_*=false`
@@ -95,8 +95,58 @@ A Evolution não guarda mensagens, contatos nem chats no banco dela (`DATABASE_S
 
 Nesta fatia (GAB-28) o bot só reage a mensagens com `#crm` de usuários ativos com
 `telefoneWhatsapp`/`whatsappLid` cadastrado; o resto é contado (`contador_descartadas`,
-`remetente_desconhecido`) e descartado sem persistir conteúdo. Classificação e LLM entram no
-GAB-34/GAB-39.
+`remetente_desconhecido`) e descartado sem persistir conteúdo. O que acontece com a mensagem
+`#crm` está em [#crm → card](#crm--card-llm); o classificador sem tag é GAB-39.
+
+## #crm → card (LLM)
+
+Fluxo (GAB-34, design §4.3 passos 6–10): o webhook comita a `MensagemBruta` como `RECEBIDA`,
+responde 200 e agenda `processarMensagem(id)` (`src/lib/whatsapp/processar.ts`) em `after()`.
+
+1. **Reivindica** a linha: `UPDATE … SET status='PROCESSANDO', tentativas=tentativas+1 WHERE id=$1 AND
+   status='RECEBIDA' RETURNING tentativas`. Retry da Evolution ou chamada concorrente não acha a linha →
+   no-op; a LLM nunca é cobrada duas vezes. A tentativa `n` devolvida é a **cerca**: a transação de
+   aplicação (e o registro de `FALHA`) começa com `UPDATE … WHERE status='PROCESSANDO' AND tentativas=n`;
+   0 linhas → outro worker reivindicou depois, este desiste sem gravar nem responder.
+2. **Contexto** (fora de transação): remetente, mensagem respondida, fases de Vendas, candidatos por
+   telefone/email/CNPJ **exatos** citados no texto (`identificadores.ts`).
+3. **LLM** (fora de transação — a tx do Prisma expira em 5s): `extrairAtualizacao` (`src/lib/llm/`),
+   prompt + JSON schema versionados em `prompts/extracao.v1.ts`, saída validada por zod.
+   Valores ("uns 15k") e datas ("sexta", relativas à mensagem, fuso de SP) são convertidos por código
+   (`valores.ts`, `datas.ts`), não pela LLM.
+4. **Aplica** numa transação (`aplicar.ts`): cria/reaproveita Empresa/Contato/pontos, cria o card
+   (fase pela chave ou `primeiro_contato`; terminal recusada), TransicaoFase, Timeline
+   `MENSAGEM_WHATSAPP` (texto + JSON da LLM, recolhido no card) e grava `resultado_llm`.
+5. **Responde** citando a mensagem (texto da LLM achatado numa linha e cortado em ~80 caracteres):
+   `✅ Gustavo — Economia Sensata → Primeiro Contato. Resp: João. Próx.: mandar proposta (31/10)`;
+   `⚠️ …` + "Marquei para revisar: …" quando `revisar`; `⚠️` para pendências; `❌ não consegui
+   processar, veja no CRM (ref: …)` em falha (`grep 'ref=…'` no log). Mensagem que tinha dado ❌ e
+   foi reprocessada recebe uma 2ª resposta começando com `✅ Reprocessada: …`.
+
+Regras: o contato é decidido pelos telefones/emails **achados no texto** (não pelo que a LLM ecoa):
+um dono vivo → reaproveita (e a empresa dele, resolvendo merge; nome lido diferente → `revisar`), donos
+diferentes → `PENDENTE_REVISAO`; vínculo automático de empresa **só por CNPJ**; domínio de email e nome igual são sugestão
+(`revisar` + `resultado_llm.aplicacao.sugestoes`); ponto de contato de contato excluído → `PENDENTE_REVISAO`;
+sem nome de contato nem de empresa → não cria, `PENDENTE_REVISAO`; `ATUALIZAR`/`IGNORAR` →
+`PENDENTE_REVISAO` (atualização é a próxima fatia); responsável = remetente, trocado só por nome
+completo exato de usuário ativo; `revisar` se confiança < `LLM_LIMIAR_CONFIANCA` (0.7).
+Status: `RECEBIDA → PROCESSANDO → PROCESSADA | PENDENTE_REVISAO | FALHA`. `processarMensagem` nunca
+lança (roda no `after()`): erro de banco vira log com ref e a linha fica para o reprocessamento.
+
+**Contrato do reprocessamento (GAB-41)** — devolve a `RECEBIDA` e chama `processarMensagem`:
+- `RECEBIDA` há mais de N min (o processo morreu antes do `after()`; o retry da Evolution cai em
+  `DUPLICADO` e não reprocessa);
+- `PROCESSANDO` há **mais de 5 min** (`atualizado_em`; pior caso LLM 2×30 s + transação) — nunca antes,
+  ou dois workers pagam a LLM (a cerca impede só a gravação dupla);
+- `FALHA` (inclusive "sem crédito na API da Anthropic", depois da recarga), **mantendo `erro`**.
+
+Env: `LLM_PROVEDOR=anthropic|mock` (dev sem chave: `mock`, que responde com as fixtures de
+`src/lib/llm/fixtures/extracao.ts`), `ANTHROPIC_API_KEY` (vazia → `FALHA` com motivo
+"SEM_CHAVE", nada quebra), `LLM_EXTRACAO_MODELO` (padrão `claude-haiku-5-5`, Claude Haiku 5.5;
+`claude-sonnet-5-5` é a alternativa por env se o benchmark GAB-40 mostrar erros),
+`LLM_LIMIAR_CONFIANCA`. Saldo da Anthropic esgotado (`billing_error`) → `FALHA` com "sem crédito na
+API da Anthropic" + ref, reprocessável (GAB-41) depois da recarga. Cada chamada loga provedor, modelo, versão, ms e tokens — nunca o texto:
+`[llm] extracao ref=<id> provedor=anthropic modelo=claude-haiku-5-5 versao=extracao.v1 ms=… tokens_in=… tokens_out=… ok`.
 
 ## Kanban
 
