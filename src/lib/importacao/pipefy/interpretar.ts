@@ -79,6 +79,8 @@ export function chaveFasePipefy(nome: string): string {
 }
 
 const DOR_MAX = 5000;
+const TITULO_MAX = 200;
+const AMBIGUO = /^(?:R\$\s*)?\d{1,3}\.\d{3}$/i;
 const CAMPO_CURTO_MAX = 200;
 
 export function interpretarCsv(texto: string, opts: { aliases?: Aliases; maxLinhas?: number } = {}): ResultadoInterpretacao {
@@ -92,6 +94,9 @@ export function interpretarCsv(texto: string, opts: { aliases?: Aliases; maxLinh
 
   const erros: Ocorrencia[] = [];
   const avisos: Ocorrencia[] = [];
+  // Excel costuma deixar `;;` sobrando no fim do cabeçalho: não contam como colunas.
+  let colunasCab = cab.campos.length;
+  while (colunasCab > 0 && cab.campos[colunasCab - 1].trim() === "") colunasCab--;
   const nomesFase = new Map<string, { nome: string; ordem: number }>();
   /** `original` = nome como o gestor escreveu (coluna de fase atual), não o normalizado do cabeçalho. */
   const registrarFase = (nome: string, original: boolean) => {
@@ -115,6 +120,10 @@ export function interpretarCsv(texto: string, opts: { aliases?: Aliases; maxLinh
       erros.push({ linha, pipefyId: pipefyId || null, mensagem: `Linha com ${reg.campos.length} colunas; o cabeçalho tem ${cab.campos.length}. Confira o separador/aspas.` });
       continue;
     }
+    if (reg.campos.length < colunasCab) {
+      erros.push({ linha, pipefyId: pipefyId || null, mensagem: `Linha com ${reg.campos.length} colunas; o cabeçalho tem ${colunasCab}. Linha cortada? Confira o separador/aspas.` });
+      continue;
+    }
     if (!pipefyId) {
       erros.push({ linha, pipefyId: null, mensagem: "Sem ID do card." });
       continue;
@@ -123,9 +132,14 @@ export function interpretarCsv(texto: string, opts: { aliases?: Aliases; maxLinh
       erros.push({ linha, pipefyId: null, mensagem: "ID do card inválido (mais de 64 caracteres)." });
       continue;
     }
-    const titulo = validarTitulo(v("titulo"));
+    let tituloBruto = v("titulo").replace(/\s+/g, " ");
+    if (tituloBruto.length > TITULO_MAX) {
+      avisar(`"titulo" com mais de ${TITULO_MAX} caracteres: cortado.`);
+      tituloBruto = tituloBruto.slice(0, TITULO_MAX);
+    }
+    const titulo = validarTitulo(tituloBruto);
     if (!titulo) {
-      erros.push({ linha, pipefyId, mensagem: "Título vazio ou com mais de 200 caracteres." });
+      erros.push({ linha, pipefyId, mensagem: "Título vazio." });
       continue;
     }
     const faseNome = v("faseAtual").replace(/\s+/g, " ");
@@ -151,6 +165,8 @@ export function interpretarCsv(texto: string, opts: { aliases?: Aliases; maxLinh
     };
     const valor = (c: Campo): string | null => {
       const r = lerValor(v(c));
+      // "1.234": milhar no Brasil, mas pode ser 1,234 vindo de sistema em inglês.
+      if (r.ok && r.valor && AMBIGUO.test(v(c))) avisar(`Valor ambíguo em "${c}" (${v(c)}): lido como ${r.valor.replace(".", ",")} (ponto de milhar). Confira no Pipefy.`);
       if (r.ok) return r.valor;
       avisar(`Valor inválido em "${c}" (${v(c)}): ignorado.`);
       return null;

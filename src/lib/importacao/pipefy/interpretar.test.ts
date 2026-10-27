@@ -121,4 +121,23 @@ describe("interpretarCsv — erros de arquivo", () => {
     expect(r.cards.map((c) => c.pipefyId)).toEqual(["2"]);
     expect(r.erros).toEqual([{ linha: 2, pipefyId: "1", mensagem: "Linha com 4 colunas; o cabeçalho tem 3. Confira o separador/aspas." }]);
   });
+  it("linha com colunas a menos → erro da linha (colunas vazias no fim do cabeçalho não contam)", () => {
+    const r = ok("ID;Title;Current phase;Empresa;;\n1;a;b\n2;c;d;X\n3;e;f;Y;;\n");
+    expect(r.cards.map((c) => c.pipefyId)).toEqual(["2", "3"]);
+    expect(r.erros).toEqual([{ linha: 2, pipefyId: "1", mensagem: "Linha com 3 colunas; o cabeçalho tem 4. Linha cortada? Confira o separador/aspas." }]);
+  });
+  it("título com mais de 200 caracteres → cortado com aviso, card segue", () => {
+    const longo = "T".repeat(250);
+    const r = ok(`ID;Title;Current phase\n1;${longo};Lead\n`);
+    expect(r.cards[0].titulo).toBe("T".repeat(200));
+    expect(r.avisos).toEqual([{ linha: 2, pipefyId: "1", mensagem: '"titulo" com mais de 200 caracteres: cortado.' }]);
+  });
+  it("valor 1.234 (ambíguo) é lido como milhar, com aviso", () => {
+    const r = ok("ID;Title;Current phase;Orçamento previsto;Valor fechado\n1;a;Lead;1.234;R$ 2.500\n2;b;Lead;1.234,50;12500.5\n");
+    expect(r.cards.map((c) => [c.orcamento, c.valorFechado])).toEqual([["1234.00", "2500.00"], ["1234.50", "12500.50"]]);
+    expect(r.avisos.map((a) => [a.linha, a.mensagem])).toEqual([
+      [2, 'Valor ambíguo em "orcamento" (1.234): lido como 1234,00 (ponto de milhar). Confira no Pipefy.'],
+      [2, 'Valor ambíguo em "valorFechado" (R$ 2.500): lido como 2500,00 (ponto de milhar). Confira no Pipefy.'],
+    ]);
+  });
 });
