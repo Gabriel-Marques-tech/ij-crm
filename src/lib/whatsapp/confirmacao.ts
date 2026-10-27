@@ -9,6 +9,9 @@
  *
  * Mensagem que já tinha terminado em ❌ e foi reprocessada (GAB-41) ganha
  * "Reprocessada:" depois do emoji, para o grupo entender a 2ª resposta.
+ *
+ * Mensagem SEM `#crm` que o bot entendeu e aplicou (GAB-39) troca o emoji
+ * por "↪️ entendi como atualização:", para o grupo saber que não houve tag.
  */
 
 export type MotivoPendente =
@@ -20,7 +23,15 @@ export type MotivoPendente =
   | "IGNORAR"
   | "CONTATO_EXCLUIDO"
   | "EMPRESA_EXCLUIDA"
-  | "IDENTIFICADORES_CONFLITANTES";
+  | "IDENTIFICADORES_CONFLITANTES"
+  /**
+   * GAB-39: sem #crm e a extração não atingiu `LLM_LIMIAR_SEM_TAG`. Os
+   * `SEM_TAG_*` NÃO vão para o grupo (pendente sem tag é silencioso); o texto
+   * fica para o painel de revisão.
+   */
+  | "SEM_TAG_INCERTO"
+  /** GAB-39: sem #crm, CRIAR sem telefone/email/CNPJ citado (defesa contra injeção). */
+  | "SEM_TAG_SEM_IDENTIFICADOR";
 
 export type ResumoCriado = {
   titulo: string;
@@ -44,6 +55,8 @@ const TEXTO_PENDENTE: Record<MotivoPendente, string> = {
   CONTATO_EXCLUIDO: "⚠️ esse telefone/email é de um contato excluído do CRM; ficou na fila de revisão",
   EMPRESA_EXCLUIDA: "⚠️ esse CNPJ é de uma empresa excluída do CRM; ficou na fila de revisão",
   IDENTIFICADORES_CONFLITANTES: "⚠️ os dados da mensagem batem com cadastros diferentes no CRM; ficou na fila de revisão",
+  SEM_TAG_INCERTO: "⚠️ parece atualização de venda (sem #crm), mas não tive certeza; ficou na fila de revisão do CRM",
+  SEM_TAG_SEM_IDENTIFICADOR: "⚠️ parece lead novo (sem #crm), mas sem telefone, email ou CNPJ; ficou na fila de revisão do CRM",
 };
 
 /** `YYYY-MM-DD` → `DD/MM`. */
@@ -62,6 +75,8 @@ export function linha(s: string, max = MAX_TRECHO): string {
 }
 
 type Opcoes = { reprocessada?: boolean };
+
+export const PREFIXO_SEM_TAG = "↪️ entendi como atualização:";
 
 /** "✅ texto" → "✅ Reprocessada: texto" quando for o caso. */
 function marcar(texto: string, { reprocessada }: Opcoes): string {
@@ -112,6 +127,21 @@ export function textoAtualizado(r: ResumoAtualizado, opcoes: Opcoes = {}): strin
   texto += proxima(r);
   if (r.revisar) texto += `\nMarquei para revisar: ${linha(r.motivosRevisar[0] ?? "conferir os dados")}.`;
   return marcar(texto, opcoes);
+}
+
+/** Igual a `textoCriado`, mas deixa claro que a mensagem veio sem `#crm` (o "Marquei para revisar" continua). */
+/** Troca o emoji de status pelo prefixo "↪️ entendi como atualização:" (mensagem sem `#crm`). */
+function semTag(texto: string, opcoes: Opcoes): string {
+  return marcar(`${PREFIXO_SEM_TAG} ${texto.slice(texto.indexOf(" ") + 1)}`, opcoes);
+}
+
+export function textoCriadoSemTag(r: ResumoCriado, opcoes: Opcoes = {}): string {
+  return semTag(textoCriado(r), opcoes);
+}
+
+/** `textoAtualizado` de mensagem sem `#crm` (GAB-38 + GAB-39). */
+export function textoAtualizadoSemTag(r: ResumoAtualizado, opcoes: Opcoes = {}): string {
+  return semTag(textoAtualizado(r), opcoes);
 }
 
 export function textoPendente(motivo: MotivoPendente, opcoes: Opcoes = {}): string {

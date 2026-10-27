@@ -19,6 +19,7 @@
  * `valores.ts`/`datas.ts`, de forma determinística e testada.
  */
 import { z } from "zod";
+import { escaparDelimitadores } from "./escapar";
 
 export const VERSAO_EXTRACAO = "extracao.v1";
 
@@ -140,6 +141,8 @@ export type ContextoExtracao = {
   fases: FaseContexto[];
   contatos: ContatoCandidato[];
   empresas: EmpresaCandidata[];
+  /** GAB-39: veio sem `#crm` (o classificador achou que pode ser venda). */
+  semTag?: boolean;
 };
 
 const DATA_SP = new Intl.DateTimeFormat("pt-BR", {
@@ -152,16 +155,11 @@ const DATA_SP = new Intl.DateTimeFormat("pt-BR", {
   minute: "2-digit",
 });
 
-/** Neutraliza as tags de delimitação dentro do texto do usuário. */
-function escapar(s: string): string {
-  return s.replace(/<\/?(mensagem|respondendo_a)>/gi, (t) => t.replace("<", "‹").replace(">", "›"));
-}
-
 /** Mensagem do usuário: contexto em lista simples + a mensagem delimitada. */
 export function montarMensagemUsuario(textoMensagem: string, ctx: ContextoExtracao): string {
   const linhas: string[] = [];
-  // Todo dado do contexto (nomes do CRM, texto respondido) passa por `escapar`.
-  const add = (l: string) => linhas.push(escapar(l));
+  // Todo dado do contexto (nomes do CRM, texto respondido) passa por `escaparDelimitadores`.
+  const add = (l: string) => linhas.push(escaparDelimitadores(l));
   add(`Vendedor (remetente): ${ctx.remetente}`);
   add(`Enviada em: ${DATA_SP.format(ctx.recebidaEm)} (horário de Brasília)`);
   add("");
@@ -182,8 +180,12 @@ export function montarMensagemUsuario(textoMensagem: string, ctx: ContextoExtrac
     linhas.push("</respondendo_a>");
     add("");
   }
+  if (ctx.semTag) {
+    linhas.push("Atenção: mensagem sem #crm, já pré-classificada como possivelmente sobre vendas; responda IGNORAR se não for registro de venda.");
+    linhas.push("");
+  }
   linhas.push("<mensagem>");
-  linhas.push(escapar(textoMensagem));
+  linhas.push(escaparDelimitadores(textoMensagem));
   linhas.push("</mensagem>");
   return linhas.join("\n");
 }

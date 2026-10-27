@@ -22,7 +22,7 @@ import { definirConfiguracao } from "@/lib/configuracao/definicao";
 import { obterConfiguracao, restaurarConfiguracao, salvarConfiguracao } from "@/lib/configuracao/servico";
 import { registrarErro } from "@/lib/erros/registrar";
 import { ErroEvolutionAdmin, listarGrupos } from "@/lib/whatsapp/evolution-admin";
-import { ConfigAusente, ConfigFraca, LIMIAR_CONFIANCA_PADRAO, MODELOS_EXTRACAO_PADRAO, TIMEOUT_ENVIO_MAX_MS, TIMEOUT_ENVIO_MIN_MS, TIMEOUT_ENVIO_PADRAO_MS } from "./env";
+import { ConfigAusente, ConfigFraca, LIMIAR_CLASSIFICADOR_PADRAO, LIMIAR_CONFIANCA_PADRAO, LIMIAR_SEM_TAG_PADRAO, MODELOS_EXTRACAO_PADRAO, TIMEOUT_ENVIO_MAX_MS, TIMEOUT_ENVIO_MIN_MS, TIMEOUT_ENVIO_PADRAO_MS } from "./env";
 import { definirSobrescritas } from "./sobrescritas";
 
 /** Campo da config → variável de ambiente que ele sobrescreve. */
@@ -39,9 +39,6 @@ export const VARIAVEIS_TECNICAS = {
 
 export type CampoTecnico = keyof typeof VARIAVEIS_TECNICAS;
 
-/** Padrões do classificador sem #crm (os mesmos do GAB-39). */
-export const LIMIAR_SEM_TAG_PADRAO_TECNICO = 0.85;
-export const LIMIAR_CLASSIFICADOR_PADRAO_TECNICO = 0.7;
 
 const PROVEDORES = ["openai", "anthropic", "mock"] as const;
 type Provedor = (typeof PROVEDORES)[number];
@@ -141,8 +138,8 @@ export function resolverConfigTecnica(cfg: ConfigTecnica, env: Env = process.env
     modeloExtracao,
     modeloClassificacao,
     limiarConfianca: escolher(cfg.limiarConfianca, limiarEnv(env, "LLM_LIMIAR_CONFIANCA"), LIMIAR_CONFIANCA_PADRAO),
-    limiarSemTag: escolher(cfg.limiarSemTag, limiarEnv(env, "LLM_LIMIAR_SEM_TAG"), LIMIAR_SEM_TAG_PADRAO_TECNICO),
-    limiarClassificador: escolher(cfg.limiarClassificador, limiarEnv(env, "LLM_LIMIAR_CLASSIFICADOR"), LIMIAR_CLASSIFICADOR_PADRAO_TECNICO),
+    limiarSemTag: escolher(cfg.limiarSemTag, limiarEnv(env, "LLM_LIMIAR_SEM_TAG"), LIMIAR_SEM_TAG_PADRAO),
+    limiarClassificador: escolher(cfg.limiarClassificador, limiarEnv(env, "LLM_LIMIAR_CLASSIFICADOR"), LIMIAR_CLASSIFICADOR_PADRAO),
     timeoutEnvioMs: escolher(
       cfg.timeoutEnvioMs,
       Number.isInteger(timeoutEnv) && timeoutEnv >= TIMEOUT_ENVIO_MIN_MS && timeoutEnv <= TIMEOUT_ENVIO_MAX_MS ? timeoutEnv : undefined,

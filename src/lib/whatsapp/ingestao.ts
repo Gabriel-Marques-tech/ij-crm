@@ -7,9 +7,11 @@
  * Violação de unicidade NO INSERT DO INBOX ⇒ evento já visto ⇒ `DUPLICADO`;
  * qualquer outra violação de unicidade é erro de verdade e sobe.
  *
- * Ordem: tag → remetente. Mensagem sem `#crm` não persiste nada (nem
- * identidade do remetente), só soma no contador do dia — vale também para
- * número desconhecido (design doc §2: nada de conteúdo fora de venda).
+ * Ordem: tag → remetente. Mensagem sem `#crm` não persiste nada aqui (nem
+ * identidade do remetente): ruído óbvio ou número desconhecido só soma no
+ * contador do dia; de vendedor conhecido devolve `CLASSIFICAR` e o webhook
+ * roda o classificador em `after()` (`sem-tag.ts`, GAB-39) — só ele decide
+ * se o texto é gravado (design doc §2: nada de conteúdo fora de venda).
  *
  * GAB-34 (LLM): roda DEPOIS do commit, em `processar.ts`, disparado pelo
  * webhook em `after()` e chaveado em `MensagemBruta.status = RECEBIDA` —
@@ -18,14 +20,18 @@
  */
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
+import { contarDescartada } from "./contadores";
 import { mascararJid, mascararTelefone } from "./mascarar";
 import type { MensagemRecebida, Remetente } from "./payload";
 import { temTagCrm } from "./payload";
+import { ruidoObvio } from "./ruido";
 
 export type ResultadoIngestao =
   | { tipo: "DUPLICADO" }
   | { tipo: "REMETENTE_DESCONHECIDO" }
   | { tipo: "DESCARTADA" }
+  /** Sem `#crm`, vendedor conhecido: o classificador decide depois do 200 (nada gravado ainda). */
+  | { tipo: "CLASSIFICAR"; usuarioId: string }
   | { tipo: "PERSISTIDA"; mensagemId: string };
 
 type Tx = Prisma.TransactionClient;
@@ -74,16 +80,6 @@ async function registrarDesconhecido(tx: Tx, r: Remetente, quando: Date) {
   });
 }
 
-/** Dia em UTC (TZ do processo é UTC no compose e nos testes). */
-function diaDe(d: Date): Date {
-  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
-}
-
-async function contarDescartada(tx: Tx, quando: Date) {
-  const dia = diaDe(quando);
-  await tx.contadorDescartadas.upsert({ where: { dia }, create: { dia, total: 1 }, update: { total: { increment: 1 } } });
-}
-
 export async function ingerirMensagem(m: MensagemRecebida): Promise<ResultadoIngestao> {
   try {
     return await db.$transaction(async (tx) => {
@@ -104,12 +100,20 @@ export async function ingerirMensagem(m: MensagemRecebida): Promise<ResultadoIng
 }
 
 async function processar(tx: Tx, m: MensagemRecebida): Promise<ResultadoIngestao> {
-  if (!temTagCrm(m.texto)) {
+  const semTag = !temTagCrm(m.texto);
+  if (semTag && ruidoObvio(m.texto)) {
     await contarDescartada(tx, m.recebidaEm);
     return { tipo: "DESCARTADA" };
   }
 
   const resolucao = await resolverRemetente(tx, m.remetente);
+  if (semTag) {
+    if (resolucao.tipo !== "OK") {
+      await contarDescartada(tx, m.recebidaEm);
+      return { tipo: "DESCARTADA" };
+    }
+    return { tipo: "CLASSIFICAR", usuarioId: resolucao.usuarioId };
+  }
   if (resolucao.tipo !== "OK") {
     if (resolucao.tipo === "CONFLITO") {
       console.warn(

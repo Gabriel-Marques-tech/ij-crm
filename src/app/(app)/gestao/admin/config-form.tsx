@@ -18,11 +18,6 @@ function Herdado({ v }: { v: { valor: string | number | null; origem: Origem } }
   );
 }
 
-/** Campos sem leitor no pipeline até o classificador sem #crm entrar na main. */
-function SoComGab39() {
-  return <span className="ml-1 rounded bg-warn-soft px-1.5 py-0.5 text-[0.7rem] text-warn">vale depois do classificador sem #crm (GAB-39)</span>;
-}
-
 const CLASSE_SELECT =
   "h-8 w-full rounded-lg border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30";
 
@@ -159,9 +154,7 @@ function Campos({ atual, herdado, efetivo }: { atual: ConfigTecnica; herdado: Co
             </p>
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="modeloClassificacao">
-              Modelo de classificação (sem #crm) <SoComGab39 />
-            </Label>
+            <Label htmlFor="modeloClassificacao">Modelo de classificação (sem #crm)</Label>
             <Input id="modeloClassificacao" name="modeloClassificacao" defaultValue={atual.modeloClassificacao ?? ""} className="font-mono" />
             <p className="text-xs text-fg-faint">Vazio = o do ambiente, ou o mesmo da extração.</p>
           </div>
@@ -173,16 +166,13 @@ function Campos({ atual, herdado, efetivo }: { atual: ConfigTecnica; herdado: Co
         <div className="grid gap-5 sm:grid-cols-3">
           {(
             [
-              ["limiarConfianca", "Com #crm", "Abaixo disto o card nasce marcado para revisar.", false],
-              ["limiarSemTag", "Sem #crm", "Mensagem sem tag só age com confiança ≥ isto. Precisa ser ≥ o de com #crm.", true],
-              ["limiarClassificador", "Classificador", "Mensagem sem tag com relevância abaixo disto é descartada.", true],
+              ["limiarConfianca", "Com #crm", "Abaixo disto o card nasce marcado para revisar."],
+              ["limiarSemTag", "Sem #crm", "Mensagem sem tag só age com confiança ≥ isto. Precisa ser ≥ o de com #crm."],
+              ["limiarClassificador", "Classificador", "Mensagem sem tag com relevância abaixo disto é descartada."],
             ] as const
-          ).map(([nome, rotulo, ajuda, gab39]) => (
+          ).map(([nome, rotulo, ajuda]) => (
             <div key={nome} className="space-y-1.5">
-              <Label htmlFor={nome}>
-                {rotulo}
-                {gab39 ? <SoComGab39 /> : null}
-              </Label>
+              <Label htmlFor={nome}>{rotulo}</Label>
               <Input id={nome} name={nome} inputMode="decimal" defaultValue={num(atual[nome])} className="font-mono tabular" />
               <p className="text-xs text-fg-faint">
                 {ajuda} <Herdado v={herdado[nome]} />

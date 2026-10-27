@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { classificar, extrairAtualizacao, provedorConfigurado } from "./extracao";
+import { extrairAtualizacao, provedorConfigurado } from "./extracao";
 import { FIXTURES_EXTRACAO, RECEBIDA_EM } from "./fixtures/extracao";
 import { definirRespostaMock } from "./provedores/mock";
 import type { ContextoExtracao } from "./prompts/extracao.v2";
@@ -116,9 +116,5 @@ describe("extrairAtualizacao (mock)", () => {
     expect(logs(console.info)).toMatch(
       /\[llm\] extracao ref=m3 provedor=openai modelo=gpt-6\.1-sol versao=extracao\.v2 ms=900 tokens_in=1500 tokens_out=260 tokens_reasoning=64 ok/,
     );
-  });
-
-  it("classificar é stub: tudo que chega é relevante", async () => {
-    await expect(classificar("#crm qualquer")).resolves.toEqual({ relevante: true, confianca: 1 });
   });
 });

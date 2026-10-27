@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { chaveOpenAI, grupoJid, limiarConfianca, modeloExtracao, notificacoesAtivas, provedorLlm, timeoutEnvioMs } from "./env";
 import { definirSobrescritas } from "./sobrescritas";
 import { paraSobrescritas, resolverConfigTecnica, validarCombinacao, type ConfigTecnica } from "./tecnica";
@@ -126,5 +126,27 @@ describe("validarCombinacao", () => {
     process.env.LLM_PROVEDOR = "gemini";
     expect(validarCombinacao(efetivo({}))).toMatch(/LLM_PROVEDOR/);
     expect(validarCombinacao(efetivo({ provedor: "openai" }))).toBeNull();
+  });
+});
+
+describe("leitores do classificador (GAB-39) seguem a config do Admin", () => {
+  it("LLM_CLASSIFICACAO_MODELO, LLM_LIMIAR_CLASSIFICADOR e LLM_LIMIAR_SEM_TAG vêm das sobrescritas, com a regra de ordem", async () => {
+    const { limiarClassificador, limiarSemTag, modeloClassificacao, reiniciarAvisosConfig } = await import("./env");
+    reiniciarAvisosConfig();
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    process.env.LLM_CLASSIFICACAO_MODELO = "gpt-env";
+    process.env.LLM_LIMIAR_CLASSIFICADOR = "0.6";
+    process.env.LLM_LIMIAR_SEM_TAG = "0.9";
+    definirSobrescritas(paraSobrescritas({ modeloClassificacao: "gpt-admin", limiarClassificador: 0.55, limiarSemTag: 0.95 }));
+    expect(modeloClassificacao("openai")).toBe("gpt-admin");
+    expect(limiarClassificador()).toBe(0.55);
+    expect(limiarSemTag()).toBe(0.95);
+    // Ordem: sem #crm nunca abaixo de com #crm, mesmo vindo da config.
+    definirSobrescritas(paraSobrescritas({ limiarConfianca: 0.8, limiarSemTag: 0.5 }));
+    expect(limiarSemTag()).toBe(0.8);
+    definirSobrescritas(undefined);
+    expect(modeloClassificacao("openai")).toBe("gpt-env");
+    expect(limiarClassificador()).toBe(0.6);
+    vi.restoreAllMocks();
   });
 });
