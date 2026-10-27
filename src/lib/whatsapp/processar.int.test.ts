@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/lib/db";
 import { diaEmFuso } from "@/lib/oportunidades/aging";
 import { FIXTURES_EXTRACAO, RECEBIDA_EM, saida } from "@/lib/llm/fixtures/extracao";
+import { VERSAO_EXTRACAO } from "@/lib/llm/prompts/extracao.v2";
 import { definirRespostaMock } from "@/lib/llm/provedores/mock";
 import { ErroLlm } from "@/lib/llm/tipos";
 import { dbTeste, limparBanco } from "@/test/db";
@@ -78,7 +79,7 @@ describe("fixtures de extração (LLM mockada) → efeito no CRM", () => {
     const r = await processarMensagem(m.id);
     const depois = await dbT.mensagemBruta.findUniqueOrThrow({ where: { id: m.id } });
     expect(depois.status).toBe(f.esperado.status);
-    expect(depois.resultadoLlm).toMatchObject({ versao: "extracao.v1", provedor: "mock", saida: f.saida });
+    expect(depois.resultadoLlm).toMatchObject({ versao: VERSAO_EXTRACAO, provedor: "mock", saida: f.saida });
     expect(r).toMatchObject({ confirmacao: f.esperado.confirmacao });
 
     const cards = await dbT.oportunidade.findMany({ include: { fase: true, responsavel: true, empresa: true, contato: { include: { pontos: true } } } });
@@ -104,7 +105,7 @@ describe("fixtures de extração (LLM mockada) → efeito no CRM", () => {
     expect(tl.map((t) => t.tipo)).toEqual(["CRIACAO", "MENSAGEM_WHATSAPP"]);
     expect(tl[0].payload).toMatchObject({ via: "WHATSAPP" });
     expect(tl[1]).toMatchObject({ mensagemBrutaId: m.id, usuarioId: joao.id });
-    expect(tl[1].payload).toMatchObject({ texto: f.texto, saida: f.saida, versao: "extracao.v1" });
+    expect(tl[1].payload).toMatchObject({ texto: f.texto, saida: f.saida, versao: VERSAO_EXTRACAO });
     const tr = await dbT.transicaoFase.findMany({ where: { oportunidadeId: c.id } });
     expect(tr).toMatchObject([{ deFaseId: null, paraFaseId: c.faseId, origem: "WHATSAPP", usuarioId: joao.id }]);
   });
@@ -453,7 +454,7 @@ describe("falhas → FALHA com ref, nunca quebra, nunca loga o texto", () => {
   it("log de custo/latência por chamada, sem o texto", async () => {
     await processarMensagem((await bruta(FIXTURES_EXTRACAO[0].texto)).id);
     const l = logs(console.info);
-    expect(l).toMatch(/\[llm\] extracao ref=\S+ provedor=mock modelo=mock-extracao versao=extracao\.v1 ms=\d+ tokens_in=\d+ tokens_out=\d+ ok/);
+    expect(l).toMatch(/\[llm\] extracao ref=\S+ provedor=mock modelo=mock-extracao versao=extracao\.v2 ms=\d+ tokens_in=\d+ tokens_out=\d+ ok/);
     expect(l).not.toContain("Gustavo");
   });
 });

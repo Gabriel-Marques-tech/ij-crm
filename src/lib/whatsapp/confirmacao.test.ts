@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { textoCriado, textoFalha, textoPendente } from "./confirmacao";
+import { textoAtualizado, textoCriado, textoFalha, textoPendente } from "./confirmacao";
 
 const BASE = {
   titulo: "Gustavo — Economia Sensata",
@@ -10,6 +10,42 @@ const BASE = {
   revisar: false,
   motivosRevisar: [],
 };
+
+const ATU = {
+  titulo: "Gustavo — Economia Sensata",
+  deFaseNome: "Primeiro Contato" as string | null,
+  faseNome: "Reunião Diagnóstica",
+  proximaAcao: "reunião" as string | null,
+  proximaAcaoEm: "2026-10-30" as string | null,
+  mudou: true,
+  revisar: false,
+  motivosRevisar: [] as string[],
+};
+
+describe("confirmação de ATUALIZAR (cita o card)", () => {
+  it("moveu: formato do ticket", () => {
+    expect(textoAtualizado(ATU)).toBe("✅ Gustavo — Economia Sensata: Primeiro Contato → Reunião Diagnóstica. Próx.: reunião (30/10)");
+  });
+
+  it("sem mover: diz a fase atual; nada mudou: só anotado", () => {
+    expect(textoAtualizado({ ...ATU, deFaseNome: null, proximaAcao: null, proximaAcaoEm: null })).toBe(
+      "✅ Gustavo — Economia Sensata (Reunião Diagnóstica): atualizado.",
+    );
+    expect(textoAtualizado({ ...ATU, deFaseNome: null, proximaAcao: null, proximaAcaoEm: null, mudou: false })).toBe(
+      "✅ Gustavo — Economia Sensata (Reunião Diagnóstica): anotado na timeline, sem mudança nos campos.",
+    );
+  });
+
+  it("revisar em 2ª linha; reprocessada; texto achatado/cortado", () => {
+    const r = textoAtualizado({ ...ATU, revisar: true, motivosRevisar: ["ganho sem valor fechado: mova pelo CRM"] }, { reprocessada: true });
+    expect(r).toBe(
+      "⚠️ Reprocessada: Gustavo — Economia Sensata: Primeiro Contato → Reunião Diagnóstica. Próx.: reunião (30/10)\nMarquei para revisar: ganho sem valor fechado: mova pelo CRM.",
+    );
+    const longo = textoAtualizado({ ...ATU, titulo: `a\n\nb ${"x".repeat(300)}` });
+    expect(longo.split("\n")).toHaveLength(1);
+    expect(longo).toContain("…");
+  });
+});
 
 describe("confirmação no grupo", () => {
   it("formato do ticket", () => {
@@ -28,7 +64,8 @@ describe("confirmação no grupo", () => {
       textoCriado(BASE),
       textoCriado({ ...BASE, revisar: true, motivosRevisar: ["x"] }),
       textoPendente("SEM_NOME"),
-      textoPendente("ATUALIZAR"),
+      textoPendente("ALVO_NAO_ENCONTRADO"),
+      textoAtualizado({ ...ATU, revisar: true, motivosRevisar: ["y"] }),
       textoFalha("ab12cd34"),
     ];
     for (const t of textos) {
