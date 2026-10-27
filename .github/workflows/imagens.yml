@@ -3,16 +3,19 @@
 #   app  ← Dockerfile, estágio `runtime` (serviço `app` do compose.prod.yml)
 #   ops  ← Dockerfile, estágio `ops`     (serviço one-shot `migrate`)
 #
-# Tags: `sha-<commit curto>` (imutável, é o que o deploy/rollback usa) e `latest`
-# (SÓ a partir da main; dispatch de outra branch publica só `sha-…`).
+# Tags: `sha-<commit curto>` e `latest` SÓ a partir da main (código que passou
+# por PR); dispatch de outra branch publica só `branch-<commit curto>`, que o
+# deploy recusa. `sha-…` é o que o deploy/rollback usa.
 # Actions fixadas por SHA de commit (versão no comentário); atualize os dois juntos.
 #
-# Deploy automático: depois do build de um push na main, o job `deploy` manda a
-# tag `sha-<commit curto>` por SSH para a VPS, onde o comando forçado da chave
-# (scripts/deploy-remoto.sh) roda `scripts/deploy.sh <tag>`. Environment
-# `producao` com os secrets DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY e
-# DEPLOY_KNOWN_HOSTS; sem eles o job é pulado com um aviso. Pausa: variável de
-# repositório DEPLOY_AUTOMATICO=false. Ver docs/runbook.md, "Deploy automático".
+# Deploy automático: depois do build de um push na main, o job `deploy` assume
+# uma role da AWS por OIDC (sem chave guardada) e manda, por SSM Run Command, o
+# documento `ij-crm-deploy` (deploy/ssm-deploy.yaml) com a tag e os DIGESTS das
+# imagens recém-publicadas; na VPS, scripts/deploy-remoto.sh confere tudo e roda
+# `scripts/deploy.sh`. Porta 22 fechada. Configuração no environment `producao`
+# (variáveis AWS_DEPLOY_ROLE_ARN, AWS_REGION, DEPLOY_INSTANCE_ID); sem elas o job
+# é pulado com aviso. Pausa: variável de repositório DEPLOY_AUTOMATICO=false.
+# Ver docs/runbook.md, "Deploy automático (GitHub Actions + AWS SSM)".
 name: imagens
 
 on:
@@ -44,8 +47,20 @@ jobs:
       packages: write
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
+      digest_app: ${{ steps.push-app.outputs.digest }}
+      digest_ops: ${{ steps.push-ops.outputs.digest }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0   # histórico para comparar as migrations com o push anterior
+
+      # Expand/contract: migration nova destrutiva sem `-- destrutiva-ok:` barra o
+      # build (e portanto o deploy). Nos PRs o mesmo check roda em migrations.yml.
+      - name: Migrations destrutivas
+        if: github.event_name == 'push' && github.event.before != '0000000000000000000000000000000000000000'
+        env:
+          BASE: ${{ github.event.before }}
+        run: scripts/checar-migrations.sh "$BASE"
 
       - name: QEMU (só para arm64)
         if: contains(env.PLATAFORMAS, 'arm64')
@@ -65,13 +80,15 @@ jobs:
         with:
           images: ${{ env.REGISTRO }}/ij-crm-app
           tags: |
-            type=sha,prefix=sha-,format=short
+            type=sha,prefix=sha-,format=short,enable=${{ github.ref == 'refs/heads/main' }}
+            type=sha,prefix=branch-,format=short,enable=${{ github.ref != 'refs/heads/main' }}
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 
       # A tag que o deploy usa, conferida contra a lista que o metadata-action
-      # gerou (e que o build abaixo publica): o deploy leva exatamente esta imagem.
+      # gerou (e que o build abaixo publica). O deploy leva a tag E os digests.
       - name: Tag imutável do deploy
         id: tag
+        if: github.ref == 'refs/heads/main'
         env:
           TAGS_APP: ${{ steps.meta-app.outputs.tags }}
           IMAGEM: ${{ env.REGISTRO }}/ij-crm-app
@@ -87,12 +104,14 @@ jobs:
         with:
           images: ${{ env.REGISTRO }}/ij-crm-ops
           tags: |
-            type=sha,prefix=sha-,format=short
+            type=sha,prefix=sha-,format=short,enable=${{ github.ref == 'refs/heads/main' }}
+            type=sha,prefix=branch-,format=short,enable=${{ github.ref != 'refs/heads/main' }}
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 
       # Mesmo builder nos dois passos: o estágio `deps` (pnpm install) do app é
       # reaproveitado pelo ops. Cache entre execuções no cache do GitHub Actions.
       - name: Build + push app (runtime)
+        id: push-app
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
@@ -105,6 +124,7 @@ jobs:
           cache-to: type=gha,scope=app,mode=max
 
       - name: Build + push ops (migrate)
+        id: push-ops
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
@@ -123,6 +143,8 @@ jobs:
           TAGS_APP: ${{ steps.meta-app.outputs.tags }}
           TAGS_OPS: ${{ steps.meta-ops.outputs.tags }}
           TAG: ${{ steps.tag.outputs.tag }}
+          DIGEST_APP: ${{ steps.push-app.outputs.digest }}
+          DIGEST_OPS: ${{ steps.push-ops.outputs.digest }}
           PAUSADO: ${{ vars.DEPLOY_AUTOMATICO == 'false' }}
         run: |
           {
@@ -131,15 +153,23 @@ jobs:
             echo '```'
             echo "$TAGS_APP"
             echo "$TAGS_OPS"
+            echo "app@$DIGEST_APP"
+            echo "ops@$DIGEST_OPS"
             echo '```'
             echo
-            if [[ "$PAUSADO" == "true" ]]; then
-              echo "Deploy automático **pausado** (variável DEPLOY_AUTOMATICO=false)."
+            if [[ -z "$TAG" ]]; then
+              echo "Build fora da main: tags \`branch-…\`, que o deploy não aceita."
+            else
+              if [[ "$PAUSADO" == "true" ]]; then
+                echo "Deploy automático **pausado** (variável DEPLOY_AUTOMATICO=false)."
+              fi
+              echo "Deploy manual na VPS: \`scripts/deploy.sh $TAG\`"
             fi
-            echo "Deploy manual na VPS: \`scripts/deploy.sh $TAG\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
-  # Deploy automático na VPS (AWS) da imagem que o job `build` acabou de publicar.
+
+  # Deploy automático na VPS (AWS) da imagem que o job `build` acabou de publicar,
+  # por AWS SSM Run Command (porta 22 fechada; credencial temporária via OIDC).
   # Só em push na main com build ok; pausável com a variável de repositório
   # DEPLOY_AUTOMATICO=false (o job aparece como "skipped").
   deploy:
@@ -148,9 +178,10 @@ jobs:
       success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
       && vars.DEPLOY_AUTOMATICO != 'false'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    # Sem token do GitHub: o job não faz checkout nem usa a API, só SSH.
-    permissions: {}
+    timeout-minutes: 60
+    # Só o token OIDC para a AWS; nenhum acesso ao repo (sem checkout).
+    permissions:
+      id-token: write
     environment:
       name: producao
     # Um deploy por vez, na ordem dos merges; um em andamento nunca é cancelado.
@@ -159,96 +190,154 @@ jobs:
       cancel-in-progress: false
     env:
       TAG: ${{ needs.build.outputs.tag }}
+      DIGEST_APP: ${{ needs.build.outputs.digest_app }}
+      DIGEST_OPS: ${{ needs.build.outputs.digest_ops }}
+      # Configuração (não são segredos), no environment `producao`.
+      ROLE_ARN: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+      REGIAO: ${{ vars.AWS_REGION }}
+      INSTANCIA: ${{ vars.DEPLOY_INSTANCE_ID }}
+      DOCUMENTO: ij-crm-deploy
     steps:
-      # Sem a VPS ainda: nenhum secret configurado → pula com aviso (não falha).
-      # Configuração pela metade → falha (é erro de quem configurou).
+      # Sem a VPS ainda: nenhuma variável → pula com aviso + warning (verde, mas
+      # visível: uma variável apagada por engano não passa despercebida).
+      # Configuração pela metade ou inválida → falha.
       - name: Conferir configuração
         id: config
-        env:
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
         run: |
           faltam=()
-          for v in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY DEPLOY_KNOWN_HOSTS; do
-            [[ -n "${!v}" ]] || faltam+=("$v")
-          done
-          if [[ ${#faltam[@]} -eq 4 ]]; then
-            echo "::notice title=Deploy pulado::Secrets de deploy ausentes no environment producao (runbook: Deploy automático). Imagem $TAG publicada, sem deploy."
+          for v in ROLE_ARN REGIAO INSTANCIA; do [[ -n "${!v}" ]] || faltam+=("$v"); done
+          if [[ ${#faltam[@]} -eq 3 ]]; then
+            echo "::notice title=Deploy pulado::Variáveis AWS_DEPLOY_ROLE_ARN, AWS_REGION e DEPLOY_INSTANCE_ID ausentes no environment producao (runbook: Deploy automático). Imagem $TAG publicada, sem deploy."
+            echo "::warning title=Deploy automático NÃO rodou::sem configuração da AWS no environment producao; se a VPS já existe, alguém apagou as variáveis."
             {
               echo "### Deploy automático: pulado"
               echo
-              echo "Secrets \`DEPLOY_*\` ainda não configurados no environment \`producao\`."
+              echo "Variáveis \`AWS_DEPLOY_ROLE_ARN\`, \`AWS_REGION\` e \`DEPLOY_INSTANCE_ID\` ausentes no environment \`producao\`."
               echo "Imagem \`$TAG\` publicada; nada foi enviado à VPS."
             } >> "$GITHUB_STEP_SUMMARY"
             echo "pronto=false" >> "$GITHUB_OUTPUT"
-          elif [[ ${#faltam[@]} -gt 0 ]]; then
-            echo "::error title=Deploy mal configurado::faltam no environment producao: ${faltam[*]}"
+            exit 0
+          fi
+          erros=()
+          [[ ${#faltam[@]} -eq 0 ]] || erros+=("faltam no environment producao: ${faltam[*]} (AWS_DEPLOY_ROLE_ARN, AWS_REGION, DEPLOY_INSTANCE_ID)")
+          [[ -z "$ROLE_ARN" || "$ROLE_ARN" =~ ^arn:aws:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+$ ]] || erros+=("AWS_DEPLOY_ROLE_ARN inválida")
+          [[ -z "$REGIAO" || "$REGIAO" =~ ^[a-z]{2}(-[a-z]+)+-[0-9]$ ]] || erros+=("AWS_REGION inválida")
+          [[ -z "$INSTANCIA" || "$INSTANCIA" =~ ^i-[0-9a-f]{8,17}$ ]] || erros+=("DEPLOY_INSTANCE_ID inválido")
+          [[ "$TAG" =~ ^sha-[0-9a-f]{7,40}$ ]] || erros+=("tag inválida vinda do build: '$TAG'")
+          [[ "$DIGEST_APP" =~ ^sha256:[0-9a-f]{64}$ && "$DIGEST_OPS" =~ ^sha256:[0-9a-f]{64}$ ]] \
+            || erros+=("digests inválidos vindos do build: '$DIGEST_APP' '$DIGEST_OPS'")
+          if [[ ${#erros[@]} -gt 0 ]]; then
+            for e in "${erros[@]}"; do echo "::error title=Deploy mal configurado::$e"; done
             exit 1
-          else
-            [[ "$TAG" =~ ^sha-[0-9a-f]{7,40}$ ]] || { echo "::error::tag inválida vinda do build: '$TAG'"; exit 1; }
-            echo "pronto=true" >> "$GITHUB_OUTPUT"
           fi
+          echo "pronto=true" >> "$GITHUB_OUTPUT"
 
-      - name: Chave SSH e host conhecido
+      - name: Credenciais da AWS (OIDC)
+        if: steps.config.outputs.pronto == 'true'
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: ij-crm-deploy-${{ github.run_id }}
+          role-duration-seconds: 3600
+          mask-aws-account-id: true
+
+      # send-command do documento ij-crm-deploy e acompanhamento até um estado
+      # final. O código de saída do deploy.sh na VPS vira o resultado do job
+      # (≠ 0, inclusive com rollback automático = ❌ + email). Status que não dá
+      # para saber (API fora, prazo do job) NÃO é dado como falha certa.
+      - name: Deploy via SSM
         if: steps.config.outputs.pronto == 'true'
         env:
-          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          INTERVALO: "15"   # s entre consultas
+          PRAZO: "3000"     # s de acompanhamento (timeout do documento: 2700)
         run: |
-          umask 077
-          mkdir -p ~/.ssh
-          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
-          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts_deploy
+          set -uo pipefail
+          cmd_id="-"
+          resumo() {
+            {
+              echo "### Deploy automático"
+              echo
+              echo "| | |"
+              echo "|---|---|"
+              echo "| Tag | \`$TAG\` |"
+              echo "| Commit | \`$GITHUB_SHA\` |"
+              echo "| Digest app | \`$DIGEST_APP\` |"
+              echo "| Digest ops | \`$DIGEST_OPS\` |"
+              echo "| Comando SSM | \`$cmd_id\` (instância \`$INSTANCIA\`) |"
+              echo "| Resultado | $1 |"
+            } >> "$GITHUB_STEP_SUMMARY"
+          }
+          params="$(jq -cn --arg t "$TAG" --arg a "$DIGEST_APP" --arg o "$DIGEST_OPS" \
+            '{tag: [$t], digestApp: [$a], digestOps: [$o]}')"
+          if ! cmd_id="$(aws ssm send-command --document-name "$DOCUMENTO" --instance-ids "$INSTANCIA" \
+                --parameters "$params" --timeout-seconds 600 \
+                --comment "ij-crm $TAG run $GITHUB_RUN_ID" \
+                --query Command.CommandId --output text)" || [[ -z "$cmd_id" ]]; then
+            cmd_id="-"
+            resumo "❌ não enviado: \`send-command\` falhou (permissão da role, documento ou instância; veja o log do passo). Nada rodou na VPS."
+            echo "::error title=Deploy não enviado::send-command falhou"
+            exit 1
+          fi
+          echo "Comando SSM $cmd_id enviado (tag $TAG)"
 
-      # O servidor ignora o comando e roda o forçado (scripts/deploy-remoto.sh),
-      # que só aceita a tag. A saída do deploy.sh aparece aqui ao vivo; o código
-      # de saída dele vira o do job (≠ 0, inclusive com rollback automático = ❌).
-      - name: Deploy ${{ env.TAG }}
-        if: steps.config.outputs.pronto == 'true'
-        env:
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-        run: |
-          saida="$RUNNER_TEMP/deploy.log"
-          set +e
-          ssh -T \
-            -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o IdentityAgent=none \
-            -o UserKnownHostsFile="$HOME/.ssh/known_hosts_deploy" -o GlobalKnownHostsFile=/dev/null \
-            -o StrictHostKeyChecking=yes -o BatchMode=yes \
-            -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=10 \
-            "$DEPLOY_USER@$DEPLOY_HOST" "$TAG" 2>&1 | tee "$saida"
-          rc=${PIPESTATUS[0]}
-          set -e
-          case "$rc" in
-            0) resultado="✅ ok: \`$TAG\` no ar" ;;
-            255) resultado="❌ SSH falhou (conexão, chave ou host key; veja o log do passo)" ;;
-            *)
-              if grep -q "^deploy-remoto: recusado" "$saida"; then
-                resultado="❌ recusado pelo servidor (scripts/deploy-remoto.sh não aceitou a tag)"
-              elif grep -q "rollback automático ok" "$saida"; then
-                resultado="❌ falhou; rollback automático para a versão anterior ok"
-              elif grep -q "rollback automático para .* também falhou" "$saida"; then
-                resultado="❌ falhou e o rollback automático TAMBÉM falhou: intervenção manual (runbook §2)"
+          status="" detalhe="" ultimo="" erros_api=0 inv="{}"
+          limite=$((SECONDS + PRAZO))
+          while (( SECONDS < limite )); do
+            sleep "$INTERVALO"
+            if novo="$(aws ssm get-command-invocation --command-id "$cmd_id" --instance-id "$INSTANCIA" \
+                  --output json 2>"$RUNNER_TEMP/ssm-erro")"; then
+              erros_api=0
+              inv="$novo"
+              status="$(jq -r '.Status // ""' <<<"$inv")"
+              detalhe="$(jq -r '.StatusDetails // ""' <<<"$inv")"
+              if [[ "$status/$detalhe" != "$ultimo" ]]; then echo "SSM: $status ($detalhe)"; ultimo="$status/$detalhe"; fi
+              case "$status" in Success | Failed | TimedOut | Cancelled) break ;; esac
+            else
+              # Logo depois do send-command a invocação pode ainda não existir.
+              erros_api=$((erros_api + 1))
+              if (( erros_api >= 20 )); then
+                cat "$RUNNER_TEMP/ssm-erro"
+                status="" detalhe="get-command-invocation falhando"
+                break
+              fi
+            fi
+          done
+
+          codigo="$(jq -r '.ResponseCode // ""' <<<"$inv")"
+          saida="$(jq -r '.StandardOutputContent // ""' <<<"$inv")"
+          echo "----- saída do deploy na VPS (fim do log; completo em /var/log/ij-crm/deploy-*-$TAG.log) -----"
+          printf '%s\n' "$saida"
+          jq -r '.StandardErrorContent // ""' <<<"$inv"
+          echo "-----"
+
+          rc=1
+          case "$status" in
+            Success)
+              rc=0; resultado="✅ ok: \`$TAG\` no ar" ;;
+            Failed)
+              if [[ "$detalhe" == Undeliverable || "$detalhe" == Terminated ]]; then
+                resultado="❌ SSM: $detalhe (instância sem agente SSM/parada); verifique o status no SSM"
+              elif [[ "$codigo" == 2 ]] || grep -q "deploy-remoto: recusado" <<<"$saida"; then
+                resultado="❌ recusado na VPS por scripts/deploy-remoto.sh (tag, digest ou commit fora da main); nada rodou"
+              elif grep -q "rollback automático ok" <<<"$saida"; then
+                resultado="❌ deploy falhou; rollback automático para a versão anterior ok"
+              elif grep -q "rollback automático para .* também falhou" <<<"$saida"; then
+                resultado="❌ deploy falhou e o rollback automático TAMBÉM falhou: intervenção manual (runbook §2)"
               else
-                resultado="❌ falhou (código $rc; veja o log do passo e runbook §1–§2)"
+                resultado="❌ deploy.sh falhou (código ${codigo:-?}); veja a saída neste passo e o log na VPS"
               fi ;;
+            TimedOut)
+              if [[ "$detalhe" == DeliveryTimedOut ]]; then
+                resultado="❌ não entregue a tempo (instância offline ou sem agente SSM); nada rodou"
+              else
+                resultado="❌ estourou o tempo do SSM. O deploy.sh roda destacado e pode ter terminado ou ainda estar rodando: verifique o status no SSM e o log /var/log/ij-crm/deploy-*-$TAG.log"
+              fi ;;
+            Cancelled)
+              resultado="❌ cancelado no SSM. Se já tinha começado, o deploy.sh segue destacado até o fim: confira o log na VPS" ;;
+            *)
+              resultado="⚠️ status desconhecido (último: ${status:-nenhum}${detalhe:+, $detalhe}); NÃO quer dizer que falhou: verifique o status no SSM (comando $cmd_id)" ;;
           esac
-          {
-            echo "### Deploy automático"
-            echo
-            echo "| | |"
-            echo "|---|---|"
-            echo "| Tag | \`$TAG\` |"
-            echo "| Commit | \`$GITHUB_SHA\` |"
-            echo "| Resultado | $resultado |"
-          } >> "$GITHUB_STEP_SUMMARY"
-          if [[ "$rc" -ne 0 ]]; then
-            echo "::error title=Deploy falhou::$resultado"
-          fi
+          resumo "$resultado"
+          if [[ $rc -ne 0 ]]; then echo "::error title=Deploy $TAG::$resultado"; fi
           exit "$rc"
-
-      - name: Apagar a chave
-        if: always()
-        run: rm -f ~/.ssh/deploy_key ~/.ssh/known_hosts_deploy

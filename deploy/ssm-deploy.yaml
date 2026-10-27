@@ -1,0 +1,45 @@
+# Documento SSM "ij-crm-deploy" (Command, schema 2.2): o ÚNICO comando que o
+# GitHub Actions pode mandar para a VPS (a role ij-crm-deploy-gha só tem
+# ssm:SendCommand neste documento e nesta instância). Ver docs/runbook.md,
+# "Deploy automático (GitHub Actions + AWS SSM)".
+#
+# Criar / atualizar (o SendCommand usa a versão padrão):
+#   aws ssm create-document --name ij-crm-deploy --document-type Command \
+#     --document-format YAML --content file://deploy/ssm-deploy.yaml
+#   aws ssm update-document --name ij-crm-deploy --document-version '$LATEST' \
+#     --document-format YAML --content file://deploy/ssm-deploy.yaml
+#   aws ssm update-document-default-version --name ij-crm-deploy --document-version <nova>
+#
+# Os parâmetros entram no script por substituição de texto: o allowedPattern
+# (conferido pelo SSM antes de executar) só deixa passar [a-z0-9:-], e o
+# deploy-remoto.sh valida tudo de novo. timeoutSeconds folgado: o deploy.sh
+# espera até 15 min por outro deploy (lock) e o 1º deploy baixa ~2 GB; se mesmo
+# assim estourar, o deploy.sh segue destacado até o fim (log em /var/log/ij-crm/).
+schemaVersion: "2.2"
+description: "ij-crm: deploy de uma imagem sha-<commit> da main, conferida por digest (scripts/deploy-remoto.sh)"
+parameters:
+  tag:
+    type: String
+    description: "Tag imutável da imagem: sha-<commit curto> da main"
+    allowedPattern: "^sha-[0-9a-f]{7,40}$"
+  digestApp:
+    type: String
+    description: "Digest esperado da imagem ij-crm-app (sha256:...)"
+    allowedPattern: "^sha256:[0-9a-f]{64}$"
+  digestOps:
+    type: String
+    description: "Digest esperado da imagem ij-crm-ops (sha256:...)"
+    allowedPattern: "^sha256:[0-9a-f]{64}$"
+mainSteps:
+  - action: aws:runShellScript
+    name: deploy
+    precondition:
+      StringEquals:
+        - platformType
+        - Linux
+    inputs:
+      timeoutSeconds: "2700"
+      workingDirectory: /opt/ij-crm
+      runCommand:
+        - "set -eu"
+        - "exec runuser -u deploy -- /opt/ij-crm/scripts/deploy-remoto.sh '{{ tag }}' '{{ digestApp }}' '{{ digestOps }}'"
