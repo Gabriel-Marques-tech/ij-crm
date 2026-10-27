@@ -148,6 +148,23 @@ Env: `LLM_PROVEDOR=anthropic|mock` (dev sem chave: `mock`, que responde com as f
 API da Anthropic" + ref, reprocessável (GAB-41) depois da recarga. Cada chamada loga provedor, modelo, versão, ms e tokens — nunca o texto:
 `[llm] extracao ref=<id> provedor=anthropic modelo=claude-haiku-5-5 versao=extracao.v1 ms=… tokens_in=… tokens_out=… ok`.
 
+## Alerta de sem crédito na LLM
+
+GAB-46. A recarga da API de LLM é manual (pré-pago). Quando uma chamada falha com `SEM_CREDITO`
+(qualquer provedor), o caminho de `FALHA` de `processar.ts` chama `alertarSeSemCredito`
+(`src/lib/llm/alerta-credito.ts`), que:
+
+- manda `⚠️ Sem crédito na API de LLM. Mensagens do grupo estão ficando em FALHA e serão reprocessadas
+  depois da recarga. ref: …` para `ALERTA_OPS_JID` pelo `enviarWhatsApp` de sempre (timeout 60 s);
+- respeita cooldown guardado no banco (`alerta_operacional`, sobrevive a restart): 6 h depois de um aviso
+  entregue, 5 min se o envio falhou;
+- com `NOTIFICATIONS_ENABLED`≠`true` ou `ALERTA_OPS_JID` vazio, só loga (`[alerta-credito] … ref=…`);
+- nunca lança e nunca leva texto de mensagem do grupo (só a ref; `grep 'ref=…'` acha a causa).
+
+Gestor/admin veem um banner no topo do app enquanto houver `SEM_CREDITO` nas últimas 24 h. A primeira
+chamada à LLM que der certo (`marcarCreditoOk`) apaga o banner e zera o cooldown: uma nova falta de
+crédito avisa na hora. Depois da recarga, as mensagens em `FALHA` voltam pelo reprocessamento (GAB-41).
+
 ## Kanban
 
 `/kanban` (Vendas; `?quadro=projetos` para Projetos) e detalhe em `/kanban/[id]`. Serviço em
