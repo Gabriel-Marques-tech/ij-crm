@@ -96,4 +96,15 @@ describe("rodarCli", () => {
     expect(await rodarCli(["/nao/existe.csv"], r.x, AGORA)).toBe(1);
     expect(r.erros[0]).toMatch(/Não consegui ler \/nao\/existe\.csv/);
   });
+
+  it("erro de leitura não ecoa PII da mensagem", async () => {
+    const r = io();
+    r.x.ler = () => {
+      throw new Error("falhou para ana@segredo.test tel 11987654321");
+    };
+    expect(await rodarCli([ARQ], r.x, AGORA)).toBe(1);
+    expect(r.erros[0]).toContain("Não consegui ler");
+    expect(r.erros[0]).not.toContain("segredo");
+    expect(r.erros[0]).not.toContain("987654321");
+  });
 });

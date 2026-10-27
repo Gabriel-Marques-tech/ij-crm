@@ -3,11 +3,11 @@
  * Cria sessões direto no banco e checa redirects/guards por papel.
  * Uso: pnpm tsx scripts/smoke-auth.ts
  */
-import { PrismaClient } from "@prisma/client";
+import { db as prisma } from "../src/lib/db";
+import { mensagemSegura } from "../src/lib/erros/registrar";
 import { criarSessao } from "../src/lib/auth/sessao";
 
 const BASE = process.env.BASE_URL ?? "http://localhost:3100";
-const prisma = new PrismaClient();
 
 async function get(path: string, cookie?: string) {
   const r = await fetch(`${BASE}${path}`, { redirect: "manual", headers: cookie ? { cookie: `ij_sessao=${cookie}` } : {} });
@@ -59,7 +59,7 @@ async function main() {
 
 main()
   .catch((e) => {
-    console.error(e);
+    console.error(mensagemSegura(e));
     process.exitCode = 1;
   })
   .finally(() => prisma.$disconnect());

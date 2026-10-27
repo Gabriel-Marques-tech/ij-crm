@@ -11,6 +11,7 @@
  * cards em PERDIDO sem "Motivo da perda" no CSV; sem ele, esses cards são pulados.
  */
 import { db } from "@/lib/db";
+import { mensagemSegura } from "@/lib/erros/registrar";
 import { normalizarEmail } from "@/lib/normalizacao";
 import { decodificarArquivo } from "./csv";
 import { CAMPOS, combinarAliases, type Aliases, type Campo } from "./colunas";
@@ -109,7 +110,7 @@ export async function rodarCli(argv: string[], io: IoCli, agora = new Date()): P
       aliases = combinarAliases(extras.extras);
     }
   } catch (e) {
-    io.erro(`Não consegui ler ${(e as { path?: string }).path ?? arquivo}: ${(e as Error).message}`);
+    io.erro(`Não consegui ler ${(e as { path?: string }).path ?? arquivo}: ${mensagemSegura(e)}`);
     return 1;
   }
   const op = validarOpcoes(a.args.motivoPerda ? { motivoPerdaPadrao: a.args.motivoPerda } : {});
