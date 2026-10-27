@@ -13,7 +13,7 @@
  * Todo acesso filtra `deletadoEm: null`: card soft-deletado não aparece, não
  * move e não edita.
  */
-import type { Fase, Origem, Prisma, TipoTerminal, TipoTimeline } from "@prisma/client";
+import type { Fase, Origem, OrigemTransicao, Prisma, TipoTerminal, TipoTimeline } from "@prisma/client";
 import { db } from "@/lib/db";
 import { SELECAO_NOME_EXIBIDO, nomeExibido } from "@/lib/entidades/vinculo";
 import { listarPipelines, travarPipelines } from "@/lib/fases/fases";
@@ -153,6 +153,83 @@ export async function nomesDeUsuarios(ids: Iterable<string>): Promise<Map<string
 
 // ---------------------------------------------------------------- escrita
 
+/**
+ * Núcleo de "card nasce" (UI, import): grava a oportunidade, a TransicaoFase
+ * de entrada no funil (`de_fase_id` null — base das métricas de tempo por
+ * fase) e a Timeline de criação. Pressupõe o lock do pipeline e a fase já
+ * validada pelo chamador. `entrada` = fase/instante em que o card entrou no
+ * funil (o import pode ter histórico: entrou numa fase, hoje está em outra).
+ */
+export async function inserirCard(
+  tx: Tx,
+  args: {
+    data: Prisma.OportunidadeUncheckedCreateInput;
+    entrada: { faseId: string; em: Date };
+    porId: string;
+    origem: OrigemTransicao;
+    timeline: { tipo: TipoTimeline; payload: Prisma.InputJsonValue; em: Date };
+  },
+): Promise<string> {
+  const op = await tx.oportunidade.create({ data: args.data, select: { id: true } });
+  await tx.transicaoFase.create({
+    data: { oportunidadeId: op.id, deFaseId: null, paraFaseId: args.entrada.faseId, usuarioId: args.porId, origem: args.origem, em: args.entrada.em },
+  });
+  await tx.timeline.create({ data: { oportunidadeId: op.id, tipo: args.timeline.tipo, payload: args.timeline.payload, usuarioId: args.porId, em: args.timeline.em } });
+  return op.id;
+}
+
+/**
+ * Núcleo do movimento (Kanban, import): fase/fase_desde, TransicaoFase,
+ * Timeline MOVIMENTACAO e os ganchos de terminal (sai antes de entrar).
+ * Pressupõe os locks já tomados (`travarPipelines` com os extras do
+ * terminal) e `origem`/`destino` relidos depois do lock. `transicao: false`
+ * quando o chamador grava a TransicaoFase por outro caminho (histórico do import).
+ */
+export async function registrarMovimento(
+  tx: Tx,
+  args: {
+    oportunidadeId: string;
+    pipelineChave: string;
+    origem: Fase;
+    destino: Fase;
+    porId: string;
+    em: Date;
+    origemTransicao: OrigemTransicao;
+    transicao?: boolean;
+    /** Marca extra no payload da MOVIMENTACAO (ex.: `"IMPORT"`). */
+    via?: string;
+    dadosTerminal?: unknown;
+  },
+): Promise<void> {
+  const { oportunidadeId: id, origem, destino, em } = args;
+  // Entradas da Timeline depois da MOVIMENTACAO: `em` estritamente crescente.
+  let passo = 0;
+  const instante = () => new Date(em.getTime() + ++passo);
+  await tx.oportunidade.update({ where: { id }, data: { faseId: destino.id, faseDesde: em } });
+  if (args.transicao !== false) {
+    await tx.transicaoFase.create({ data: { oportunidadeId: id, deFaseId: origem.id, paraFaseId: destino.id, usuarioId: args.porId, origem: args.origemTransicao, em } });
+  }
+  const payload = { deFaseId: origem.id, paraFaseId: destino.id, ...(args.via ? { via: args.via } : {}) };
+  await tx.timeline.create({ data: { oportunidadeId: id, tipo: "MOVIMENTACAO", payload, usuarioId: args.porId, em } });
+  // Sai antes de entrar: ganho → perdido avisa o projeto e depois grava o motivo.
+  if (origem.isTerminal) {
+    await aoSairDeTerminal({ tx, oportunidadeId: id, pipelineChave: args.pipelineChave, origem, destino, porUsuarioId: args.porId, em, instante });
+  }
+  if (destino.isTerminal) {
+    await aoEntrarEmTerminal({
+      tx,
+      oportunidadeId: id,
+      pipelineChave: args.pipelineChave,
+      deFaseId: origem.id,
+      destino,
+      porUsuarioId: args.porId,
+      em,
+      instante,
+      dados: args.dadosTerminal,
+    });
+  }
+}
+
 export async function criarCard(
   dados: { pipelineId: string; faseId: string; titulo: string },
   por: Ator,
@@ -166,14 +243,13 @@ export async function criarCard(
       // Ganho/perdido só por movimento: é ele que passa por `aoEntrarEmTerminal`.
       if (f.isTerminal) throw new ErroDeRegra("FASE_TERMINAL");
       const agora = new Date();
-      const op = await tx.oportunidade.create({
+      return inserirCard(tx, {
         data: { pipelineId: dados.pipelineId, faseId: f.id, titulo, responsavelId: por.id, criadoVia: "UI", faseDesde: agora, criadoEm: agora },
-        select: { id: true },
+        entrada: { faseId: f.id, em: agora },
+        porId: por.id,
+        origem: "UI",
+        timeline: { tipo: "CRIACAO", payload: { faseId: f.id, via: "UI" }, em: agora },
       });
-      // Entrada no funil: de_fase_id null. Base das métricas de tempo por fase.
-      await tx.transicaoFase.create({ data: { oportunidadeId: op.id, deFaseId: null, paraFaseId: f.id, usuarioId: por.id, origem: "UI", em: agora } });
-      await tx.timeline.create({ data: { oportunidadeId: op.id, tipo: "CRIACAO", payload: { faseId: f.id, via: "UI" }, usuarioId: por.id, em: agora } });
-      return op.id;
     });
     return { ok: true, id };
   } catch (e) {
@@ -239,32 +315,16 @@ async function moverUmaVez(
 
     const origem = await tx.fase.findUniqueOrThrow({ where: { id: op.faseId } });
 
-    const agora = new Date();
-    // Entradas da Timeline depois da MOVIMENTACAO: `em` estritamente crescente.
-    let passo = 0;
-    const instante = () => new Date(agora.getTime() + ++passo);
-    await tx.oportunidade.update({ where: { id }, data: { faseId: destino.id, faseDesde: agora } });
-    await tx.transicaoFase.create({ data: { oportunidadeId: id, deFaseId: op.faseId, paraFaseId: destino.id, usuarioId: por.id, origem: "UI", em: agora } });
-    await tx.timeline.create({
-      data: { oportunidadeId: id, tipo: "MOVIMENTACAO", payload: { deFaseId: op.faseId, paraFaseId: destino.id }, usuarioId: por.id, em: agora },
+    await registrarMovimento(tx, {
+      oportunidadeId: id,
+      pipelineChave: alvo.pipeline.chave,
+      origem,
+      destino,
+      porId: por.id,
+      em: new Date(),
+      origemTransicao: "UI",
+      dadosTerminal: opts.dadosTerminal,
     });
-    // Sai antes de entrar: ganho → perdido avisa o projeto e depois grava o motivo.
-    if (origem.isTerminal) {
-      await aoSairDeTerminal({ tx, oportunidadeId: id, pipelineChave: alvo.pipeline.chave, origem, destino, porUsuarioId: por.id, em: agora, instante });
-    }
-    if (destino.isTerminal) {
-      await aoEntrarEmTerminal({
-        tx,
-        oportunidadeId: id,
-        pipelineChave: alvo.pipeline.chave,
-        deFaseId: op.faseId,
-        destino,
-        porUsuarioId: por.id,
-        em: agora,
-        instante,
-        dados: opts.dadosTerminal,
-      });
-    }
     return { ok: true as const, mudou: true, terminal: destino.tipoTerminal };
   });
 }
