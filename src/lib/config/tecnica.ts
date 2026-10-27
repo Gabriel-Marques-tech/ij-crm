@@ -211,7 +211,8 @@ type Ator = { id: string; papel: Papel };
 
 export type ResultadoConfigTecnica =
   | { ok: true; valor: ConfigTecnica }
-  | { ok: false; erro: "SEM_PERMISSAO" | "CONFLITO" }
+  | { ok: false; erro: "SEM_PERMISSAO" }
+  | { ok: false; erro: "CONFLITO" }
   | { ok: false; erro: "DADOS_INVALIDOS"; mensagem: string };
 
 /** Valida campo a campo, depois a combinação efetiva (com o env), grava e aplica na hora. */

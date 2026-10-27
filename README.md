@@ -391,6 +391,35 @@ campos com problema, nunca o valor) e a tela avisa "valor salvo inválido". Grav
 otimista: o formulário manda o `atualizado_em` que carregou e, se outra pessoa salvou no meio, recebe
 "Outra pessoa alterou esta configuração. Recarregue para ver os valores atuais."
 
+## Admin: configuração técnica e logs
+
+Só ADMIN (gestor recebe 403): **Gestão → Admin**.
+
+- **Configuração** — `GRUPO_JID` (botão "Listar grupos" consulta a Evolution:
+  `GET /group/fetchAllGroups/{instância}?getParticipants=false`), provedor e modelos de
+  extração/classificação, limiares (com #crm, sem #crm, classificador) e timeout de envio.
+  Fica na tabela `configuracao` (chave `tecnica`, schema zod em `src/lib/config/tecnica.ts`).
+  Precedência **config > env > padrão**: o valor salvo vira sobrescrita das variáveis lidas por
+  `src/lib/config/env.ts` (mesmas validações de lá). Campo vazio = herda do env.
+- Salvar recusa combinação inválida (em português): modelo de outro provedor, limiar sem
+  #crm < com #crm, `mock` em produção, JID que não é de grupo. Concorrência otimista.
+- **Cache**: a config é lida do banco uma vez por processo (entrada do webhook e de
+  `processarMensagem`) e fica em memória; salvar/restaurar aplica na hora, então vale já na
+  próxima mensagem. Funciona porque o app roda em **um processo Next** — com réplicas seria
+  preciso TTL ou `LISTEN/NOTIFY`. Edição manual da linha no banco só vale após reiniciar.
+- Segredos (chaves de API, chave da Evolution, segredo do webhook) e o safe mode
+  (`NOTIFICATIONS_ENABLED`) **não** são editáveis: a tela mostra só configurada/ausente e um
+  aviso quando o safe mode está desligado.
+- **Estado da Evolution** (`GET /instance/connectionState/{instância}`) e botão "Mostrar QR"
+  (`GET /instance/connect/{instância}`; com a instância fechada isso inicia uma conexão). O QR
+  vincula o WhatsApp: action só-ADMIN, nunca logado nem cacheado, some ao fechar.
+- **Logs** — últimos 200 eventos do webhook (hora, tipo, chat mascarado, HTTP, resultado, ms)
+  e 200 chamadas de LLM (modelo, tokens de entrada/saída/raciocínio, ms, status, ref da
+  mensagem). Tabelas `log_webhook`/`log_llm` em anel: cada inserção apaga o que passou do
+  limite (`src/lib/logs/tecnicos.ts`). Nunca texto de mensagem, telefone ou email; tipo,
+  resultado e modelo só entram se parecem identificadores. Falha ao gravar log não afeta o
+  webhook.
+
 ## Erros e debug
 
 Exceção inesperada numa server action não vira tela de erro: a action devolve

@@ -100,6 +100,7 @@ services:
       GRUPO_JID: ${GRUPO_JID:-}
       # Safe mode: só "true" libera envio real. Só o .env da VPS define true.
       NOTIFICATIONS_ENABLED: ${NOTIFICATIONS_ENABLED:-false}
+      EVOLUTION_TIMEOUT_ENVIO_MS: ${EVOLUTION_TIMEOUT_ENVIO_MS:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       # Vazio = padrão do provedor (gpt-6.1-sol / claude-haiku-5-5).

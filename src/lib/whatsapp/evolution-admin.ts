@@ -23,19 +23,19 @@ export class ErroEvolutionAdmin extends Error {
   }
 }
 
-async function chamar(caminho: string): Promise<unknown> {
+async function chamar(caminho: string, timeoutMs = TIMEOUT_ADMIN_MS): Promise<unknown> {
   const { apiUrl, apiKey, instancia } = configEvolution();
   const url = `${apiUrl}/${caminho.replace("{i}", encodeURIComponent(instancia))}`;
   const nome = caminho.split("/").slice(0, 2).join("/");
   const controlador = new AbortController();
-  const timer = setTimeout(() => controlador.abort(), TIMEOUT_ADMIN_MS);
+  const timer = setTimeout(() => controlador.abort(), timeoutMs);
   try {
     const r = await fetch(url, { headers: { apikey: apiKey }, signal: controlador.signal, cache: "no-store" });
     if (!r.ok) throw new ErroEvolutionAdmin(`Evolution ${nome} respondeu HTTP ${r.status}`);
     return await r.json().catch(() => null);
   } catch (e) {
     if (e instanceof ErroEvolutionAdmin) throw e;
-    throw new ErroEvolutionAdmin(`Evolution ${nome}: ${controlador.signal.aborted ? `timeout após ${TIMEOUT_ADMIN_MS / 1000}s` : "falha de rede"}`);
+    throw new ErroEvolutionAdmin(`Evolution ${nome}: ${controlador.signal.aborted ? `timeout após ${timeoutMs / 1000}s` : "falha de rede"}`);
   } finally {
     clearTimeout(timer);
   }
@@ -54,8 +54,9 @@ export async function listarGrupos(): Promise<GrupoEvolution[]> {
 
 export type EstadoConexao = "CONECTADO" | "AGUARDANDO_QR" | "DESCONECTADO" | "DESCONHECIDO";
 
-export async function estadoConexao(): Promise<EstadoConexao> {
-  const j = (await chamar("instance/connectionState/{i}")) as { instance?: { state?: unknown } } | null;
+/** `timeoutMs` menor na renderização da página: Evolution fora não pode travar o Admin. */
+export async function estadoConexao(timeoutMs = TIMEOUT_ADMIN_MS): Promise<EstadoConexao> {
+  const j = (await chamar("instance/connectionState/{i}", timeoutMs)) as { instance?: { state?: unknown } } | null;
   const s = j?.instance?.state;
   return s === "open" ? "CONECTADO" : s === "connecting" ? "AGUARDANDO_QR" : s === "close" ? "DESCONECTADO" : "DESCONHECIDO";
 }

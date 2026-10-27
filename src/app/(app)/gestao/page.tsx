@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { Users, Layers, MessageSquare, Upload, Trash2, Trophy } from "lucide-react";
+import { Users, Layers, MessageSquare, Upload, Trash2, Trophy, Settings } from "lucide-react";
 import { PageHeader } from "@/components/shell/page-header";
+import { exigirUsuario } from "@/lib/auth/atual";
 
 const AREAS = [
   { href: "/gestao/usuarios", icon: Users, titulo: "Usuários", desc: "Convites, papéis, telefone do WhatsApp." },
@@ -9,16 +10,19 @@ const AREAS = [
   { href: "/gestao/whatsapp", icon: MessageSquare, titulo: "WhatsApp", desc: "Mensagens falhas e pendentes. (GAB-41)", futuro: true },
   { href: "/gestao/importar", icon: Upload, titulo: "Importar", desc: "Pipefy → CRM: CSV com prévia, idempotente." },
   { href: "/gestao/ranking", icon: Trophy, titulo: "Ranking", desc: "Pesos da pontuação e se os vendedores veem o ranking." },
+  { href: "/gestao/admin", icon: Settings, titulo: "Admin", desc: "Grupo, LLM, limiares, conexão do WhatsApp e logs técnicos.", soAdmin: true },
 ];
 
 export const metadata = { title: "Gestão" };
 
-export default function GestaoPage() {
+export default async function GestaoPage() {
+  const u = await exigirUsuario();
+  const areas = AREAS.filter((a) => !("soAdmin" in a) || u.papel === "ADMIN");
   return (
     <>
       <PageHeader eyebrow="gestão" title="Gestão" description="Configuração do time e do funil." />
       <div className="grid gap-4 sm:grid-cols-2">
-        {AREAS.map((a) => {
+        {areas.map((a) => {
           const Icon = a.icon;
           const conteudo = (
             <>
