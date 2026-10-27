@@ -51,6 +51,47 @@ describe("resolverAlvo — escolha da LLM só vale dentro da lista", () => {
     });
   });
 
+  it("GAB-49: card só do ledger (mexido há mais de 30 min) pode ser escolhido, mas com revisar", () => {
+    expect(resolverAlvo({ alvoResposta: null, escolhaLlm: "b", candidatas: [c("b", { via: ["ledger"] })] })).toEqual({
+      tipo: "EXISTENTE",
+      id: "b",
+      motivos: [MOTIVO_SEM_IDENTIDADE],
+    });
+    // Mesmo card recente E no ledger continua sendo um só.
+    expect(resolverAlvo({ alvoResposta: null, escolhaLlm: "b", candidatas: [c("b", { via: ["recente", "ledger"] })] })).toMatchObject({ motivos: [] });
+  });
+
+  it("GAB-49: ledger com OUTRO card aberto na janela → ambíguo, revisar (mesmo que só um seja dos últimos 30 min)", () => {
+    expect(
+      resolverAlvo({ alvoResposta: null, escolhaLlm: "b", candidatas: [c("a", { via: ["ledger"] }), c("b", { via: ["recente", "ledger"] })] }),
+    ).toEqual({ tipo: "EXISTENTE", id: "b", motivos: [MOTIVO_SEM_IDENTIDADE] });
+  });
+
+  it("GAB-49: card fechado no ledger também concorre (como um recente fechado)", () => {
+    expect(
+      resolverAlvo({ alvoResposta: null, escolhaLlm: "b", candidatas: [c("x", { via: ["ledger"], terminal: true }), c("b", { via: ["recente"] })] }),
+    ).toMatchObject({ id: "b", motivos: [MOTIVO_SEM_IDENTIDADE] });
+  });
+
+  it("GAB-49: card FECHADO só pelo ledger nunca reabre → NENHUM com motivo (vai para revisão)", () => {
+    expect(resolverAlvo({ alvoResposta: null, escolhaLlm: "x", candidatas: [c("x", { via: ["ledger"], terminal: true })] })).toEqual({
+      tipo: "NENHUM",
+      motivo: "FECHADO_SEM_IDENTIDADE",
+    });
+    // Com identidade exata (ou reply), a reabertura do GAB-38 continua.
+    expect(resolverAlvo({ alvoResposta: null, escolhaLlm: "x", candidatas: [c("x", { via: ["ledger", "contato"], terminal: true })] })).toMatchObject({
+      tipo: "REABRIR",
+      deId: "x",
+    });
+    expect(resolverAlvo({ alvoResposta: "x", escolhaLlm: null, candidatas: [c("x", { via: ["ledger", "resposta"], terminal: true })] })).toMatchObject({
+      tipo: "REABRIR",
+    });
+  });
+
+  it("GAB-49: ledger sozinho nunca decide sem a LLM (sem id → NENHUM)", () => {
+    expect(resolverAlvo({ alvoResposta: null, escolhaLlm: null, candidatas: [c("b", { via: ["ledger"] })] })).toEqual({ tipo: "NENHUM" });
+  });
+
   it("escolha só por 'dominio' → sempre com motivo (revisar)", () => {
     expect(resolverAlvo({ alvoResposta: null, escolhaLlm: "b", candidatas: [c("b", { via: ["dominio"] })] })).toEqual({
       tipo: "EXISTENTE",
