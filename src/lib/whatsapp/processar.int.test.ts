@@ -353,7 +353,7 @@ describe("falhas → FALHA com ref, nunca quebra, nunca loga o texto", () => {
     expect(logs(console.error) + logs(console.info)).not.toContain("segredo");
   });
 
-  it("sem crédito na Anthropic → FALHA com motivo específico + ref (reprocessável depois)", async () => {
+  it("sem crédito (motivo padrão neutro) → FALHA com motivo específico + ref (reprocessável depois)", async () => {
     definirRespostaMock(() => {
       throw new ErroLlm("SEM_CREDITO", { status: 402 });
     });
@@ -364,7 +364,7 @@ describe("falhas → FALHA com ref, nunca quebra, nunca loga o texto", () => {
     expect(r.confirmacao).toBe(`❌ não consegui processar, veja no CRM (ref: ${r.ref})`);
     const d = await dbT.mensagemBruta.findUniqueOrThrow({ where: { id: m.id } });
     expect(d.status).toBe("FALHA");
-    expect(d.erro).toContain("sem crédito na API da Anthropic");
+    expect(d.erro).toContain("sem crédito na API de LLM");
     expect(d.erro).toContain(`ref=${r.ref}`);
     expect(logs(console.error)).toContain(`ref=${r.ref}`);
     expect(logs(console.error) + logs(console.info)).not.toContain("segredo");
