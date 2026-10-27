@@ -228,7 +228,8 @@ async function falhar(
   });
   if (count === 0) return { tipo: "IGNORADA" };
   const confirmacao = textoFalha(ref);
-  await responder(m, confirmacao, null, participantJid);
+  // GAB-41: já tinha levado ❌ (reprocessamento que falhou de novo) → não repete no grupo.
+  if (m.erro === null) await responder(m, confirmacao, null, participantJid);
   await alertarSeSemCredito(e, ref); // GAB-46: avisa ops se for SEM_CREDITO; nunca lança
   return { tipo: "FALHA", ref, codigo, confirmacao };
 }
