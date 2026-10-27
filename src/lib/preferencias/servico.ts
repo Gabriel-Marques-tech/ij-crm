@@ -1,14 +1,16 @@
 /** Leitura/gravação de `usuario.preferencias`. Sempre do PRÓPRIO usuário (a action passa o id da sessão). */
+import { cache } from "react";
 import { db } from "@/lib/db";
 import { listarPipelines } from "@/lib/fases/fases";
 import { comInicio, comVisualizacaoKanban, inicioSchema, lerPreferencias, visualizacaoKanbanSchema, type Preferencias } from "./preferencias";
 
 export type ErroPreferencias = "DADOS_INVALIDOS" | "QUADRO_INEXISTENTE";
 
-export async function obterPreferencias(usuarioId: string): Promise<Preferencias> {
+/** Uma leitura por request (React cache): o layout e a página costumam pedir as duas. */
+export const obterPreferencias = cache(async (usuarioId: string): Promise<Preferencias> => {
   const u = await db.usuario.findUnique({ where: { id: usuarioId }, select: { preferencias: true } });
   return lerPreferencias(u?.preferencias ?? null);
-}
+});
 
 /**
  * Grava a visualização de um quadro. Só aceita quadro existente e guarda só

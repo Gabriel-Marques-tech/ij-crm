@@ -54,8 +54,10 @@ export function paginaInicial(p: Preferencias): PaginaInicial {
   return p.inicio ?? "semana";
 }
 
-/** Destino do redirect de `/` (sempre interno, de uma lista fixa). */
-export function destinoInicio(p: Preferencias): "/semana" | "/kanban" | "/kanban?quadro=projetos" {
+export type DestinoInicio = "/semana" | "/kanban" | "/kanban?quadro=projetos";
+
+/** Destino do redirect de `/` e do logo do shell (sempre interno, de uma lista fixa). */
+export function destinoInicio(p: Preferencias): DestinoInicio {
   const i = paginaInicial(p);
   return i === "vendas" ? "/kanban" : i === "projetos" ? "/kanban?quadro=projetos" : "/semana";
 }

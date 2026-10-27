@@ -9,16 +9,18 @@ vi.mock("next/navigation", () => ({
 }));
 
 describe("Rail: logo da IJ no topo", () => {
-  it("mostra o símbolo da IJ com alt em português, levando ao início", () => {
+  it("mostra o símbolo da IJ com alt em português, levando direto à página inicial escolhida", () => {
     render(
       <QuadroAtivoProvider>
-        <Rail papel="VENDEDOR" />
+        <Rail papel="VENDEDOR" inicio="/kanban?quadro=projetos" />
       </QuadroAtivoProvider>,
     );
     const [desktop] = screen.getAllByRole("navigation", { name: "Principal" });
     const logo = within(desktop).getByRole("img", { name: "Inteli Júnior" });
     expect(logo.getAttribute("src")).toContain("simbolo-ij");
-    expect(logo.closest("a")).toHaveAttribute("href", "/");
+    // Direto ao destino: "/" só redireciona, e o redirect no meio da navegação
+    // disparava "Performance.measure: … end cannot be negative" no dev.
+    expect(logo.closest("a")).toHaveAttribute("href", "/kanban?quadro=projetos");
     // O "IJ" em texto (wordmark provisório) saiu.
     expect(desktop.textContent).not.toMatch(/^IJ/);
   });
