@@ -4,6 +4,7 @@
  * para 404: excluída → texto; mesclada → texto + link para o destino vivo.
  */
 import { resolverContatos, resolverEmpresas } from "@/lib/contatos/match";
+import { SUFIXO, sufixoVinculo } from "./sufixo-vinculo";
 
 export type RefBruta = { id: string; nome: string; deletadoEm: Date | null; mergedIntoId: string | null };
 
@@ -35,10 +36,6 @@ export async function descreverVinculo(tipo: "empresa" | "contato", ref: RefBrut
   return (await descreverVinculos(tipo, [ref])).get(ref.id) ?? null;
 }
 
-const SUFIXO = {
-  empresa: { EXCLUIDO: "excluída", MESCLADO: "mesclada" },
-  contato: { EXCLUIDO: "excluído", MESCLADO: "mesclado" },
-} as const;
 
 /** Texto simples (sem link): "Acme", "Acme (excluída)", "Acme (mesclada → Beta)". */
 export function textoVinculo(tipo: "empresa" | "contato", v: Vinculo | null | undefined): string | null {
@@ -48,9 +45,7 @@ export function textoVinculo(tipo: "empresa" | "contato", v: Vinculo | null | un
   return `${v.nome} (${SUFIXO[tipo].MESCLADO}${v.destino ? ` → ${v.destino.nome}` : ""})`;
 }
 
-export function sufixoVinculo(tipo: "empresa" | "contato", estado: "EXCLUIDO" | "MESCLADO"): string {
-  return SUFIXO[tipo][estado];
-}
+export { sufixoVinculo };
 
 /**
  * Nome curto da empresa/contato nas visões de card (Kanban, Minha Semana,

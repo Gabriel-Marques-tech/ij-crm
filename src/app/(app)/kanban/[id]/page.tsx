@@ -18,11 +18,15 @@ import { ResultadoTerminal } from "./resultado-terminal";
 import { Timeline, type CardRelacionado } from "./timeline";
 import { Vinculos } from "./vinculos";
 import { ExcluirCard } from "@/components/lixeira/excluir-card";
+import { temPapelMinimo } from "@/lib/auth/papeis";
+import { listarPrazosDoCard } from "@/lib/prazos/prazos";
+import { PrazosProvider } from "../../_calendario/editor-prazo";
+import { PrazosDoCard } from "./prazos-card";
 
 export const metadata = { title: "Card" };
 
 export default async function CardPage({ params }: { params: Promise<{ id: string }> }) {
-  await exigirUsuario();
+  const ator = await exigirUsuario();
   const { id } = await params;
   const card = await obterCard(id);
   if (!card) notFound();
@@ -35,10 +39,13 @@ export default async function CardPage({ params }: { params: Promise<{ id: strin
       if (typeof p.depois === "string") idsUsuarios.add(p.depois);
     }
   }
-  const [pipelines, responsaveis, nomes] = await Promise.all([
+  const agora = new Date();
+  const hoje = diaEmFuso(agora);
+  const [pipelines, responsaveis, nomes, prazos] = await Promise.all([
     listarPipelines({ incluirArquivadas: true }),
     listarResponsaveis(),
     nomesDeUsuarios(idsUsuarios),
+    listarPrazosDoCard(card.id, ator, hoje),
   ]);
   const todasFases = pipelines.flatMap((p) => p.fases);
   const nomesFases = new Map(todasFases.map((f) => [f.id, f.nome]));
@@ -49,7 +56,6 @@ export default async function CardPage({ params }: { params: Promise<{ id: strin
     [card.projeto, card.origemOportunidade].flatMap((c) => (c && !c.deletadoEm ? [[c.id, { titulo: c.titulo, quadro: c.pipeline.chave }] as const] : [])),
   );
 
-  const agora = new Date();
   const dias = diasNaFase(card.faseDesde, agora);
   const nivel = nivelAging(dias, card.fase.limiteDiasAlerta);
   const acao = estadoProximaAcao(card.proximaAcaoEm, agora);
@@ -171,6 +177,16 @@ export default async function CardPage({ params }: { params: Promise<{ id: strin
           </section>
 
           <DescricaoCard cardId={card.id} valor={card.descricao} />
+
+          <PrazosProvider
+            eu={{ id: ator.id, nome: ator.nome }}
+            gestor={temPapelMinimo(ator.papel, "GESTOR")}
+            responsaveis={responsaveis}
+            // Gestor: sugere o responsável do card; vendedor: sempre ele mesmo.
+            responsavelPadrao={card.responsavelId}
+          >
+            <PrazosDoCard cardId={card.id} prazos={prazos} hoje={hoje} />
+          </PrazosProvider>
 
           <Vinculos cardId={card.id} />
 

@@ -1,8 +1,8 @@
 import Link from "next/link";
-import { ArrowRightLeft, MessageSquareText, Pencil, Plus, Download, MessageCircle, Link2, Trash2, ArchiveRestore } from "lucide-react";
+import { ArrowRightLeft, MessageSquareText, Pencil, Plus, Download, MessageCircle, Link2, Trash2, ArchiveRestore, Flag } from "lucide-react";
 import type { TipoTimeline } from "@prisma/client";
 import { ehCampoEditavel, ROTULO_CAMPO } from "@/lib/oportunidades/campos";
-import { ROTULO_CAMPO_TERMINAL, ehCampoTerminal, formatarCampoTerminal, formatarDataHora, formatarValorCampo } from "@/lib/oportunidades/formatar";
+import { ROTULO_CAMPO_TERMINAL, ehCampoTerminal, formatarCampoTerminal, formatarDataHora, formatarDia, formatarValorCampo } from "@/lib/oportunidades/formatar";
 import type { DetalheCard } from "@/lib/oportunidades/oportunidades";
 import { ehCampoVinculo, ROTULO_VINCULO } from "@/lib/oportunidades/vinculos";
 import { MensagemWhatsapp } from "./mensagem-whatsapp";
@@ -20,6 +20,7 @@ const ICONE: Record<TipoTimeline, typeof Plus> = {
   VINCULO_PROJETO: Link2,
   EXCLUSAO: Trash2,
   RESTAURACAO: ArchiveRestore,
+  PRAZO: Flag,
 };
 
 /** Card ligado a este (venda ↔ projeto), para os links da Timeline. */
@@ -164,6 +165,21 @@ function Descricao({
       return <>excluiu o card (foi para a lixeira)</>;
     case "RESTAURACAO":
       return <>restaurou o card da lixeira</>;
+    case "PRAZO": {
+      const titulo = typeof p.titulo === "string" ? p.titulo : "prazo";
+      const dia = typeof p.dia === "string" && /^\d{4}-\d{2}-\d{2}$/.test(p.dia) ? p.dia : null;
+      return (
+        <>
+          {p.evento === "concluido" ? "concluiu o prazo" : "criou o prazo"} 🏁 <b className="font-medium text-foreground">{titulo}</b>
+          {dia ? (
+            <>
+              {" "}
+              {p.evento === "concluido" ? "de" : "para"} <span className="font-mono text-xs tabular">{formatarDia(dia)}</span>
+            </>
+          ) : null}
+        </>
+      );
+    }
   }
 }
 

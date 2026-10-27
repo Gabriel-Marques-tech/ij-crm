@@ -7,10 +7,20 @@ import { db } from "@/lib/db";
 import { exigirUsuario } from "@/lib/auth/atual";
 import { comTratamento, ehInesperado } from "@/lib/erros/registrar";
 import { diaEmFuso } from "@/lib/oportunidades/aging";
-import { carregarSemana, resolverVendedor } from "@/lib/semana/semana";
+import { temPapelMinimo } from "@/lib/auth/papeis";
+import { carregarItens } from "@/lib/calendario/calendario";
+import { resolverSemana } from "@/lib/calendario/semana";
+import { dividirSemana, fimDaJanela } from "@/lib/semana/colunas";
+import { listarResponsaveis } from "@/lib/oportunidades/oportunidades";
+import { agruparSemana } from "@/lib/semana/agrupar";
+import { listarCardsDoVendedor, resolverVendedor } from "@/lib/semana/semana";
+import { Legenda } from "@/components/calendario/legenda";
 import { carregarTop3 } from "@/lib/ranking/servico";
 import { Top3Semana } from "@/components/ranking/top3-semana";
+import { BotaoNovoPrazo, PrazosProvider } from "../_calendario/editor-prazo";
 import { Destaque, Grupo } from "../_semana/itens";
+import { ProximaSemana } from "../_semana/proxima-semana";
+import { SemanaEmColunas } from "../_semana/semana-colunas";
 import { SeletorVendedor } from "../_semana/seletor-vendedor";
 
 export const metadata = { title: "Minha Semana" };
@@ -32,31 +42,42 @@ function saudacao(agora: Date): string {
   return "Boa noite.";
 }
 
-/** Minha Semana (GAB-33, §4.5): próximas ações do vendedor, padrão "Today" do ics-select. */
+/**
+ * Minha Semana (GAB-33, §4.5): próximas ações do vendedor, padrão "Today" do
+ * ics-select. GAB-51: "Hoje / Próximos 7 dias" viraram a semana (seg–dom) em
+ * colunas, com os mesmos mini-cards e prazos 🏁 do Calendário.
+ */
 export default async function MinhaSemanaPage({ searchParams }: { searchParams: Promise<{ vendedor?: string | string[] }> }) {
   const ator = await exigirUsuario();
   const { vendedor } = await searchParams;
   const agora = new Date();
   const hoje = diaEmFuso(agora);
+  const semana = resolverSemana(undefined, agora);
+  // Uma leitura de segunda até hoje+7: colunas (seg–dom) + "Próxima semana" (o resto do antigo "Próximos 7 dias").
+  const ate = fimDaJanela(semana);
   // Top 3 em paralelo e isolado: se falhar, só o card lateral mostra a ref (GAB-44).
   const top3 = comTratamento("pagina.semana.top3", () => carregarTop3(ator, agora));
   const dados = await comTratamento("pagina.semana", async () => {
     const escolha = await resolverVendedor(ator, typeof vendedor === "string" ? vendedor : undefined);
-    const [s, foto] = await Promise.all([
-      carregarSemana(escolha.alvo.id, agora),
+    const [cards, itens, foto, responsaveis] = await Promise.all([
+      listarCardsDoVendedor(escolha.alvo.id),
+      carregarItens({ responsavelIds: [escolha.alvo.id] }, { primeiroDia: semana.segunda, ultimoDia: ate, hoje: semana.hoje }, ator),
       db.usuarioFoto.findUnique({ where: { usuarioId: escolha.alvo.id }, select: { atualizadoEm: true } }),
+      escolha.podeTrocar ? escolha.opcoes : listarResponsaveis(),
     ]);
-    return { escolha, s, foto };
+    return { escolha, s: agruparSemana(cards, agora), cards, itens, foto, responsaveis };
   });
   if (ehInesperado(dados)) return <ErroCarregamento codigo={dados.ref} />;
   const ranking = await top3;
-  const { escolha, s, foto } = dados;
+  const { escolha, s, cards, itens, foto, responsaveis } = dados;
+  // O destaque já está grande no topo: não se repete nas colunas.
+  const { dias, proxima } = dividirSemana(semana, itens, s.destaque?.id ?? null);
+  // Vencidas de antes desta semana não cabem nas colunas: seguem em lista (com "marcar feita").
+  const vencidasAntes = s.vencidas.filter((c) => diaEmFuso(c.proximaAcaoEm!) < semana.segunda);
+  const depois = cards.filter((c) => c.proximaAcaoEm && diaEmFuso(c.proximaAcaoEm) > ate && c.id !== s.destaque?.id).length;
   const proprio = escolha.alvo.id === ator.id;
   const primeiroNome = escolha.alvo.nome.split(" ")[0];
   const nada = s.destaque === null && s.sem.length === 0;
-
-  // Totais incluem o destaque; a lista da faixa dele mostra o resto.
-  const soDestaque = (faixa: "vencida" | "hoje" | "semana") => s.destaqueFaixa === faixa;
 
   return (
     <>
@@ -100,49 +121,49 @@ export default async function MinhaSemanaPage({ searchParams }: { searchParams: 
             </p>
           ) : null}
 
-          {s.totais.vencida > 0 ? (
-            <Grupo titulo="Vencidas" total={s.totais.vencida} cor="bg-danger" itens={s.vencidas} agora={agora} hoje={hoje} vazio="Só a do destaque, acima." />
-          ) : null}
-          <Grupo
-            titulo="Hoje"
-            total={s.totais.hoje}
-            cor="bg-warn"
-            itens={s.hoje}
-            agora={agora}
-            hoje={hoje}
-            vazio={soDestaque("hoje") ? "Só a do destaque, acima." : "Nada marcado para hoje."}
-          />
-          <Grupo
-            titulo="Próximos 7 dias"
-            total={s.totais.semana}
-            cor="bg-success"
-            itens={s.semana}
-            agora={agora}
-            hoje={hoje}
-            vazio={soDestaque("semana") ? "Só a do destaque, acima." : "Nada nos próximos 7 dias."}
-          />
-          <Grupo
-            titulo="Sem próxima ação"
-            total={s.totais.sem}
-            cor="bg-fg-faint"
-            itens={s.sem}
-            agora={agora}
-            hoje={hoje}
-            vazio="Todos os cards abertos têm próxima ação."
-          />
-
-          {s.depois > 0 ? (
-            <p className="font-mono text-xs text-fg-mute">
-              +{s.depois} {s.depois === 1 ? "card" : "cards"} com próxima ação depois de 7 dias ·{" "}
-              <Link href={`/kanban?resp=${encodeURIComponent(escolha.alvo.id)}`} className="text-fg-soft hover:text-foreground hover:underline">
-                ver no Kanban
-              </Link>
-            </p>
+          {vencidasAntes.length > 0 ? (
+            <Grupo titulo="Vencidas antes desta semana" total={vencidasAntes.length} cor="bg-danger" itens={vencidasAntes} agora={agora} hoje={hoje} vazio={null} />
           ) : null}
         </div>
         <aside className="lg:sticky lg:top-6">
           {ehInesperado(ranking) ? <ErroCarregamento codigo={ranking.ref} /> : <Top3Semana dados={ranking} euId={ator.id} />}
         </aside>
+      </div>
+
+      <PrazosProvider eu={{ id: ator.id, nome: ator.nome }} gestor={temPapelMinimo(ator.papel, "GESTOR")} responsaveis={responsaveis} responsavelPadrao={escolha.alvo.id}>
+        <section aria-labelledby="semana-colunas" className="mt-8">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h2 id="semana-colunas" className="flex items-center gap-2 text-sm font-medium">
+              <span aria-hidden className="size-1.5 rounded-full bg-primary" />
+              Esta semana
+              <span className="font-mono text-xs text-fg-mute tabular">{semana.rotulo}</span>
+            </h2>
+            <div className="flex items-center gap-3">
+              <Link
+                href={proprio ? "/calendario" : `/calendario?pessoa=${encodeURIComponent(escolha.alvo.id)}`}
+                className="font-mono text-xs text-fg-mute hover:text-foreground hover:underline"
+              >
+                abrir no Calendário
+              </Link>
+              <BotaoNovoPrazo dia={hoje} variant="outline" />
+            </div>
+          </div>
+          <SemanaEmColunas dias={dias} hoje={semana.hoje} />
+          <Legenda />
+          <ProximaSemana acoes={proxima.acoes} prazos={proxima.prazos} ate={ate} depois={depois} kanbanHref={`/kanban?resp=${encodeURIComponent(escolha.alvo.id)}`} />
+        </section>
+      </PrazosProvider>
+
+      <div className="mt-8 space-y-4">
+        <Grupo
+          titulo="Sem próxima ação"
+          total={s.totais.sem}
+          cor="bg-fg-faint"
+          itens={s.sem}
+          agora={agora}
+          hoje={hoje}
+          vazio="Todos os cards abertos têm próxima ação."
+        />
       </div>
     </>
   );

@@ -3,6 +3,7 @@ import { temPapelMinimo } from "@/lib/auth/papeis";
 import {
   Building2,
   CalendarCheck,
+  CalendarDays,
   Contact,
   FolderKanban,
   KanbanSquare,
@@ -27,6 +28,7 @@ export const QUADRO_PADRAO = "vendas";
 
 export const NAV_ITEMS: NavItem[] = [
   { href: "/semana", label: "Minha Semana", icon: CalendarCheck },
+  { href: "/calendario", label: "Calendário", icon: CalendarDays },
   { href: "/kanban", label: "Vendas", icon: KanbanSquare, quadro: "vendas" },
   { href: "/kanban?quadro=projetos", label: "Projetos", icon: FolderKanban, quadro: "projetos" },
   { href: "/tabela", label: "Tabela", icon: Table2 },

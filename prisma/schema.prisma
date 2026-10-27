@@ -62,6 +62,7 @@ enum TipoTimeline {
   VINCULO_PROJETO
   EXCLUSAO     // card foi para a lixeira (GAB-36)
   RESTAURACAO  // card voltou da lixeira (GAB-36)
+  PRAZO        // prazo do card criado/concluído (GAB-51); payload.evento = "criado" | "concluido"
 }
 
 enum StatusMensagem {
@@ -105,6 +106,9 @@ model Usuario {
   foto              UsuarioFoto?
   configuracoes     Configuracao[]
   resumosJanela     ResumoJanela[]
+  prazos            Prazo[]          @relation("prazoResponsavel")
+  prazosCriados     Prazo[]          @relation("prazoCriadoPor")
+  prazosFeitos      Prazo[]          @relation("prazoFeitoPor")
 
   @@map("usuario")
 }
@@ -293,6 +297,7 @@ model Oportunidade {
   transicoes            TransicaoFase[]
   timeline              Timeline[]
   mensagensEnviadas     MensagemEnviada[]
+  prazos                Prazo[]
 
   @@index([pipelineId, faseId])
   @@index([responsavelId])
@@ -546,4 +551,34 @@ model ResumoJanela {
   @@unique([usuarioId, janelaInicio])
   @@index([janelaInicio])
   @@map("resumo_janela")
+}
+
+// ---------------------------------------------------------------- prazos (GAB-51)
+
+/// Prazo ("linha de chegada" no Calendário): um DIA civil (sem hora), um
+/// responsável e, opcionalmente, um card. Vendedor só mexe nos próprios;
+/// gestor/admin em qualquer um (src/lib/prazos/regras.ts). Soft-delete como o
+/// resto do app; card apagado de vez leva os prazos junto (cascade).
+model Prazo {
+  id             String    @id @default(cuid())
+  titulo         String
+  data           DateTime  @db.Date
+  responsavelId  String    @map("responsavel_id")
+  oportunidadeId String?   @map("oportunidade_id")
+  feitoEm        DateTime? @map("feito_em")
+  feitoPorId     String?   @map("feito_por_id")
+  criadoPorId    String    @map("criado_por_id")
+  deletadoEm     DateTime? @map("deletado_em")
+  criadoEm       DateTime  @default(now()) @map("criado_em")
+  atualizadoEm   DateTime  @updatedAt @map("atualizado_em")
+
+  responsavel  Usuario       @relation("prazoResponsavel", fields: [responsavelId], references: [id])
+  criadoPor    Usuario       @relation("prazoCriadoPor", fields: [criadoPorId], references: [id])
+  feitoPor     Usuario?      @relation("prazoFeitoPor", fields: [feitoPorId], references: [id], onDelete: SetNull)
+  oportunidade Oportunidade? @relation(fields: [oportunidadeId], references: [id], onDelete: Cascade)
+
+  @@index([responsavelId, data]) // semana de uma pessoa (Calendário "Meu"/"Pessoa", Minha Semana)
+  @@index([data]) // semana do time
+  @@index([oportunidadeId])
+  @@map("prazo")
 }
