@@ -618,8 +618,14 @@ erro do Prisma só loga `code` + `target`/`modelName` (a mensagem ecoa dados da 
 Deploy, rollback, backup/restore, QR da Evolution e troca do número do bot:
 [`docs/runbook.md`](docs/runbook.md) (`compose.prod.yml` + `scripts/deploy.sh`).
 As imagens são buildadas no GitHub Actions a cada push na `main` e publicadas no
-GHCR; a VPS só baixa (`scripts/deploy.sh [sha-<commit>]`). Limites de memória e
-instância mínima: runbook §11.
+GHCR; a VPS só baixa (`scripts/deploy.sh [sha-<commit>]`). **O deploy é
+automático**: depois do build, o job `deploy` do mesmo workflow manda a tag
+`sha-<commit>` por SSH para a VPS, onde uma chave com comando forçado
+(`scripts/deploy-remoto.sh`) só consegue rodar `scripts/deploy.sh <tag>`. Deploy
+que falha (mesmo com rollback automático) deixa o workflow vermelho. Pausar:
+variável de repositório `DEPLOY_AUTOMATICO=false`. Configuração (usuário
+`deploy`, chave, host key, environment `producao` e secrets): runbook, "Deploy
+automático (GitHub Actions)". Limites de memória e instância mínima: runbook §11.
 
 ## Testes
 

@@ -12,12 +12,15 @@ Do zero ao ar, em ordem. Cada passo aponta para a seção com os comandos
 
 1. **Instância**: EC2 `t3.small` (x86_64, 2 GiB), Ubuntu 24.04 LTS, disco gp3 de
    20–30 GiB e **2 GiB de swap** em arquivo ([§11](#11-recursos-limites-medição-e-instância-mínima)).
-   IP elástico. Security group: 22 só do seu IP; 80 e 443 TCP abertos (443 UDP opcional,
-   HTTP/3). **Não** abra 8080 nem 3000.
-2. **Docker Engine + plugin compose v2** e o usuário no grupo `docker`
-   ([§0, "Docker na VPS"](#docker-na-vps)).
-3. **Clonar em `/opt/ij-crm`** e criar `/var/backups/ij-crm` e `/var/log/ij-crm`
-   ([§0](#0-primeira-instalação-vps-limpa)).
+   IP elástico. Security group: 80 e 443 TCP abertos (443 UDP opcional, HTTP/3);
+   22 aberto para `0.0.0.0/0` (e `::/0`) **só com login por chave** — os runners do
+   GitHub Actions não têm IP fixo ([Deploy automático](#deploy-automático-github-actions),
+   "Porta 22"). **Não** abra 8080 nem 3000.
+2. **Docker Engine + plugin compose v2** ([§0, "Docker na VPS"](#docker-na-vps)) e o
+   **usuário `deploy`** no grupo `docker` ([Deploy automático, passo 1](#deploy-automático-github-actions)).
+3. **Clonar em `/opt/ij-crm`** (dono: `deploy`) e criar `/var/backups/ij-crm` e
+   `/var/log/ij-crm` ([§0](#0-primeira-instalação-vps-limpa)). Daqui em diante tudo
+   roda como `deploy`: `sudo -iu deploy`.
 4. **`.env`**: `cp .env.prod.example .env && chmod 600 .env`; `APP_DOMAIN`,
    `ACME_EMAIL`, um `openssl rand -hex 32` para cada segredo, `OPENAI_API_KEY`
    (conta com crédito pré-pago e auto-reload desligado, [§10](#10-provedor-de-llm-e-crédito-da-openai)).
@@ -48,7 +51,12 @@ Do zero ao ar, em ordem. Cada passo aponta para a seção com os comandos
     `scripts/backup.sh` mostrando `off-site: rclone copy` e o arquivo listado no
     remote ([§3, "Backup off-site"](#backup-off-site-rclone)). Restore testado uma vez ([§3](#3-restaurar-backup)).
     **Não entrar em produção sem isso.**
-14. **Por último**: `NOTIFICATIONS_ENABLED=true` no `.env` e `scripts/deploy.sh`.
+14. **Deploy automático**: chave do GitHub no `authorized_keys` do `deploy` com o
+    comando forçado, host key conferida, environment `producao` com os 4 secrets
+    e um deploy de teste pelo Actions (re-run do último `imagens` da `main`)
+    ([Deploy automático](#deploy-automático-github-actions), passos 2–6).
+    Daí em diante cada merge na `main` vai ao ar sozinho.
+15. **Por último**: `NOTIFICATIONS_ENABLED=true` no `.env` e `scripts/deploy.sh`.
     Mandar um `#crm` de teste e conferir a confirmação no grupo.
 
 Atalho usado em todo este documento (rode na raiz do repo):
@@ -60,7 +68,8 @@ alias dc='docker compose -f compose.prod.yml'
 | Arquivo | Para quê |
 |---|---|
 | `scripts/deploy.sh` | deploy (`checa → git pull → docker pull da imagem → backup → migrate → up → health`) e `rollback` por tag |
-| `.github/workflows/imagens.yml` | CI: builda as imagens `app` e `ops` a cada push na `main` e publica no GHCR |
+| `.github/workflows/imagens.yml` | CI: builda as imagens `app` e `ops` a cada push na `main`, publica no GHCR e faz o deploy automático na VPS |
+| `scripts/deploy-remoto.sh` | comando forçado da chave SSH do deploy automático: aceita só `sha-<commit>` e roda `deploy.sh` |
 | `scripts/backup.sh` | `pg_dump` do banco do CRM, retenção de 14 dias, cópia off-site (`BACKUP_REMOTE`) |
 | `scripts/restore.sh` | restaura um dump do CRM (destrutivo, pede confirmação) |
 | `scripts/evolution.sh` | instância do WhatsApp: criar, QR, estado, webhook, grupos, logout |
@@ -80,8 +89,9 @@ Pré-requisitos: Linux x86_64 com Docker Engine + plugin compose **recente**
 (o deploy usa `docker compose config --environment` e `up --wait --wait-timeout`;
 ensaiado com Docker 29.8 + Compose 5.6; um compose v2 antigo falha logo no
 `config` do deploy, antes de mexer em algo), `git`, `curl`, `flock` (util-linux), `rclone` (off-site) e de
-preferência `qrencode` e `jq`; usuário de deploy no grupo `docker`. Instância
-mínima e swap: §11.
+preferência `qrencode` e `jq`; usuário `deploy` no grupo `docker`, dono de
+`/opt/ij-crm` (criado no [Deploy automático, passo 1](#deploy-automático-github-actions)).
+Instância mínima e swap: §11.
 
 ### Docker na VPS
 
@@ -130,13 +140,14 @@ unset GHCR_PAT    # credencial fica em ~/.docker/config.json (chmod 600)
 O repo também é público: o `git clone`/`git pull` da VPS usa HTTPS sem chave.
 
 ```bash
-sudo git clone https://github.com/Gabriel-Marques-tech/ij-crm.git /opt/ij-crm && sudo chown -R "$USER" /opt/ij-crm
+sudo git clone https://github.com/Gabriel-Marques-tech/ij-crm.git /opt/ij-crm && sudo chown -R deploy:deploy /opt/ij-crm
+sudo mkdir -p /var/backups/ij-crm /var/log/ij-crm && sudo chown deploy:deploy /var/backups/ij-crm /var/log/ij-crm
+sudo -iu deploy                                   # daqui em diante, como deploy
 cd /opt/ij-crm
 cp .env.prod.example .env && chmod 600 .env
 # preencher: APP_DOMAIN, ACME_EMAIL, OPENAI_API_KEY e um `openssl rand -hex 32` para cada segredo:
 for v in POSTGRES_PASSWORD EVOLUTION_DB_PASSWORD EVOLUTION_REDIS_PASSWORD EVOLUTION_API_KEY \
   EVOLUTION_WEBHOOK_SECRET CRON_SECRET; do sed -i "s|^$v=$|$v=$(openssl rand -hex 32)|" .env; done
-sudo mkdir -p /var/backups/ij-crm /var/log/ij-crm && sudo chown "$USER" /var/backups/ij-crm /var/log/ij-crm
 scripts/deploy.sh --no-pull                       # 1º deploy: baixa :latest do GHCR (banco vazio: sem backup)
 dc --profile ops run --rm migrate prisma db seed  # pipelines/fases do Pipefy (só na 1ª vez)
 
@@ -164,7 +175,10 @@ evolution 206 MiB ociosos). Deploys seguintes da mesma tag: ~10 s.
 
 Fluxo: merge na `main` → o workflow **imagens** (GitHub Actions) builda e publica
 `ij-crm-app` e `ij-crm-ops` com as tags `sha-<commit curto>` e `latest` (≈ 5–10
-min; acompanhe na aba Actions) → deploy na VPS:
+min; acompanhe na aba Actions) → o job `deploy` do mesmo workflow roda
+`scripts/deploy.sh sha-<commit>` na VPS por SSH ([Deploy automático](#deploy-automático-github-actions)).
+Deploy à mão (tag específica, workflow pausado, emergência), como `deploy`
+(`sudo -iu deploy`):
 
 ```bash
 cd /opt/ij-crm && scripts/deploy.sh                 # a imagem :latest (resolvida para o sha-… dela)
@@ -219,6 +233,176 @@ Comandos úteis: `dc ps` (estado + health), `dc logs -f app`,
 Depois de um rollback automático confira `dc ps`: ele só troca o `app`. Se o
 que falhou foi outro serviço (ex.: a Evolution não subiu), ele segue com o
 problema. Veja `dc logs <serviço>`.
+
+## Deploy automático (GitHub Actions)
+
+Cada push na `main` (merge de PR) roda o workflow **imagens**: o job `build`
+publica as imagens e, se deu certo, o job `deploy` abre um SSH para a VPS e
+manda **só a tag** `sha-<commit curto>` do commit buildado. Na VPS, a chave do
+GitHub tem um **comando forçado** no `authorized_keys`: o sshd ignora o que o
+cliente pediu e roda `scripts/deploy-remoto.sh`, que aceita apenas
+`^sha-[0-9a-f]{7,40}$` (qualquer outra coisa: recusa, saída 2) e executa
+`scripts/deploy.sh <tag>` em `/opt/ij-crm`, com a saída ao vivo no log do
+Actions. Uma chave vazada só consegue disparar o deploy de uma tag que exista
+no GHCR: nada de shell, `latest`, opções, rollback, scp/sftp ou túnel.
+
+- **Resultado**: o código de saída do `deploy.sh` é o do job. Falha (inclusive
+  quando o rollback automático deu certo) = ❌ no Actions e email do GitHub para
+  quem fez o push. O resumo do job mostra tag, commit e resultado (ok, falhou com
+  rollback automático ok, rollback também falhou, recusado, SSH falhou).
+- **Ordem**: um deploy por vez (`concurrency: deploy-producao`, sem cancelar o
+  que está rodando), e o workflow inteiro já é serializado na `main`. Com vários
+  merges seguidos, o GitHub mantém **um** pendente: o intermediário é cancelado
+  e vai ao ar o mais novo (ele contém o anterior).
+- **Sem secrets** (antes de existir a VPS): o job passa com o aviso "Deploy
+  pulado" e nada é enviado. Secrets pela metade: o job falha dizendo quais faltam.
+- **Escopo**: só `push` na `main`; PRs, outras branches e `workflow_dispatch`
+  não fazem deploy. O job não tem token do GitHub (`permissions: {}`) nem faz checkout.
+- O `deploy.sh` faz `git pull` antes: compose/Caddyfile/scripts vêm da `main`
+  atual, a imagem vem da tag pedida (igual ao deploy à mão).
+
+### 1. Usuário `deploy` na VPS
+
+Usuário dedicado, sem senha, no grupo `docker`, dono do repo, do `.env`, dos
+backups e do crontab. **Grupo `docker` = root na prática**: a proteção é a chave
+só rodar o comando forçado. O admin (ex.: `ubuntu`) continua entrando com a
+chave dele e opera como `deploy` via `sudo -iu deploy`.
+
+```bash
+sudo useradd -m -s /bin/bash -c "deploy ij-crm" -G docker deploy
+sudo usermod -p '*' deploy      # sem senha (nenhuma confere), mas conta não "travada" para o sshd
+sudo install -d -m 700 -o deploy -g deploy /home/deploy/.ssh
+```
+
+Só se a VPS já foi instalada (§0) com outro usuário: passar tudo para o `deploy`.
+
+```bash
+sudo chown -R deploy:deploy /opt/ij-crm /var/backups/ij-crm /var/log/ij-crm
+crontab -l > /tmp/crontab.ij && sudo crontab -u deploy /tmp/crontab.ij && crontab -r && rm /tmp/crontab.ij
+# (rclone: copie ~/.config/rclone/rclone.conf para /home/deploy/.config/rclone/, chmod 600, dono deploy)
+```
+
+Par de chaves **ed25519 sem passphrase** (o Actions não digita senha), gerado
+na sua máquina, fora do repo:
+
+```bash
+ssh-keygen -t ed25519 -N '' -C github-actions-deploy@ij-crm -f ~/ij-crm-deploy
+# ~/ij-crm-deploy      → secret DEPLOY_SSH_KEY (passo 4); apagar depois
+# ~/ij-crm-deploy.pub  → authorized_keys do deploy (passo 2)
+```
+
+### 2. `authorized_keys` com o comando forçado
+
+Uma linha só (opções + chave pública), em `/home/deploy/.ssh/authorized_keys`:
+
+```bash
+echo "command=\"/opt/ij-crm/scripts/deploy-remoto.sh\",no-pty,no-port-forwarding,no-agent-forwarding,no-X11-forwarding $(cat ~/ij-crm-deploy.pub)"
+# cole a saída na VPS:
+sudo -u deploy tee -a /home/deploy/.ssh/authorized_keys      # cole, Enter, Ctrl-D
+sudo chmod 600 /home/deploy/.ssh/authorized_keys
+```
+
+Teste da sua máquina (o primeiro tem de ser recusado; o segundo faz um deploy
+de verdade da tag que já roda, `cat /opt/ij-crm/.deploy/atual`):
+
+```bash
+ssh -i ~/ij-crm-deploy deploy@<ip-elastico> latest          # → "deploy-remoto: recusado", saída 2
+ssh -i ~/ij-crm-deploy deploy@<ip-elastico> sha-<atual>     # → log do deploy.sh, saída 0
+```
+
+**Porta 22**: os runners do GitHub saem de faixas de IP enormes e variáveis, então
+o security group precisa aceitar 22 de qualquer lugar. Isso só é aceitável com
+**login por senha desligado** (padrão das AMIs Ubuntu; confira
+`sudo sshd -T | grep -Ei '^(passwordauthentication|kbdinteractiveauthentication|permitrootlogin)'`
+→ `no`, `no`, `prohibit-password`/`no`).
+
+### 3. Host key (nada de "trust on first use")
+
+O job usa `StrictHostKeyChecking=yes` com o known_hosts do secret: se a VPS
+trocar de chave (ou alguém se passar por ela), o deploy falha em vez de
+conectar. De uma rede confiável (sua casa, não Wi-Fi público), com o **mesmo
+endereço que vai em `DEPLOY_HOST`**:
+
+```bash
+ssh-keyscan -t ed25519 <ip-elastico> > ~/ij-crm-known_hosts
+ssh-keygen -lf ~/ij-crm-known_hosts       # → 256 SHA256:AbC… <ip> (ED25519)
+```
+
+Confira o `SHA256:…` com a fonte da AWS, que não passa pela rede:
+**EC2 → a instância → Actions → Monitor and troubleshoot → Get system log**,
+bloco `BEGIN SSH HOST KEY FINGERPRINTS` (impresso pelo cloud-init no 1º boot),
+ou numa sessão do **EC2 Instance Connect / Session Manager**:
+`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`. Diferente → **não use**.
+
+### 4. Environment `producao` e secrets no GitHub
+
+Settings → Environments → **New environment** `producao`:
+
+- **sem** "Required reviewers" (o deploy é automático);
+- **Deployment branches and tags** → *Selected branches and tags* → `main`
+  (os secrets só chegam a jobs da `main`);
+- **Environment secrets**:
+
+| Secret | Valor |
+|---|---|
+| `DEPLOY_HOST` | IP elástico (o mesmo usado no `ssh-keyscan`) |
+| `DEPLOY_USER` | `deploy` |
+| `DEPLOY_SSH_KEY` | conteúdo inteiro de `~/ij-crm-deploy` (privada, com as linhas BEGIN/END) |
+| `DEPLOY_KNOWN_HOSTS` | conteúdo de `~/ij-crm-known_hosts` |
+
+Ou pelo `gh` (na raiz do repo):
+
+```bash
+gh api -X PUT repos/Gabriel-Marques-tech/ij-crm/environments/producao \
+  -F 'deployment_branch_policy[protected_branches]=false' -F 'deployment_branch_policy[custom_branch_policies]=true'
+gh api -X POST repos/Gabriel-Marques-tech/ij-crm/environments/producao/deployment-branch-policies -f name=main
+gh secret set DEPLOY_HOST --env producao --body '<ip-elastico>'
+gh secret set DEPLOY_USER --env producao --body deploy
+gh secret set DEPLOY_SSH_KEY --env producao < ~/ij-crm-deploy
+gh secret set DEPLOY_KNOWN_HOSTS --env producao < ~/ij-crm-known_hosts
+shred -u ~/ij-crm-deploy          # a privada só fica no GitHub (gera outra se precisar)
+```
+
+### 5. Primeiro deploy pelo Actions
+
+Actions → **imagens** → último run da `main` → **Re-run all jobs** (ou faça um
+merge). O job `deploy` deve terminar ✅ com o resumo "ok". Histórico de deploys:
+aba **Environments → producao** do repo. Na VPS, `journalctl -t ij-crm-deploy`
+lista cada pedido (aceito ou recusado) com o IP de origem.
+
+### 6. Deploy de uma tag específica e rollback (à mão)
+
+Igual a antes, pelo admin, como `deploy`:
+
+```bash
+ssh ubuntu@<ip-elastico>
+sudo -iu deploy
+cd /opt/ij-crm
+scripts/deploy.sh sha-1a2b3c4       # §1
+scripts/deploy.sh rollback          # §2 (ou: rollback sha-1a2b3c4)
+```
+
+Deploy à mão e automático disputam o mesmo `flock`: se um estiver rodando, o
+outro falha com "outro deploy/rollback em andamento" (no Actions: ❌; rode o
+re-run depois). **Depois de um rollback, pause o deploy automático** (passo 7)
+até corrigir: o próximo merge na `main` sobe a versão nova por cima.
+
+### 7. Pausar o deploy automático
+
+Variável de **repositório** `DEPLOY_AUTOMATICO=false` (Settings → Secrets and
+variables → Actions → Variables): o build continua publicando imagens e o job
+`deploy` aparece como *skipped* (o resumo do build avisa "pausado").
+
+```bash
+gh variable set DEPLOY_AUTOMATICO --body false     # pausar
+gh variable delete DEPLOY_AUTOMATICO               # voltar (ou --body true)
+```
+
+Desabilitar o workflow inteiro (Actions → imagens → Disable workflow) também
+para o deploy, mas para o build junto. Revogar de vez: apague a linha do
+`authorized_keys` do `deploy` e o secret `DEPLOY_SSH_KEY`.
+
+Teste do `deploy-remoto.sh` sem SSH nem Docker: `bash scripts/teste-deploy-remoto.sh`.
 
 ## 2. Rollback
 

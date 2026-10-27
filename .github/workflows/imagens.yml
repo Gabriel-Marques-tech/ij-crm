@@ -6,7 +6,13 @@
 # Tags: `sha-<commit curto>` (imutável, é o que o deploy/rollback usa) e `latest`
 # (SÓ a partir da main; dispatch de outra branch publica só `sha-…`).
 # Actions fixadas por SHA de commit (versão no comentário); atualize os dois juntos.
-# Deploy: `scripts/deploy.sh [tag]` na VPS (docs/runbook.md §1).
+#
+# Deploy automático: depois do build de um push na main, o job `deploy` manda a
+# tag `sha-<commit curto>` por SSH para a VPS, onde o comando forçado da chave
+# (scripts/deploy-remoto.sh) roda `scripts/deploy.sh <tag>`. Environment
+# `producao` com os secrets DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY e
+# DEPLOY_KNOWN_HOSTS; sem eles o job é pulado com um aviso. Pausa: variável de
+# repositório DEPLOY_AUTOMATICO=false. Ver docs/runbook.md, "Deploy automático".
 name: imagens
 
 on:
@@ -14,11 +20,11 @@ on:
     branches: [main]
   workflow_dispatch:
 
-permissions:
-  contents: read
-  packages: write
+# Nada por padrão; cada job pede só o que usa.
+permissions: {}
 
-# Dois pushes seguidos na main: o segundo espera; `latest` nunca regride.
+# Dois pushes seguidos na main: o segundo espera (build E deploy do primeiro);
+# `latest` nunca regride.
 concurrency:
   group: imagens-${{ github.ref }}
   cancel-in-progress: false
@@ -33,6 +39,11 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -56,6 +67,19 @@ jobs:
           tags: |
             type=sha,prefix=sha-,format=short
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+      # A tag que o deploy usa, conferida contra a lista que o metadata-action
+      # gerou (e que o build abaixo publica): o deploy leva exatamente esta imagem.
+      - name: Tag imutável do deploy
+        id: tag
+        env:
+          TAGS_APP: ${{ steps.meta-app.outputs.tags }}
+          IMAGEM: ${{ env.REGISTRO }}/ij-crm-app
+        run: |
+          tag="sha-${GITHUB_SHA::7}"
+          grep -qxF "$IMAGEM:$tag" <<<"$TAGS_APP" \
+            || { echo "::error::$IMAGEM:$tag não está nas tags geradas: $TAGS_APP"; exit 1; }
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
       - name: Tags do ops
         id: meta-ops
@@ -98,6 +122,8 @@ jobs:
         env:
           TAGS_APP: ${{ steps.meta-app.outputs.tags }}
           TAGS_OPS: ${{ steps.meta-ops.outputs.tags }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          PAUSADO: ${{ vars.DEPLOY_AUTOMATICO == 'false' }}
         run: |
           {
             echo "### Imagens publicadas"
@@ -107,5 +133,122 @@ jobs:
             echo "$TAGS_OPS"
             echo '```'
             echo
-            echo "Deploy na VPS: \`scripts/deploy.sh sha-${GITHUB_SHA::7}\`"
+            if [[ "$PAUSADO" == "true" ]]; then
+              echo "Deploy automático **pausado** (variável DEPLOY_AUTOMATICO=false)."
+            fi
+            echo "Deploy manual na VPS: \`scripts/deploy.sh $TAG\`"
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # Deploy automático na VPS (AWS) da imagem que o job `build` acabou de publicar.
+  # Só em push na main com build ok; pausável com a variável de repositório
+  # DEPLOY_AUTOMATICO=false (o job aparece como "skipped").
+  deploy:
+    needs: build
+    if: >-
+      success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      && vars.DEPLOY_AUTOMATICO != 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Sem token do GitHub: o job não faz checkout nem usa a API, só SSH.
+    permissions: {}
+    environment:
+      name: producao
+    # Um deploy por vez, na ordem dos merges; um em andamento nunca é cancelado.
+    concurrency:
+      group: deploy-producao
+      cancel-in-progress: false
+    env:
+      TAG: ${{ needs.build.outputs.tag }}
+    steps:
+      # Sem a VPS ainda: nenhum secret configurado → pula com aviso (não falha).
+      # Configuração pela metade → falha (é erro de quem configurou).
+      - name: Conferir configuração
+        id: config
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          faltam=()
+          for v in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY DEPLOY_KNOWN_HOSTS; do
+            [[ -n "${!v}" ]] || faltam+=("$v")
+          done
+          if [[ ${#faltam[@]} -eq 4 ]]; then
+            echo "::notice title=Deploy pulado::Secrets de deploy ausentes no environment producao (runbook: Deploy automático). Imagem $TAG publicada, sem deploy."
+            {
+              echo "### Deploy automático: pulado"
+              echo
+              echo "Secrets \`DEPLOY_*\` ainda não configurados no environment \`producao\`."
+              echo "Imagem \`$TAG\` publicada; nada foi enviado à VPS."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "pronto=false" >> "$GITHUB_OUTPUT"
+          elif [[ ${#faltam[@]} -gt 0 ]]; then
+            echo "::error title=Deploy mal configurado::faltam no environment producao: ${faltam[*]}"
+            exit 1
+          else
+            [[ "$TAG" =~ ^sha-[0-9a-f]{7,40}$ ]] || { echo "::error::tag inválida vinda do build: '$TAG'"; exit 1; }
+            echo "pronto=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Chave SSH e host conhecido
+        if: steps.config.outputs.pronto == 'true'
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts_deploy
+
+      # O servidor ignora o comando e roda o forçado (scripts/deploy-remoto.sh),
+      # que só aceita a tag. A saída do deploy.sh aparece aqui ao vivo; o código
+      # de saída dele vira o do job (≠ 0, inclusive com rollback automático = ❌).
+      - name: Deploy ${{ env.TAG }}
+        if: steps.config.outputs.pronto == 'true'
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          saida="$RUNNER_TEMP/deploy.log"
+          set +e
+          ssh -T \
+            -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o IdentityAgent=none \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts_deploy" -o GlobalKnownHostsFile=/dev/null \
+            -o StrictHostKeyChecking=yes -o BatchMode=yes \
+            -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=10 \
+            "$DEPLOY_USER@$DEPLOY_HOST" "$TAG" 2>&1 | tee "$saida"
+          rc=${PIPESTATUS[0]}
+          set -e
+          case "$rc" in
+            0) resultado="✅ ok: \`$TAG\` no ar" ;;
+            255) resultado="❌ SSH falhou (conexão, chave ou host key; veja o log do passo)" ;;
+            *)
+              if grep -q "^deploy-remoto: recusado" "$saida"; then
+                resultado="❌ recusado pelo servidor (scripts/deploy-remoto.sh não aceitou a tag)"
+              elif grep -q "rollback automático ok" "$saida"; then
+                resultado="❌ falhou; rollback automático para a versão anterior ok"
+              elif grep -q "rollback automático para .* também falhou" "$saida"; then
+                resultado="❌ falhou e o rollback automático TAMBÉM falhou: intervenção manual (runbook §2)"
+              else
+                resultado="❌ falhou (código $rc; veja o log do passo e runbook §1–§2)"
+              fi ;;
+          esac
+          {
+            echo "### Deploy automático"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Tag | \`$TAG\` |"
+            echo "| Commit | \`$GITHUB_SHA\` |"
+            echo "| Resultado | $resultado |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$rc" -ne 0 ]]; then
+            echo "::error title=Deploy falhou::$resultado"
+          fi
+          exit "$rc"
+
+      - name: Apagar a chave
+        if: always()
+        run: rm -f ~/.ssh/deploy_key ~/.ssh/known_hosts_deploy
