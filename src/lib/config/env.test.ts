@@ -166,4 +166,24 @@ describe("provedorLlm", () => {
     expect(modeloDoProvedor("gemini-3.8-flash", "openai")).toBe(false);
     expect(modeloDoProvedor("claude-haiku-5-5", "openai")).toBe(false);
   });
+
+  it("modeloDoProvedor normaliza `models/` e maiúsculas antes do prefixo", () => {
+    expect(modeloDoProvedor("models/gemini-3.8-flash", "gemini")).toBe(true);
+    expect(modeloDoProvedor("Gemini-3.8-Flash", "gemini")).toBe(true);
+    expect(modeloDoProvedor(" models/GEMINI-3.8-flash ", "gemini")).toBe(true);
+    expect(modeloDoProvedor("CLAUDE-haiku-5-5", "anthropic")).toBe(true);
+    expect(modeloDoProvedor("models/gemini-3.8-flash", "openai")).toBe(false);
+    expect(modeloDoProvedor("GPT-6.1-sol", "openai")).toBe(true);
+  });
+
+  it("prefixo desconhecido não vale como OpenAI (gemma-*, llama-*, vazio); famílias da OpenAI valem", () => {
+    for (const m of ["gemma-4-31b-it", "models/gemma-4-26b-a4b-it", "llama-4", "mistral-large", "", "models/"]) {
+      expect(modeloDoProvedor(m, "openai"), m).toBe(false);
+      expect(modeloDoProvedor(m, "gemini"), m).toBe(false);
+      expect(modeloDoProvedor(m, "anthropic"), m).toBe(false);
+    }
+    for (const m of ["gpt-6.1-sol", "gpt-x", "o4-mini", "o3", "chatgpt-4o-latest", "codex-mini-latest", "ft:gpt-4o-mini:ij::abc"]) {
+      expect(modeloDoProvedor(m, "openai"), m).toBe(true);
+    }
+  });
 });

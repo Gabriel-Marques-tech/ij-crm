@@ -58,6 +58,8 @@ describe("provedor por env", () => {
     }
     process.env.LLM_EXTRACAO_MODELO = "gemini-3.6-flash";
     expect(provedorConfigurado().nome).toBe("gemini");
+    process.env.LLM_EXTRACAO_MODELO = "gemma-4-31b-it";
+    expect(() => provedorConfigurado()).toThrow(expect.objectContaining({ codigo: "PROVEDOR_INVALIDO" }));
     process.env.LLM_PROVEDOR = "openai";
     process.env.OPENAI_API_KEY = "sk-x";
     expect(() => provedorConfigurado()).toThrow(expect.objectContaining({ codigo: "PROVEDOR_INVALIDO" }));

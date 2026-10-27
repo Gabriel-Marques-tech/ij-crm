@@ -106,6 +106,21 @@ describe("validarCombinacao", () => {
     expect(efetivo({ provedor: "gemini" }).modeloClassificacao).toEqual({ valor: "gemini-3.8-flash", origem: "padrao" });
   });
 
+  it("provedor no env com nome de propriedade de objeto (constructor, toString) é inválido, sem modelo padrão", () => {
+    for (const p of ["constructor", "toString", "__proto__"]) {
+      process.env.LLM_PROVEDOR = p;
+      const r = efetivo({});
+      expect(r.modeloExtracao, p).toEqual({ valor: null, origem: "padrao" });
+      expect(validarCombinacao(r), p).toMatch(/LLM_PROVEDOR/);
+    }
+  });
+
+  it("gemma-* não passa como modelo da OpenAI nem do Gemini", () => {
+    expect(validarCombinacao(efetivo({ provedor: "openai", modeloExtracao: "gemma-4-31b-it" }))).toMatch(/não é do provedor openai/);
+    expect(validarCombinacao(efetivo({ provedor: "gemini", modeloExtracao: "gemma-4-31b-it" }))).toMatch(/não é do provedor gemini/);
+    expect(validarCombinacao(efetivo({ provedor: "gemini", modeloExtracao: "models/gemini-3.8-flash" }))).toBeNull();
+  });
+
   it("recusa modelo de outro provedor (config ou env herdado)", () => {
     expect(validarCombinacao(efetivo({ provedor: "anthropic", modeloExtracao: "gpt-6.1-sol" }))).toMatch(/modelo de extração.*não é do provedor anthropic/);
     process.env.LLM_EXTRACAO_MODELO = "gpt-6.1-sol";

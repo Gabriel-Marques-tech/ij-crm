@@ -133,15 +133,21 @@ export const MODELOS_EXTRACAO_PADRAO = { openai: "gpt-6.1-sol", anthropic: "clau
 
 const ehProvedorReal = (p: unknown): p is ProvedorReal => p === "openai" || p === "anthropic" || p === "gemini";
 
+/** Famílias de modelo da OpenAI (gpt-*, o1/o3/o4..., chatgpt-*, codex-*, fine-tune `ft:`). */
+const MODELO_OPENAI = /^(?:ft:)?(?:gpt-|o\d|chatgpt-|codex-)/;
+
 /**
- * O modelo é do provedor? Pelo prefixo: Anthropic `claude-`, Gemini
- * `gemini-`; OpenAI é o resto (gpt-*, o*...), nunca os outros dois. Evita o
- * `.env` trocar o provedor e esquecer o modelo (404 a cada mensagem).
+ * O modelo é do provedor? Pelo prefixo, depois de tirar `models/` (forma de
+ * recurso do Google) e passar para minúsculas: Anthropic `claude-`, Gemini
+ * `gemini-`, OpenAI as famílias de `MODELO_OPENAI`. Prefixo desconhecido
+ * (`gemma-*`, `llama-*`) não é de ninguém: falha clara em vez de um 404 da
+ * API a cada mensagem quando o `.env` troca o provedor e esquece o modelo.
  */
 export function modeloDoProvedor(modelo: string, provedor: ProvedorReal): boolean {
-  if (provedor === "anthropic") return modelo.startsWith("claude-");
-  if (provedor === "gemini") return modelo.startsWith("gemini-");
-  return !modelo.startsWith("claude-") && !modelo.startsWith("gemini-");
+  const m = modelo.trim().toLowerCase().replace(/^models\//, "");
+  if (provedor === "anthropic") return m.startsWith("claude-");
+  if (provedor === "gemini") return m.startsWith("gemini-");
+  return MODELO_OPENAI.test(m);
 }
 export const LIMIAR_CONFIANCA_PADRAO = 0.7;
 

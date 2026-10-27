@@ -112,7 +112,8 @@ function escolher<T>(config: T | undefined, env: T | undefined, padrao: T): Valo
   return { valor: padrao, origem: "padrao" };
 }
 
-const ehReal = (p: string): p is keyof typeof MODELOS_EXTRACAO_PADRAO => p in MODELOS_EXTRACAO_PADRAO;
+// `Object.hasOwn`: `in` aceitaria "constructor"/"toString" vindos do env.
+const ehReal = (p: string): p is keyof typeof MODELOS_EXTRACAO_PADRAO => Object.hasOwn(MODELOS_EXTRACAO_PADRAO, p);
 /** Mesma regra de `env.ts` (prefixo); mock/inválido não restringe o modelo. */
 const modeloCombina = (m: string, p: string) => (ehReal(p) ? modeloDoProvedor(m, p) : true);
 
