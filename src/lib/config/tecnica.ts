@@ -202,7 +202,11 @@ async function ler(e: EstadoCache): Promise<ResultadoCarga> {
       if (e.carregada) return { ok: true }; // salvar/restaurar aplicou um valor mais novo
       continue; // invalidado durante a leitura: relê
     }
-    if (validarCombinacao(resolverConfigTecnica(c.valor)) !== null || semGrupo(resolverConfigTecnica(c.valor)) !== null) {
+    if (c.atualizadoEm === null) {
+      // Nada salvo: vale só o ambiente, e um env incompleto (ex.: GRUPO_JID vazio em
+      // dev) não é "config salva inválida" — o webhook já acusa isso sozinho (503).
+      aplicar({});
+    } else if (validarCombinacao(resolverConfigTecnica(c.valor)) !== null || semGrupo(resolverConfigTecnica(c.valor)) !== null) {
       // Só a chave: o valor pode ter modelo/JID. A tela do Admin mostra o motivo.
       registrarErro("config.tecnica.carregar", new Error(`configuração salva "${CONFIG_TECNICA.chave}" forma combinação inválida com o ambiente; usando só o ambiente`));
       aplicar({});
