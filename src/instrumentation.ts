@@ -1,8 +1,16 @@
 import type { Instrumentation } from "next";
 
-/** Boot (GAB-39): avisa uma vez se LLM_LIMIAR_* / LLM_CLASSIFICACAO_MODELO estiverem errados. */
+/**
+ * Boot (GAB-39): avisa uma vez se LLM_LIMIAR_* / LLM_CLASSIFICACAO_MODELO estiverem errados.
+ * GAB-42: carrega antes a config técnica do Admin (sobrescreve o env), para os
+ * valores salvos lá também passarem pela validação. No build não há banco.
+ */
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
+  if (process.env.NEXT_PHASE !== "phase-production-build") {
+    const { carregarConfigTecnica } = await import("@/lib/config/tecnica");
+    await carregarConfigTecnica(); // nunca lança: banco fora → log com ref, vale o env
+  }
   const { validarConfigLlm } = await import("@/lib/config/env");
   validarConfigLlm();
 }

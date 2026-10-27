@@ -11,6 +11,7 @@
  * Lança `ErroLlm`; quem decide o que fazer com a falha é `whatsapp/sem-tag.ts`.
  */
 import { limiarClassificador } from "@/lib/config/env";
+import { registrarLogLlm } from "@/lib/logs/tecnicos";
 import { provedorConfigurado } from "./extracao";
 import {
   JSON_SCHEMA_CLASSIFICACAO,
@@ -26,12 +27,15 @@ import { ErroLlm, type ProvedorLlm, type UsoLlm } from "./tipos";
 export type ContextoClassificacao = { respondendoA: string | null };
 export type ResultadoClassificacao = Classificacao & { uso: UsoLlm; versao: string };
 
-function log(uso: UsoLlm | undefined, ref: string, resultado: string) {
+/** Log do servidor + linha em `log_llm` (Admin → Logs, GAB-42). `status` = "ok" ou o código. Nunca o texto. */
+async function log(uso: UsoLlm | undefined, ref: string, resultado: string, status: string) {
   const base = `[llm] classificacao ref=${ref}`;
-  if (!uso) return console.info(`${base} versao=${VERSAO_CLASSIFICACAO} ${resultado}`);
-  console.info(
-    `${base} provedor=${uso.provedor} modelo=${uso.modelo} versao=${VERSAO_CLASSIFICACAO} ms=${uso.ms} tokens_in=${uso.tokensEntrada} tokens_out=${uso.tokensSaida}${uso.tokensRaciocinio === undefined ? "" : ` tokens_reasoning=${uso.tokensRaciocinio}`} max_out=${MAX_TOKENS_CLASSIFICACAO} ${resultado}`,
-  );
+  if (!uso) console.info(`${base} versao=${VERSAO_CLASSIFICACAO} ${resultado}`);
+  else
+    console.info(
+      `${base} provedor=${uso.provedor} modelo=${uso.modelo} versao=${VERSAO_CLASSIFICACAO} ms=${uso.ms} tokens_in=${uso.tokensEntrada} tokens_out=${uso.tokensSaida}${uso.tokensRaciocinio === undefined ? "" : ` tokens_reasoning=${uso.tokensRaciocinio}`} max_out=${MAX_TOKENS_CLASSIFICACAO} ${resultado}`,
+    );
+  await registrarLogLlm({ operacao: "classificacao", uso, status, ref: ref === "-" ? null : ref });
 }
 
 /** TRUNCADA ganha uma nova tentativa (5xx/timeout/rede já re-tentam no provedor). */
@@ -49,7 +53,7 @@ export async function classificar(
   try {
     provedor = opts.provedor ?? provedorConfigurado("classificacao");
   } catch (e) {
-    log(undefined, ref, `erro=${codigo(e)}`);
+    await log(undefined, ref, `erro=${codigo(e)}`, codigo(e));
     throw e;
   }
   const pedido = {
@@ -65,7 +69,7 @@ export async function classificar(
       resposta = await provedor.extrair(pedido);
       break;
     } catch (e) {
-      log(e instanceof ErroLlm ? e.uso : undefined, ref, `erro=${codigo(e)}`);
+      await log(e instanceof ErroLlm ? e.uso : undefined, ref, `erro=${codigo(e)}`, codigo(e));
       // Raciocínio variável pode estourar o teto uma vez; a 2ª costuma caber.
       if (e instanceof ErroLlm && e.codigo === "TRUNCADA" && tentativa < TENTATIVAS_TRUNCADA) continue;
       throw e;
@@ -73,10 +77,10 @@ export async function classificar(
   }
   const r = esquemaClassificacao.safeParse(resposta.bruto);
   if (!r.success) {
-    log(resposta.uso, ref, "erro=SAIDA_INVALIDA");
+    await log(resposta.uso, ref, "erro=SAIDA_INVALIDA", "SAIDA_INVALIDA");
     throw new ErroLlm("SAIDA_INVALIDA", { uso: resposta.uso });
   }
-  log(resposta.uso, ref, `relevante=${r.data.relevante} confianca=${r.data.confianca}`);
+  await log(resposta.uso, ref, `relevante=${r.data.relevante} confianca=${r.data.confianca}`, "ok");
   return { ...r.data, uso: resposta.uso, versao: VERSAO_CLASSIFICACAO };
 }
 

@@ -68,7 +68,17 @@ export async function salvarConfiguracao<T>(def: DefinicaoConfiguracao<T>, entra
   return count === 1 ? { ok: true, valor: r.data } : { ok: false, erro: "CONFLITO" };
 }
 
-/** Volta ao padrão do código apagando a linha. */
-export async function restaurarConfiguracao<T>(def: DefinicaoConfiguracao<T>): Promise<void> {
-  await db.configuracao.deleteMany({ where: { chave: def.chave } });
+/**
+ * Volta ao padrão do código apagando a linha. Com `versao` (o `atualizado_em`
+ * carregado; null = não havia linha) só apaga se a linha não mudou desde
+ * então — `false` = conflito. Sem `versao`, apaga incondicionalmente.
+ */
+export async function restaurarConfiguracao<T>(def: DefinicaoConfiguracao<T>, versao?: Date | null): Promise<boolean> {
+  if (versao === undefined) {
+    await db.configuracao.deleteMany({ where: { chave: def.chave } });
+    return true;
+  }
+  if (versao === null) return (await db.configuracao.count({ where: { chave: def.chave } })) === 0;
+  const { count } = await db.configuracao.deleteMany({ where: { chave: def.chave, atualizadoEm: versao } });
+  return count === 1;
 }

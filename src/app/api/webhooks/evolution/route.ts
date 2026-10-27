@@ -11,7 +11,8 @@
  * Segredo ausente ou fraco (ver `src/lib/config/env.ts`) ⇒ aquela forma não
  * existe; sem nenhuma forma válida ⇒ 401 para tudo (falha fechada).
  *
- * Códigos: 401 não autenticado, 503 sem GRUPO_JID, 400 corpo não-JSON (a
+ * Códigos: 401 não autenticado, 503 sem GRUPO_JID ou config técnica ilegível
+ * (GAB-42), 400 corpo não-JSON (a
  * Evolution não re-tenta 4xx), 500 falha de processamento (re-tenta; o dedup
  * é atômico). Nunca logamos corpo, texto ou mensagens de erro do Prisma
  * (elas ecoam os argumentos da query, inclusive o texto).
@@ -19,6 +20,8 @@
 import { timingSafeEqual } from "node:crypto";
 import { after } from "next/server";
 import { chaveApiEvolution, diagnosticarSegredo, grupoJid, segredoWebhook } from "@/lib/config/env";
+import { carregarConfigTecnica } from "@/lib/config/tecnica";
+import { contarNaoAutorizado, registrarLogWebhook } from "@/lib/logs/tecnicos";
 import { ingerirMensagem } from "@/lib/whatsapp/ingestao";
 import { mascararJid } from "@/lib/whatsapp/mascarar";
 import { interpretarPayload } from "@/lib/whatsapp/payload";
@@ -70,7 +73,52 @@ function descreverErro(e: unknown): string {
   return typeof codigo === "string" ? `${e.name} ${codigo}` : e.name;
 }
 
+/**
+ * GAB-42: grava uma linha em `log_webhook` — tipo do evento, chat mascarado,
+ * resultado e duração; nunca corpo/texto. 401 não entra no anel (só no
+ * contador em memória). A config técnica é carregada em `tratar`, depois da
+ * autenticação.
+ */
 export async function POST(req: Request): Promise<Response> {
+  const inicio = performance.now();
+  const copia = req.clone();
+  const res = await tratar(req);
+  if (res.status === 401) {
+    contarNaoAutorizado();
+    return res;
+  }
+  const ms = performance.now() - inicio;
+  const copiaRes = res.clone(); // o corpo original vai para a Evolution
+  // Depois da resposta (como o processamento): o log não atrasa a Evolution.
+  after(async () => {
+    let tipo: string | null = null;
+    let chat: string | null = null;
+    try {
+      const j = JSON.parse(await copia.text()) as { event?: unknown; data?: { key?: { remoteJid?: unknown } } } | null;
+      tipo = typeof j?.event === "string" ? j.event : null;
+      chat = typeof j?.data?.key?.remoteJid === "string" ? j.data.key.remoteJid : null;
+    } catch {
+      // corpo não-JSON: fica sem tipo/chat
+    }
+    await registrarLogWebhook({ tipo, chat, status: res.status, resultado: await resultadoDe(copiaRes), ms });
+  });
+  return res;
+}
+
+/** Resumo do corpo JSON da resposta (só chaves/códigos nossos). */
+async function resultadoDe(res: Response): Promise<string> {
+  try {
+    const j = (await res.json()) as Record<string, unknown>;
+    if (typeof j.erro === "string") return j.erro;
+    if (j.ignorado) return `ignorado:${typeof j.motivo === "string" ? j.motivo : "?"}`;
+    for (const k of ["duplicado", "remetenteDesconhecido", "descartada", "persistida"]) if (j[k]) return k;
+    return "ok";
+  } catch {
+    return `http_${res.status}`;
+  }
+}
+
+async function tratar(req: Request): Promise<Response> {
   // O corpo é lido antes da autenticação porque o fallback está nele — mas
   // nada dele é logado nem interpretado enquanto a autenticação não passar.
   const bruto = await req.text();
@@ -84,6 +132,14 @@ export async function POST(req: Request): Promise<Response> {
   const auth = autenticar(req, json);
   if (!auth.ok) return Response.json({ erro: "nao_autorizado" }, { status: 401 });
   if (json === undefined) return Response.json({ erro: "json_invalido" }, { status: 400 });
+
+  // GAB-42: GRUPO_JID do Admin > env. Sem conseguir ler a config, falha
+  // fechado (503: a Evolution re-tenta) em vez de usar um grupo talvez velho.
+  const carga = await carregarConfigTecnica();
+  if (!carga.ok) {
+    console.error(`[webhook] config técnica indisponível (ref=${carga.ref}); recusando com 503`);
+    return Response.json({ erro: "config_indisponivel", ref: carga.ref }, { status: 503 });
+  }
 
   const grupo = grupoJid();
   if (!grupo) {

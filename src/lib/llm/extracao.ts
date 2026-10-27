@@ -8,6 +8,7 @@
  * chamada loga provedor, modelo, versão do prompt, latência e tokens (incl.
  * raciocínio) — NUNCA o texto.
  */
+import { registrarLogLlm } from "@/lib/logs/tecnicos";
 import { ConfigInvalida, chaveAnthropic, chaveOpenAI, modeloClassificacao, modeloExtracao, provedorLlm } from "@/lib/config/env";
 import {
   JSON_SCHEMA_EXTRACAO,
@@ -64,11 +65,14 @@ function modeloTrocado(modelo: string, provedor: string): ErroLlm {
   return new ErroLlm("PROVEDOR_INVALIDO", { detalhe: { modelo, provedor } });
 }
 
-function logUso(uso: UsoLlm | undefined, ref: string, resultado: string) {
-  if (!uso) return console.info(`[llm] extracao ref=${ref} versao=${VERSAO_EXTRACAO} ${resultado}`);
-  console.info(
-    `[llm] extracao ref=${ref} provedor=${uso.provedor} modelo=${uso.modelo} versao=${VERSAO_EXTRACAO} ms=${uso.ms} tokens_in=${uso.tokensEntrada} tokens_out=${uso.tokensSaida}${uso.tokensRaciocinio === undefined ? "" : ` tokens_reasoning=${uso.tokensRaciocinio}`} ${resultado}`,
-  );
+/** Log do servidor + linha em `log_llm` (Admin → Logs, GAB-42). Nunca o texto. */
+async function logUso(uso: UsoLlm | undefined, ref: string, resultado: string, status: string) {
+  if (!uso) console.info(`[llm] extracao ref=${ref} versao=${VERSAO_EXTRACAO} ${resultado}`);
+  else
+    console.info(
+      `[llm] extracao ref=${ref} provedor=${uso.provedor} modelo=${uso.modelo} versao=${VERSAO_EXTRACAO} ms=${uso.ms} tokens_in=${uso.tokensEntrada} tokens_out=${uso.tokensSaida}${uso.tokensRaciocinio === undefined ? "" : ` tokens_reasoning=${uso.tokensRaciocinio}`} ${resultado}`,
+    );
+  await registrarLogLlm({ operacao: "extracao", uso, status, ref: ref === "-" ? null : ref });
 }
 
 /**
@@ -86,23 +90,25 @@ export async function extrairAtualizacao(
   try {
     provedor = opts.provedor ?? provedorConfigurado();
   } catch (e) {
-    logUso(undefined, ref, `erro=${e instanceof ErroLlm ? e.codigo : "INESPERADO"}`);
+    const codigo = e instanceof ErroLlm ? e.codigo : "INESPERADO";
+    await logUso(undefined, ref, `erro=${codigo}`, codigo);
     throw e;
   }
   let resposta;
   try {
     resposta = await provedor.extrair({ sistema: PROMPT_SISTEMA, usuario: montarMensagemUsuario(texto, contexto), schema: JSON_SCHEMA_EXTRACAO });
   } catch (e) {
-    logUso(e instanceof ErroLlm ? e.uso : undefined, ref, `erro=${e instanceof ErroLlm ? e.codigo : "INESPERADO"}`);
+    const codigo = e instanceof ErroLlm ? e.codigo : "INESPERADO";
+    await logUso(e instanceof ErroLlm ? e.uso : undefined, ref, `erro=${codigo}`, codigo);
     throw e;
   }
   const r = esquemaExtracao.safeParse(resposta.bruto);
   if (!r.success) {
     // Só os caminhos dos campos (nunca valores) vão para o detalhe/log.
     const campos = [...new Set(r.error.issues.map((i) => i.path.join(".") || "(raiz)"))].slice(0, 5);
-    logUso(resposta.uso, ref, `erro=SAIDA_INVALIDA campos=${campos.join(",")}`);
+    await logUso(resposta.uso, ref, `erro=SAIDA_INVALIDA campos=${campos.join(",")}`, "SAIDA_INVALIDA");
     throw new ErroLlm("SAIDA_INVALIDA", { bruto: resposta.bruto, uso: resposta.uso, detalhe: { campos } });
   }
-  logUso(resposta.uso, ref, "ok");
+  await logUso(resposta.uso, ref, "ok", "ok");
   return { extracao: r.data, bruto: resposta.bruto, uso: resposta.uso, versao: VERSAO_EXTRACAO };
 }
