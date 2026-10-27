@@ -79,7 +79,9 @@ services:
       # Safe mode: só "true" libera envio real. Só o .env da VPS define true.
       NOTIFICATIONS_ENABLED: ${NOTIFICATIONS_ENABLED:-false}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      LLM_EXTRACAO_MODELO: ${LLM_EXTRACAO_MODELO:-claude-sonnet-5-5}
+      LLM_EXTRACAO_MODELO: ${LLM_EXTRACAO_MODELO:-claude-haiku-5-5}
+      LLM_PROVEDOR: ${LLM_PROVEDOR:-anthropic}
+      LLM_LIMIAR_CONFIANCA: ${LLM_LIMIAR_CONFIANCA:-0.7}
       LLM_CLASSIFICACAO_MODELO: ${LLM_CLASSIFICACAO_MODELO:-claude-haiku-5-5}
       # Único controle de acesso a /api/cron/* (header x-cron-secret, GAB-41).
       CRON_SECRET: ${CRON_SECRET:?defina CRON_SECRET no .env}
