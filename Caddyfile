@@ -1,7 +1,8 @@
 # Reverse proxy de produção (GAB-30). Domínio e email vêm do .env via compose.
 # HTTPS automático: Let's Encrypt para domínio público; para `localhost` o
 # Caddy usa a CA interna dele (teste local, ver runbook §8).
-# Só o app é publicado. A Evolution NÃO tem rota aqui: acesso por túnel SSH (runbook §5).
+# Só o app é publicado. A Evolution NÃO tem rota aqui: acesso por port forwarding
+# do AWS Session Manager (`aws ssm start-session … AWS-StartPortForwardingSession`, runbook §5).
 {
 	email {$ACME_EMAIL}
 }

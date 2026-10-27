@@ -12,7 +12,8 @@
 #   scripts/evolution.sh grupos     lista JID + nome dos grupos (para GRUPO_JID)
 #   scripts/evolution.sh logout     desconecta o número atual (troca de número)
 #
-# Alternativa visual para o QR: túnel SSH + manager (runbook §5).
+# Alternativa visual para o QR: port forwarding do Session Manager + manager (runbook §5):
+#   aws ssm start-session --target <i-…> --document-name AWS-StartPortForwardingSession --parameters '{"portNumber":["8080"],"localPortNumber":["8080"]}'
 set -euo pipefail
 # shellcheck source=scripts/_comum.sh
 source "$(dirname "${BASH_SOURCE[0]}")/_comum.sh"

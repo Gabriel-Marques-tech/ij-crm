@@ -54,8 +54,8 @@ Do zero ao ar, em ordem. Cada passo aponta para a seção com os comandos
     `scripts/backup.sh` mostrando `off-site: rclone copy` e o arquivo listado no
     remote ([§3, "Backup off-site"](#backup-off-site-rclone)). Restore testado uma vez ([§3](#3-restaurar-backup)).
     **Não entrar em produção sem isso.**
-14. **Deploy automático** ([Deploy automático](#deploy-automático-github-actions--aws-ssm)): provedor OIDC, `sub`
-    customizado do repo, role `ij-crm-deploy-gha` com a policy, documento SSM
+14. **Deploy automático** ([Deploy automático](#deploy-automático-github-actions--aws-ssm)): provedor OIDC,
+    role `ij-crm-deploy-gha` (trust de `deploy/iam/gha-trust.json`) com a policy, documento SSM
     `ij-crm-deploy` testado com `send-command`, environment `producao` (só `main`)
     com `AWS_DEPLOY_ROLE_ARN`, `AWS_REGION` e `DEPLOY_INSTANCE_ID`, e um deploy de
     teste pelo Actions (re-run do último `imagens` da `main`). Proteção da `main`
@@ -75,6 +75,7 @@ alias dc='docker compose -f compose.prod.yml'
 | `.github/workflows/imagens.yml` | CI: builda as imagens `app` e `ops` a cada push na `main`, publica no GHCR e faz o deploy automático na VPS |
 | `scripts/deploy-remoto.sh` | entrada do deploy automático (documento SSM `deploy/ssm-deploy.yaml`): valida tag/digests e commit na `main`, roda `deploy.sh` destacado |
 | `deploy/ssm-deploy.yaml`, `deploy/iam/` | documento SSM e policies IAM do deploy automático |
+| `deploy/branch-protection-main.json` | proteção da `main` com o check obrigatório `deploy-e-migrations` |
 | `scripts/checar-migrations.sh` | barra migration nova destrutiva sem `-- destrutiva-ok:` (CI) |
 | `scripts/backup.sh` | `pg_dump` do banco do CRM, retenção de 14 dias, cópia off-site (`BACKUP_REMOTE`) |
 | `scripts/restore.sh` | restaura um dump do CRM (destrutivo, pede confirmação) |
@@ -211,7 +212,8 @@ O script, na ordem:
    `Caddyfile` e scripts são **os do mesmo commit da imagem**, não os do HEAD da
    `main` (se a `main` andou durante o deploy, os arquivos não se adiantam à
    imagem). `latest` é resolvida antes para o `sha-…` dela; `--build-local` usa
-   `origin/main`. Commit que não existe no repo: recusa. Re-executa o próprio
+   `origin/main`. O commit é achado **só na história de `origin/main`, pelo prefixo
+do sha** (nunca por nome de branch/tag); fora da `main` ou ambíguo: recusa. Re-executa o próprio
    script desse commit. O repo fica em HEAD destacado (normal; não faça `git pull`
    à mão, use o `deploy.sh`);
 3. confere o ambiente **como o compose resolve** (`docker compose config
@@ -242,7 +244,7 @@ O script, na ordem:
    **Falha no passo 7: rollback automático** do app para a tag de
    `.deploy/atual` (o último deploy **ou rollback** bom: depois de um rollback
    manual, volta para onde o operador deixou, não para a versão abandonada) e
-   saída com erro (o schema não volta; ver §2).
+   saída com código 10 (rollback ok) ou 11 (o app não voltou; intervenção manual) — o schema não volta; ver §2. Falha antes de trocar o app sai com 1.
 
 Um deploy/rollback por vez: o script segura `flock` em `.deploy/lock`; o
 segundo **espera** até `LOCK_ESPERA` s (padrão 900, do ambiente do shell) e só
@@ -268,10 +270,13 @@ Cada push na `main` (merge de PR) roda o workflow **imagens**:
    no GitHub) e manda, por **SSM Run Command**, o documento `ij-crm-deploy`
    (`deploy/ssm-deploy.yaml`) com `tag` + `digestApp` + `digestOps`;
 3. na VPS, o agente SSM roda como root só
-   `runuser -u deploy -- /opt/ij-crm/scripts/deploy-remoto.sh <tag> <digests>`,
-   que valida tudo de novo (`LC_ALL=C`), faz `git fetch` e **recusa commit que não
-   é ancestral de `origin/main`**, e roda `scripts/deploy.sh <tag> --digest-app=…
-   --digest-ops=…` destacado (`setsid`), com log em
+   `runuser -u deploy -- env -i PATH=… HOME=/home/deploy LC_ALL=C /opt/ij-crm/scripts/deploy-remoto.sh <tag> <digests>`
+   (ambiente limpo: nada do agente chega ao deploy; o próprio script se
+   re-executa com `env -i` se herdar qualquer outra variável ou função), que
+   valida tudo de novo, faz `git fetch` e acha o commit **só na história de
+   `origin/main`, pelo prefixo do sha** (um branch ou tag com nome de hash não o
+   substitui; fora da `main` = recusa), e roda `scripts/deploy.sh <tag>
+   --digest-app=… --digest-ops=…` destacado (`setsid`), com log em
    `/var/log/ij-crm/deploy-<UTC>-<tag>.log`;
 4. o `deploy.sh` faz checkout do commit da tag (compose/Caddyfile/scripts batem
    com a imagem), baixa as imagens **por digest** e recusa se o digest ou o
@@ -284,11 +289,22 @@ branch não roda comando arbitrário, não faz deploy de imagem de branch (tag
 `branch-…`, recusada pelo padrão; digest de branch, recusado pelo commit da
 imagem) nem de commit fora da `main`.
 
-- **Resultado**: o código de saída do `deploy.sh` é o do job. Falha (inclusive
-  com rollback automático bem-sucedido) = ❌ no Actions + email para quem fez o
-  push. O resumo do job traz tag, commit, digests, id do comando SSM e o
-  resultado: ok, rollback automático ok, rollback também falhou, recusado na
-  VPS, não entregue, timeout, cancelado. Se não dá para saber (API do SSM fora,
+- **Resultado**: o código de saída do `deploy.sh` define o do job, e o Actions
+  classifica pelo **código** (`ResponseCode` do SSM), não pelo texto da saída
+  (que o SSM trunca em ~24 mil caracteres):
+
+  | Código | Significado |
+  |---|---|
+  | 0 | ok |
+  | 1 | falhou **antes** de trocar o app (checagens, pull/digest, backup, migration): a versão anterior segue no ar |
+  | 2 | recusado pelo `deploy-remoto.sh` (tag, digest, commit fora da `main`): nada rodou |
+  | 10 | up/health falhou e o rollback automático voltou o app para a versão anterior |
+  | 11 | up/health falhou e o app **não** voltou (rollback falhou, sem anterior ou mesma tag): intervenção manual (§2) |
+
+  Qualquer código ≠ 0 = ❌ no Actions + email para quem fez o push. A saída do
+  SSM traz uma linha `deploy-remoto: RESULTADO=<código> <descrição>` logo depois
+  do fim do deploy (antes do trecho do log), repetida no resumo do job junto com
+  tag, commit, digests e id do comando SSM. Também: não entregue, timeout, cancelado. Se não dá para saber (API do SSM fora,
   prazo do job), o resumo diz **"status desconhecido — verifique o status no
   SSM"** e não afirma que falhou: `aws ssm get-command-invocation --command-id <id>
   --instance-id <i-…>` ou Systems Manager → Run Command → Command history.
@@ -319,8 +335,19 @@ gh api repos/Gabriel-Marques-tech/ij-crm/branches/main/protection \
   --jq '{pr: .required_pull_request_reviews.required_approving_review_count, admins: .enforce_admins.enabled, force_push: .allow_force_pushes.enabled, delete: .allow_deletions.enabled}'
 ```
 
-Recomendado: marcar o check **verificacoes / deploy-e-migrations** como
-obrigatório (Settings → Branches → `main` → *Require status checks*).
+O check **`deploy-e-migrations`** (workflow `verificacoes`) é **OBRIGATÓRIO** na
+`main`: ele barra migration destrutiva sem marcador e roda os testes dos scripts
+de deploy. Ele entra na proteção **logo depois do merge do PR #35** (antes disso
+travaria todo PR aberto que ainda não tem o workflow). Comando (PUT da proteção
+inteira: repete as regras atuais e acrescenta o check; `app_id` 15368 = GitHub
+Actions), em `deploy/branch-protection-main.json`:
+
+```bash
+gh api -X PUT repos/Gabriel-Marques-tech/ij-crm/branches/main/protection \
+  --input deploy/branch-protection-main.json
+gh api repos/Gabriel-Marques-tech/ij-crm/branches/main/protection \
+  --jq '.required_status_checks.checks'      # → [{"context":"deploy-e-migrations","app_id":15368}]
+```
 
 ### Usuário `deploy` e o risco aceito
 
@@ -368,22 +395,46 @@ aws iam create-open-id-connect-provider \
   --url https://token.actions.githubusercontent.com --client-id-list sts.amazonaws.com
 ```
 
-**2. Role `ij-crm-deploy-gha`**, que só o job `deploy` da `main`, no environment
-`producao`, consegue assumir. A AWS só deixa condicionar `aud` e `sub`, então o
-`job_workflow_ref` entra **dentro** do `sub`: primeiro o repo passa a emitir esse
-`sub` (`deploy/iam/oidc-sub-customization.json`):
+**2. Role `ij-crm-deploy-gha`**, que só o job `deploy` do `imagens.yml` da
+`main`, no environment `producao`, deste repositório, consegue assumir. A
+trust (`deploy/iam/gha-trust.json`) exige, com `StringEquals`:
+
+- `aud` = `sts.amazonaws.com`;
+- `sub` = `repo:Gabriel-Marques-tech@257883742/ij-crm@1432391516:environment:producao`:
+  formato **padrão** do repo, que usa o *immutable subject* do GitHub (nome +
+  id numérico do dono e do repo). Nada de customização de `sub` no repo;
+- `repository_id` = `1432391516` e `repository_owner_id` = `257883742`
+  (ids imutáveis: renomear ou recriar o repo/conta não reaproveita a role);
+- `environment` = `producao`, `ref` = `refs/heads/main`;
+- `job_workflow_ref` = `Gabriel-Marques-tech/ij-crm/.github/workflows/imagens.yml@refs/heads/main`.
+
+A AWS aceita esses claims do GitHub direto como chaves de condição
+(`token.actions.githubusercontent.com:job_workflow_ref`, `:repository_id`,
+`:repository_owner_id`, `:environment`, `:ref`…): IAM User Guide, "IAM and AWS
+STS condition context keys" → "Available keys for AWS OIDC federation", aba
+GitHub (<https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_iam-condition-keys.html#condition-keys-wif>).
+Confira o prefixo do `sub` antes de criar a role (se `use_default` vier `false`,
+alguém customizou: volte com `-F use_default=true`):
 
 ```bash
-gh api -X PUT repos/Gabriel-Marques-tech/ij-crm/actions/oidc/customization/sub \
-  --input deploy/iam/oidc-sub-customization.json
-# sub = repo:Gabriel-Marques-tech/ij-crm:environment:producao:job_workflow_ref:Gabriel-Marques-tech/ij-crm/.github/workflows/imagens.yml@refs/heads/main
+gh api repos/Gabriel-Marques-tech/ij-crm/actions/oidc/customization/sub
+# {"use_default":true,"use_immutable_subject":true,"sub_claim_prefix":"repo:Gabriel-Marques-tech@257883742/ij-crm@1432391516"}
 sed "s/<ACCOUNT_ID>/$CONTA/" deploy/iam/gha-trust.json > /tmp/gha-trust.json
 aws iam create-role --role-name ij-crm-deploy-gha --max-session-duration 3600 \
   --assume-role-policy-document file:///tmp/gha-trust.json
 ```
 
+Se o 1º deploy falhar em "Credenciais da AWS" com `Not authorized to perform
+sts:AssumeRoleWithWebIdentity`, um claim não bateu. O mais provável é o
+`job_workflow_ref`: a documentação do GitHub o descreve para workflows
+reutilizáveis, e o formato `:environment:` do `sub` imutável foi deduzido do
+`sub_claim_prefix` acima. Tire uma condição por vez da trust (`aws iam
+update-assume-role-policy`), começando pelo `job_workflow_ref`, até achar qual;
+`sub` + `repository_id` + `environment` + `ref` já restringem ao essencial.
+
 **3. Permissões da role**: `ssm:SendCommand` só no documento e na instância;
-`GetCommandInvocation`/`ListCommandInvocations` para acompanhar.
+`ssm:GetCommandInvocation` para acompanhar (essa ação não aceita restrição por
+recurso, daí o `*`). Nada mais.
 
 ```bash
 sed -e "s/<ACCOUNT_ID>/$CONTA/g" -e "s/<REGION>/$AWS_REGION/g" -e "s/<INSTANCE_ID>/$INST/g" \
