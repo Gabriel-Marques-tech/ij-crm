@@ -38,12 +38,13 @@ import { db } from "@/lib/db";
 import { registrarErro } from "@/lib/erros/registrar";
 import { alertarSeSemCredito, marcarCreditoOk } from "@/lib/llm/alerta-credito";
 import { ErroLlm, extrairAtualizacao, type ContextoExtracao, type ResultadoExtracao } from "@/lib/llm/extracao";
-import type { ContatoCandidato, EmpresaCandidata } from "@/lib/llm/prompts/extracao.v1";
-import { VERSAO_EXTRACAO } from "@/lib/llm/prompts/extracao.v1";
+import type { ContatoCandidato, EmpresaCandidata } from "@/lib/llm/prompts/extracao.v2";
+import { VERSAO_EXTRACAO } from "@/lib/llm/prompts/extracao.v2";
 import { ErroDeRegra } from "@/lib/oportunidades/erros";
 import { PIPELINE_VENDAS } from "@/lib/oportunidades/terminal-regras";
 import { aplicarExtracao, type Desfecho } from "./aplicar";
-import { textoCriado, textoFalha, textoPendente } from "./confirmacao";
+import { alvoDaResposta, oportunidadesCandidatas, type MotivoRespostaInvalida } from "./candidatas";
+import { textoAtualizado, textoCriado, textoFalha, textoPendente } from "./confirmacao";
 import { enviarWhatsApp } from "./enviar";
 import { extrairIdentificadores } from "./identificadores";
 
@@ -84,8 +85,13 @@ function carregar(id: string) {
   });
 }
 
-/** Contexto do passo 6: remetente, msg respondida, fases de vendas, candidatos por identificador exato. */
-export async function montarContexto(m: Pick<Bruta, "texto" | "recebidaEm" | "respondendoEventoId" | "remetenteUsuario">): Promise<ContextoExtracao> {
+/**
+ * Contexto do passo 6: remetente, msg respondida, fases de vendas, candidatos
+ * por identificador exato e oportunidades candidatas (GAB-38).
+ */
+export async function montarContexto(
+  m: Pick<Bruta, "texto" | "recebidaEm" | "respondendoEventoId" | "remetenteUsuario" | "remetenteUsuarioId">,
+): Promise<ContextoExtracao & { respostaInvalida: MotivoRespostaInvalida | null }> {
   let respondendoA: string | null = null;
   if (m.respondendoEventoId) {
     const anterior =
@@ -113,6 +119,16 @@ export async function montarContexto(m: Pick<Bruta, "texto" | "recebidaEm" | "re
     if (r && !empresas.some((e) => e.id === r.empresa.id)) empresas.push({ id: r.empresa.id, nome: r.empresa.nome, via: r.via });
   }
 
+  const resposta = await alvoDaResposta(m.respondendoEventoId, m.recebidaEm);
+  const alvoResposta = resposta?.tipo === "CARD" ? resposta.id : null;
+  const oportunidades = await oportunidadesCandidatas({
+    remetenteUsuarioId: m.remetenteUsuarioId,
+    recebidaEm: m.recebidaEm,
+    contatoIds: contatos.map((c) => c.id),
+    empresas,
+    alvoResposta,
+  });
+
   return {
     remetente: m.remetenteUsuario?.nome ?? "vendedor",
     recebidaEm: m.recebidaEm,
@@ -120,6 +136,9 @@ export async function montarContexto(m: Pick<Bruta, "texto" | "recebidaEm" | "re
     fases: fases.map((f) => ({ chave: f.chave, nome: f.nome, terminal: f.isTerminal })),
     contatos,
     empresas,
+    oportunidades,
+    alvoResposta,
+    respostaInvalida: resposta?.tipo === "INVALIDA" ? resposta.motivo : null,
   };
 }
 
@@ -158,6 +177,9 @@ function registroLlm(r: ResultadoExtracao | null, bruto?: unknown, uso?: Resulta
 
 function resumoDesfecho(d: Desfecho) {
   if (d.tipo === "PENDENTE") return { tipo: d.tipo, motivo: d.motivo };
+  if (d.tipo === "ATUALIZADO") {
+    return { tipo: d.tipo, oportunidadeId: d.oportunidadeId, alterados: d.alterados, moveu: d.deFaseNome !== null, revisar: d.revisar, motivosRevisar: d.motivosRevisar, sugestoes: d.sugestoes };
+  }
   return {
     tipo: d.tipo,
     oportunidadeId: d.oportunidadeId,
@@ -166,6 +188,7 @@ function resumoDesfecho(d: Desfecho) {
     revisar: d.revisar,
     motivosRevisar: d.motivosRevisar,
     sugestoes: d.sugestoes,
+    ...(d.reabertaDeId ? { reabertaDeId: d.reabertaDeId } : {}),
   };
 }
 
@@ -240,8 +263,10 @@ async function processar(id: string, opts: { participantJid?: string | null }): 
   if (!m.remetenteUsuarioId) return falhar(m, tentativa, new ErroDeRegra("RESPONSAVEL_INVALIDO"), registroLlm(null), opts.participantJid);
 
   let r: ResultadoExtracao;
+  let ctx: Awaited<ReturnType<typeof montarContexto>>;
   try {
-    r = await extrairAtualizacao(m.texto, await montarContexto(m), { ref: m.id });
+    ctx = await montarContexto(m);
+    r = await extrairAtualizacao(m.texto, ctx, { ref: m.id });
   } catch (e) {
     return falhar(m, tentativa, e, registroLlm(null, e instanceof ErroLlm ? e.bruto : undefined, e instanceof ErroLlm ? e.uso : undefined), opts.participantJid);
   }
@@ -263,11 +288,14 @@ async function processar(id: string, opts: { participantJid?: string | null }): 
           extracao: r.extracao,
           limiar: limiarConfianca(),
           registroLlm: llm,
+          candidatas: ctx.oportunidades,
+          alvoResposta: ctx.alvoResposta,
+          respostaInvalida: ctx.respostaInvalida,
         });
         await tx.mensagemBruta.update({
           where: { id: m.id },
           data: {
-            status: d.tipo === "CRIADO" ? "PROCESSADA" : "PENDENTE_REVISAO",
+            status: d.tipo === "PENDENTE" ? "PENDENTE_REVISAO" : "PROCESSADA",
             erro: null,
             resultadoLlm: { ...llm, aplicacao: resumoDesfecho(d) } as Prisma.InputJsonValue,
           },
@@ -286,7 +314,7 @@ async function processar(id: string, opts: { participantJid?: string | null }): 
     await responder(m, confirmacao, null, opts.participantJid);
     return { tipo: "PENDENTE_REVISAO", confirmacao };
   }
-  const confirmacao = textoCriado(desfecho, { reprocessada });
+  const confirmacao = desfecho.tipo === "ATUALIZADO" ? textoAtualizado(desfecho, { reprocessada }) : textoCriado(desfecho, { reprocessada });
   await responder(m, confirmacao, desfecho.oportunidadeId, opts.participantJid);
   return { tipo: "PROCESSADA", oportunidadeId: desfecho.oportunidadeId, confirmacao };
 }

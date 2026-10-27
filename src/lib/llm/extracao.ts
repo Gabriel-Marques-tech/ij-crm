@@ -17,14 +17,14 @@ import {
   montarMensagemUsuario,
   type ContextoExtracao,
   type Extracao,
-} from "./prompts/extracao.v1";
+} from "./prompts/extracao.v2";
 import { criarProvedorAnthropic } from "./provedores/anthropic";
 import { criarProvedorMock } from "./provedores/mock";
 import { criarProvedorOpenAI } from "./provedores/openai";
 import { ErroLlm, type ProvedorLlm, type UsoLlm } from "./tipos";
 
 export { ErroLlm } from "./tipos";
-export type { ContextoExtracao, Extracao } from "./prompts/extracao.v1";
+export type { ContextoExtracao, Extracao } from "./prompts/extracao.v2";
 
 export type ResultadoExtracao = { extracao: Extracao; bruto: unknown; uso: UsoLlm; versao: string };
 
