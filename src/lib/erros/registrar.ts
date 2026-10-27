@@ -2,20 +2,25 @@
  * Erro inesperado do servidor → linha de log rastreável + `ref` curta que o
  * usuário vê na tela e repassa. Para achar: `grep 'ref=<ref>'` nos logs.
  *
- * Nunca loga `e.message` de erro do Prisma (ver `./prisma.ts`) nem de `Error`
- * genérico; só das classes em `MENSAGEM_SEGURA`.
+ * Nunca loga `e.message` de erro do Prisma (ver `./prisma.ts`); a de `Error`
+ * genérico vai redigida (`redigirPii`: emails, telefones, CPF/CNPJ, tokens).
  */
 import { unstable_rethrow } from "next/navigation";
 import { descreverErroPrisma } from "./prisma";
+import { redigirPii } from "./redigir";
 
 const FRAMES = 3;
 
 /**
- * Classes do projeto cuja `message` é montada só com códigos/nomes de variável
- * (nunca dado pessoal): a mensagem delas vai ao log. Qualquer outro `Error`
- * loga só o nome + frames — a mensagem pode trazer email/telefone/texto.
+ * `nome: mensagem` sem PII, sem stack — para log e para saída de CLI/scripts.
+ * Erro do Prisma: só a descrição estrutural (a mensagem ecoa a query).
  */
-export const MENSAGEM_SEGURA = new Set(["ConfigAusente", "ConfigInvalida", "ConfigFraca", "ErroLlm"]);
+export function mensagemSegura(e: unknown): string {
+  const prisma = descreverErroPrisma(e);
+  if (prisma !== null) return prisma;
+  if (e instanceof Error) return e.message ? `${e.name}: ${redigirPii(e.message)}` : e.name;
+  return `lançado valor não-Error (${typeof e})`;
+}
 
 export function descreverErro(e: unknown): string {
   const prisma = descreverErroPrisma(e);
@@ -26,9 +31,8 @@ export function descreverErro(e: unknown): string {
       .filter((l) => /^\s+at\s/.test(l))
       .slice(0, FRAMES)
       .map((l) => l.trim());
-    const cabeca = MENSAGEM_SEGURA.has(e.name) ? `${e.name}: ${e.message}` : e.name;
     const causa = descreverErroPrisma(e.cause);
-    return [cabeca, ...(causa ? [`cause=${causa}`] : []), ...frames].join(" | ");
+    return [mensagemSegura(e), ...(causa ? [`cause=${causa}`] : []), ...frames].join(" | ");
   }
   return `lançado valor não-Error (${typeof e})`;
 }

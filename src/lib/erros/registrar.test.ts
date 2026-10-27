@@ -47,27 +47,25 @@ describe("descreverErro", () => {
     expect(d).not.toContain("segredo");
   });
 
-  it("Error comum → só o nome + no máximo 3 frames; a mensagem pode ter dado pessoal", () => {
+  it("Error comum → nome: mensagem redigida (sem PII) + no máximo 3 frames", () => {
     const e = new TypeError("falhou para ana@segredo.test");
     e.stack = ["TypeError: falhou para ana@segredo.test", "    at a (x.ts:1)", "    at b (x.ts:2)", "    at c (x.ts:3)", "    at d (x.ts:4)"].join("\n");
     const d = descreverErro(e);
-    expect(d.startsWith("TypeError | ")).toBe(true);
+    expect(d.startsWith("TypeError: falhou para [email] | ")).toBe(true);
     expect(d).not.toContain("segredo");
     expect(d).toContain("at a (x.ts:1)");
     expect(d).toContain("at c (x.ts:3)");
     expect(d).not.toContain("at d (x.ts:4)");
   });
 
-  it("classes do projeto sem dado pessoal (MENSAGEM_SEGURA) → nome: mensagem", () => {
-    const e = new Error("Variável de ambiente ausente ou vazia: LLM_PROVEDOR");
-    e.name = "ConfigAusente";
-    expect(descreverErro(e)).toContain("ConfigAusente: Variável de ambiente ausente ou vazia: LLM_PROVEDOR");
+  it("mensagem técnica sem PII continua legível (depurável pelo log)", () => {
+    expect(descreverErro(new TypeError("travarPipelines is not a function"))).toContain("TypeError: travarPipelines is not a function");
   });
 
   it("Error com cause do Prisma → descreve a cause do jeito Prisma", () => {
     const e = new Error("falhou ao salvar ana@segredo.test", { cause: erroPrisma() });
     const d = descreverErro(e);
-    expect(d).toContain("Error");
+    expect(d).toContain("Error: falhou ao salvar [email]");
     expect(d).toContain("cause=Prisma P2002");
     expect(d).not.toContain("segredo");
   });
