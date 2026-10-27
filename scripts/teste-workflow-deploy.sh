@@ -2,8 +2,9 @@
 # Teste dos passos `run:` do job `deploy` de .github/workflows/imagens.yml, fora
 # do GitHub: extrai os scripts do YAML (python3 + PyYAML) e roda com um `aws`
 # falso. Cobre: configuração ausente (pula com notice + warning, verde), pela
-# metade / inválida (falha), sucesso (Pending → InProgress → Success), falha com
-# rollback automático, recusa na VPS, timeout de execução e de entrega, cancelado,
+# metade / inválida (falha), sucesso (Pending → InProgress → Success), falhas
+# classificadas pelo ResponseCode (1, 2, 10, 11, inesperado; o texto da saída não
+# manda), timeout de execução e de entrega, cancelado,
 # status desconhecido (prazo esgotado / API falhando: não afirma falha),
 # send-command falhando, parâmetros enviados ao SSM.
 #
@@ -82,23 +83,25 @@ contem "$out" "deploy concluído" "saída da VPS no log do job"
 chamada="$(grep send-command "$T/chamadas")"
 contem "$chamada" "--document-name ij-crm-deploy --instance-ids i-0123456789abcdef0" "send-command no documento e instância"
 contem "$chamada" "{\"tag\":[\"sha-1a2b3c4\"],\"digestApp\":[\"$DA\"],\"digestOps\":[\"$DO\"]}" "parâmetros: tag + digests"
-FAKE_STATUS="InProgress/InProgress,Failed/Failed" FAKE_CODIGO=1 \
-  FAKE_SAIDA="ERRO: up/health falhou
-rollback automático ok: app em sha-0000000" roda deploy.sh
-ok "$rc" 1 "deploy falhou com rollback: job vermelho"; contem "$sum" "rollback automático para a versão anterior ok" "resumo do rollback automático"
+FAKE_STATUS="InProgress/InProgress,Failed/Failed" FAKE_CODIGO=10 \
+  FAKE_SAIDA="deploy-remoto: RESULTADO=10 up/health falhou; rollback automático voltou o app para a versão anterior" roda deploy.sh
+ok "$rc" 1 "código 10: job vermelho"; contem "$sum" "rollback automático para a versão anterior ok" "código 10 = rollback automático ok"
 contem "$out" "::error title=Deploy sha-1a2b3c4::" "anotação de erro"
-FAKE_STATUS="Failed/Failed" FAKE_CODIGO=1 FAKE_SAIDA="ERRO: rollback automático para sha-0000000 também falhou" roda deploy.sh
-ok "$rc" 1 "rollback também falhou: vermelho"; contem "$sum" "TAMBÉM falhou" "resumo do rollback falho"
-FAKE_STATUS="Failed/Failed" FAKE_CODIGO=2 FAKE_SAIDA="deploy-remoto: recusado: commit x não está na origin/main" roda deploy.sh
-ok "$rc" 1 "recusado na VPS: vermelho"; contem "$sum" "recusado na VPS" "resumo da recusa"
-FAKE_STATUS="Failed/Failed" FAKE_CODIGO=1 FAKE_SAIDA="ERRO: migration falhou" roda deploy.sh
-ok "$rc" 1 "falha genérica: vermelho"; contem "$sum" "deploy.sh falhou (código 1)" "resumo da falha genérica"
+contem "$sum" "| Linha da VPS | \`deploy-remoto: RESULTADO=10 " "resumo traz a linha RESULTADO da VPS"
+FAKE_STATUS="Failed/Failed" FAKE_CODIGO=11 FAKE_SAIDA="" roda deploy.sh
+ok "$rc" 1 "código 11: vermelho"; contem "$sum" "o app NÃO voltou" "código 11 = intervenção manual"
+FAKE_STATUS="Failed/Failed" FAKE_CODIGO=2 FAKE_SAIDA="" roda deploy.sh
+ok "$rc" 1 "código 2: vermelho"; contem "$sum" "recusado na VPS" "código 2 = recusado"
+FAKE_STATUS="Failed/Failed" FAKE_CODIGO=1 FAKE_SAIDA="rollback automático ok: texto que NÃO manda" roda deploy.sh
+ok "$rc" 1 "código 1: vermelho"; contem "$sum" "falhou antes de trocar o app" "classifica pelo código, não pelo texto da saída"
+FAKE_STATUS="Failed/Failed" FAKE_CODIGO=42 FAKE_SAIDA="" roda deploy.sh
+ok "$rc" 1 "código inesperado: vermelho"; contem "$sum" "falhou com código 42" "resumo do código inesperado"
 FAKE_STATUS="InProgress/InProgress,TimedOut/ExecutionTimedOut" FAKE_CODIGO=-1 FAKE_SAIDA="" roda deploy.sh
 ok "$rc" 1 "timeout de execução: vermelho"; contem "$sum" "estourou o tempo do SSM" "resumo do timeout"
 contem "$sum" "verifique o status no SSM" "timeout manda verificar no SSM"
 FAKE_STATUS="TimedOut/DeliveryTimedOut" roda deploy.sh
 ok "$rc" 1 "não entregue: vermelho"; contem "$sum" "não entregue a tempo" "resumo do não entregue"
-FAKE_STATUS="Failed/Undeliverable" roda deploy.sh
+FAKE_STATUS="Failed/Undeliverable" FAKE_CODIGO=-1 roda deploy.sh
 ok "$rc" 1 "Undeliverable: vermelho"; contem "$sum" "Undeliverable" "resumo do Undeliverable"
 FAKE_STATUS="Cancelled/Cancelled" roda deploy.sh
 ok "$rc" 1 "cancelado: vermelho"; contem "$sum" "cancelado no SSM" "resumo do cancelado"

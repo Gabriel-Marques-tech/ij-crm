@@ -243,9 +243,10 @@ jobs:
           mask-aws-account-id: true
 
       # send-command do documento ij-crm-deploy e acompanhamento até um estado
-      # final. O código de saída do deploy.sh na VPS vira o resultado do job
-      # (≠ 0, inclusive com rollback automático = ❌ + email). Status que não dá
-      # para saber (API fora, prazo do job) NÃO é dado como falha certa.
+      # final. O ResponseCode (código de saída do deploy.sh na VPS: 0 ok, 1 falhou
+      # antes de trocar o app, 10 rollback automático ok, 11 app não voltou, 2
+      # recusado) define o resultado; ≠ 0 = ❌ + email. Status que não dá para
+      # saber (API fora, prazo do job) NÃO é dado como falha certa.
       - name: Deploy via SSM
         if: steps.config.outputs.pronto == 'true'
         env:
@@ -253,7 +254,7 @@ jobs:
           PRAZO: "3000"     # s de acompanhamento (timeout do documento: 2700)
         run: |
           set -uo pipefail
-          cmd_id="-"
+          cmd_id="-" marcador=""
           resumo() {
             {
               echo "### Deploy automático"
@@ -266,6 +267,7 @@ jobs:
               echo "| Digest ops | \`$DIGEST_OPS\` |"
               echo "| Comando SSM | \`$cmd_id\` (instância \`$INSTANCIA\`) |"
               echo "| Resultado | $1 |"
+              if [[ -n "$marcador" ]]; then echo "| Linha da VPS | \`${marcador//|/\\|}\` |"; fi
             } >> "$GITHUB_STEP_SUMMARY"
           }
           params="$(jq -cn --arg t "$TAG" --arg a "$DIGEST_APP" --arg o "$DIGEST_OPS" \
@@ -306,6 +308,7 @@ jobs:
 
           codigo="$(jq -r '.ResponseCode // ""' <<<"$inv")"
           saida="$(jq -r '.StandardOutputContent // ""' <<<"$inv")"
+          marcador="$(grep -m 1 '^deploy-remoto: RESULTADO=' <<<"$saida" || true)"
           echo "----- saída do deploy na VPS (fim do log; completo em /var/log/ij-crm/deploy-*-$TAG.log) -----"
           printf '%s\n' "$saida"
           jq -r '.StandardErrorContent // ""' <<<"$inv"
@@ -316,17 +319,20 @@ jobs:
             Success)
               rc=0; resultado="✅ ok: \`$TAG\` no ar" ;;
             Failed)
-              if [[ "$detalhe" == Undeliverable || "$detalhe" == Terminated ]]; then
-                resultado="❌ SSM: $detalhe (instância sem agente SSM/parada); verifique o status no SSM"
-              elif [[ "$codigo" == 2 ]] || grep -q "deploy-remoto: recusado" <<<"$saida"; then
-                resultado="❌ recusado na VPS por scripts/deploy-remoto.sh (tag, digest ou commit fora da main); nada rodou"
-              elif grep -q "rollback automático ok" <<<"$saida"; then
-                resultado="❌ deploy falhou; rollback automático para a versão anterior ok"
-              elif grep -q "rollback automático para .* também falhou" <<<"$saida"; then
-                resultado="❌ deploy falhou e o rollback automático TAMBÉM falhou: intervenção manual (runbook §2)"
-              else
-                resultado="❌ deploy.sh falhou (código ${codigo:-?}); veja a saída neste passo e o log na VPS"
-              fi ;;
+              # Classificação pelo código de saída (scripts/deploy.sh / deploy-remoto.sh),
+              # não por texto da saída (que o SSM trunca).
+              case "$codigo" in
+                2) resultado="❌ recusado na VPS por scripts/deploy-remoto.sh (tag, digest ou commit fora da main); nada rodou" ;;
+                1) resultado="❌ deploy falhou antes de trocar o app (checagens, pull/digest, backup ou migration); a versão anterior segue no ar" ;;
+                10) resultado="❌ deploy falhou no up/health; rollback automático para a versão anterior ok" ;;
+                11) resultado="❌ deploy falhou no up/health e o app NÃO voltou: intervenção manual (runbook §2)" ;;
+                *)
+                  if [[ "$detalhe" == Undeliverable || "$detalhe" == Terminated ]]; then
+                    resultado="❌ SSM: $detalhe (instância sem agente SSM/parada); verifique o status no SSM"
+                  else
+                    resultado="❌ falhou com código ${codigo:-?} ($detalhe); veja a saída neste passo e o log na VPS"
+                  fi ;;
+              esac ;;
             TimedOut)
               if [[ "$detalhe" == DeliveryTimedOut ]]; then
                 resultado="❌ não entregue a tempo (instância offline ou sem agente SSM); nada rodou"

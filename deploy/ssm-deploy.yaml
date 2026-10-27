@@ -42,4 +42,5 @@ mainSteps:
       workingDirectory: /opt/ij-crm
       runCommand:
         - "set -eu"
-        - "exec runuser -u deploy -- /opt/ij-crm/scripts/deploy-remoto.sh '{{ tag }}' '{{ digestApp }}' '{{ digestOps }}'"
+        # env -i: nada do ambiente do agente SSM (root) chega ao deploy.
+        - "exec runuser -u deploy -- env -i PATH=/usr/local/bin:/usr/bin:/bin HOME=/home/deploy LC_ALL=C /opt/ij-crm/scripts/deploy-remoto.sh '{{ tag }}' '{{ digestApp }}' '{{ digestOps }}'"
