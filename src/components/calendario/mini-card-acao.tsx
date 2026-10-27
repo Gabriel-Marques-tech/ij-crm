@@ -13,11 +13,12 @@ export const COR_ACAO_VENCIDA = "bg-primary";
  * Kanban. O card inteiro é o link (pseudo-elemento); `extra` (ex.: marcar
  * feita) fica por cima dele.
  */
-export function MiniCardAcao({ item, extra }: { item: AcaoItem; extra?: ReactNode }) {
+export function MiniCardAcao({ item, extra, urgente = false }: { item: AcaoItem; extra?: ReactNode; /** "Mais urgente" da Minha Semana. */ urgente?: boolean }) {
   const vencida = item.vencida;
   return (
     <article
       data-estado={vencida ? "vencida" : "normal"}
+      data-urgente={urgente ? "" : undefined}
       className={cn(
         "relative overflow-hidden rounded-lg border bg-surface py-2 pr-2 pl-3 transition-colors hover:bg-surface-hover",
         vencida ? "border-primary/40 bg-primary-soft/30 hover:bg-primary-soft/45" : "border-border",
@@ -33,6 +34,7 @@ export function MiniCardAcao({ item, extra }: { item: AcaoItem; extra?: ReactNod
       <p className="mt-0.5 truncate text-[11px] text-fg-mute">{item.empresa ?? item.titulo}</p>
       <div className="mt-1.5 flex items-center gap-1.5">
         <span className="min-w-0 truncate font-mono text-[10px] text-fg-faint">
+          {urgente ? <span className="font-semibold text-primary">mais urgente · </span> : null}
           {vencida ? <span className="text-primary">vencida · </span> : null}
           {item.fase}
         </span>

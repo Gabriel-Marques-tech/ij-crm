@@ -81,3 +81,16 @@ describe("Legenda", () => {
     for (const t of ["Próxima ação", "Ação vencida", "Prazo", "Prazo vencido", "Prazo feito", "Hoje"]) expect(screen.getByText(t)).toBeInTheDocument();
   });
 });
+
+describe("MiniCardAcao: mais urgente (Minha Semana)", () => {
+  it("marca o card do destaque", () => {
+    render(<MiniCardAcao item={acao} urgente />);
+    expect(screen.getByRole("article")).toHaveAttribute("data-urgente");
+    expect(screen.getByText(/mais urgente/)).toBeInTheDocument();
+  });
+
+  it("sem a marca por padrão", () => {
+    render(<MiniCardAcao item={acao} />);
+    expect(screen.getByRole("article")).not.toHaveAttribute("data-urgente");
+  });
+});

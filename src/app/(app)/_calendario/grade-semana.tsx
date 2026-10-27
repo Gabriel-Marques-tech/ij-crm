@@ -27,6 +27,7 @@ export function GradeSemana({
   layout = "rolagem",
   mostrarResponsavelNoPrazo = false,
   extraDaAcao,
+  urgenteId = null,
 }: {
   dias: DiaAgrupado<AcaoItem, PrazoItem>[];
   hoje: string;
@@ -34,6 +35,8 @@ export function GradeSemana({
   mostrarResponsavelNoPrazo?: boolean;
   /** Ex.: "marcar feita" na Minha Semana. */
   extraDaAcao?: (a: AcaoItem) => ReactNode;
+  /** Card "Mais urgente" da Minha Semana: marcado no mini-card. */
+  urgenteId?: string | null;
 }) {
   const { novo, abrir } = useEditorPrazo();
   const empilhar = layout === "empilhar";
@@ -81,7 +84,7 @@ export function GradeSemana({
                     </p>
                   ) : null}
                   {acoes.map((a) => (
-                    <MiniCardAcao key={a.cardId} item={a} extra={extraDaAcao?.(a)} />
+                    <MiniCardAcao key={a.cardId} item={a} extra={extraDaAcao?.(a)} urgente={a.cardId === urgenteId} />
                   ))}
                   <button
                     type="button"

@@ -70,11 +70,11 @@ export default async function MinhaSemanaPage({ searchParams }: { searchParams: 
   if (ehInesperado(dados)) return <ErroCarregamento codigo={dados.ref} />;
   const ranking = await top3;
   const { escolha, s, cards, itens, foto, responsaveis } = dados;
-  // O destaque já está grande no topo: não se repete nas colunas.
-  const { dias, proxima } = dividirSemana(semana, itens, s.destaque?.id ?? null);
+  // O destaque (Mais urgente) também aparece na grade, marcado como urgente.
+  const { dias, proxima } = dividirSemana(semana, itens);
   // Vencidas de antes desta semana não cabem nas colunas: seguem em lista (com "marcar feita").
   const vencidasAntes = s.vencidas.filter((c) => diaEmFuso(c.proximaAcaoEm!) < semana.segunda);
-  const depois = cards.filter((c) => c.proximaAcaoEm && diaEmFuso(c.proximaAcaoEm) > ate && c.id !== s.destaque?.id).length;
+  const depois = cards.filter((c) => c.proximaAcaoEm && diaEmFuso(c.proximaAcaoEm) > ate).length;
   const proprio = escolha.alvo.id === ator.id;
   const primeiroNome = escolha.alvo.nome.split(" ")[0];
   const nada = s.destaque === null && s.sem.length === 0;
@@ -148,7 +148,7 @@ export default async function MinhaSemanaPage({ searchParams }: { searchParams: 
               <BotaoNovoPrazo dia={hoje} variant="outline" />
             </div>
           </div>
-          <SemanaEmColunas dias={dias} hoje={semana.hoje} />
+          <SemanaEmColunas dias={dias} hoje={semana.hoje} urgenteId={s.destaque?.id ?? null} />
           <Legenda />
           <ProximaSemana acoes={proxima.acoes} prazos={proxima.prazos} ate={ate} depois={depois} kanbanHref={`/kanban?resp=${encodeURIComponent(escolha.alvo.id)}`} />
         </section>
