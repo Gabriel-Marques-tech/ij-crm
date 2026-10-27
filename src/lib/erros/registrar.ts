@@ -2,8 +2,9 @@
  * Erro inesperado do servidor → linha de log rastreável + `ref` curta que o
  * usuário vê na tela e repassa. Para achar: `grep 'ref=<ref>'` nos logs.
  *
- * Nunca loga `e.message` de erro do Prisma: ele ecoa argumentos da query
- * (emails, hashes, textos de card). Só `code` + `meta.target`/`meta.modelName`.
+ * Nunca loga `e.message` de erro do Prisma (qualquer classe): ele ecoa
+ * argumentos da query (emails, hashes, textos de card). Só a classe, `code`,
+ * `meta.target`/`meta.modelName` e os NOMES das outras chaves de `meta`.
  */
 import { Prisma } from "@prisma/client";
 import { unstable_rethrow } from "next/navigation";
@@ -16,7 +17,17 @@ export function descreverErro(e: unknown): string {
     const partes = [`Prisma ${e.code}`];
     if (meta.modelName !== undefined) partes.push(`model=${String(meta.modelName)}`);
     if (meta.target !== undefined) partes.push(`target=${Array.isArray(meta.target) ? meta.target.join(",") : String(meta.target)}`);
+    const outras = Object.keys(meta).filter((k) => k !== "target" && k !== "modelName");
+    if (outras.length > 0) partes.push(`meta=${outras.join(",")}`);
     return partes.join(" ");
+  }
+  if (e instanceof Prisma.PrismaClientInitializationError) return [e.name, e.errorCode].filter(Boolean).join(" ");
+  if (
+    e instanceof Prisma.PrismaClientValidationError ||
+    e instanceof Prisma.PrismaClientUnknownRequestError ||
+    e instanceof Prisma.PrismaClientRustPanicError
+  ) {
+    return e.name;
   }
   if (e instanceof Error) {
     const frames = (e.stack ?? "")
