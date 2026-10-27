@@ -213,7 +213,7 @@ GAB-46. A recarga da API de LLM é manual (pré-pago). Quando uma chamada falha 
 (`src/lib/llm/alerta-credito.ts`), que:
 
 - manda `⚠️ Sem crédito na API de LLM. Mensagens do grupo estão ficando em FALHA e serão reprocessadas
-  depois da recarga. ref: …` para `ALERTA_OPS_JID` pelo `enviarWhatsApp` de sempre (timeout 60 s);
+  depois da recarga. Mensagens sem #crm não são reprocessadas; quem precisar, reenvie com #crm. ref: …` para `ALERTA_OPS_JID` pelo `enviarWhatsApp` de sempre (timeout 60 s);
 - respeita cooldown guardado no banco (`alerta_operacional`, sobrevive a restart): 6 h depois de um aviso
   entregue, 5 min se o envio falhou (ou se o processo cair entre reivindicar e enviar). Entrega confirmada
   pela Evolution conta como avisado mesmo se a gravação local falhar depois (`ErroPosEnvio` em `enviar.ts`);

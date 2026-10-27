@@ -41,7 +41,7 @@ type Deps = { db?: Db; enviar?: (envio: { para: string; texto: string }) => Prom
 export type ResultadoAlerta = "IGNORADO" | "SO_LOG" | "EM_COOLDOWN" | "ENVIADO" | "FALHOU_ENVIO" | "ERRO";
 
 export function textoAlertaSemCredito(ref: string): string {
-  return `⚠️ Sem crédito na API de LLM. Mensagens do grupo estão ficando em FALHA e serão reprocessadas depois da recarga. ref: ${ref}`;
+  return `⚠️ Sem crédito na API de LLM. Mensagens do grupo estão ficando em FALHA e serão reprocessadas depois da recarga. Mensagens sem #crm não são reprocessadas; quem precisar, reenvie com #crm. ref: ${ref}`;
 }
 
 /** JID de operações. Vazio/ausente ⇒ alerta desligado (o banner continua). */
