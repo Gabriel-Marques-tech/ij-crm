@@ -759,9 +759,10 @@ deploy-remoto.sh → deploy.sh (usuário deploy) → resultado volta pro GitHub
 2. **Role da AWS:** a role `ij-crm-deploy-gha` só aceita tokens do job `deploy`
    deste repositório (pelo id numérico, então renomear ou recriar o repo com o
    mesmo nome não engana), no environment `producao`, a partir da `main`. As
-   credenciais que ela devolve expiram sozinhas e só podem mandar (e acompanhar) **um**
-   documento para **uma** instância; não dá para abrir shell, ler segredos nem
-   mexer em outra coisa da conta.
+   credenciais que ela devolve expiram sozinhas e só podem mandar **um**
+   documento para **uma** instância e ler o resultado de comandos do SSM
+   (`ssm:GetCommandInvocation` não aceita restrição por recurso); não dá para
+   abrir shell, ler segredos nem mexer em outra coisa da conta.
 3. **SSM (o "mensageiro"):** o agente SSM na EC2 fica conectado à AWS por uma
    conexão de saída. Por isso a máquina não precisa de porta 22 nem de IP
    liberado para o GitHub: ela mesma busca o comando. A instância precisa do
@@ -778,14 +779,16 @@ deploy-remoto.sh → deploy.sh (usuário deploy) → resultado volta pro GitHub
 | Onde | O quê |
 |---|---|
 | AWS IAM | provedor OIDC `token.actions.githubusercontent.com` |
-| AWS IAM | role `ij-crm-deploy-gha` (confiança só neste repo/environment + permissão de `ssm:SendCommand`) |
+| AWS IAM | role `ij-crm-deploy-gha` (confiança só neste repo/environment + `ssm:SendCommand` no documento/instância e `ssm:GetCommandInvocation`) |
 | AWS IAM / EC2 | instance profile `ij-crm-ec2-ssm` na instância |
 | AWS SSM | documento `ij-crm-deploy` (de `deploy/ssm-deploy.yaml`) |
 | EC2 security group | só 80/443 de entrada; porta 22 removida |
 | GitHub → Settings → Environments → `producao` | variáveis `AWS_DEPLOY_ROLE_ARN`, `AWS_REGION`, `DEPLOY_INSTANCE_ID` (não são segredos) |
 
-Enquanto essas variáveis não existirem, o job `deploy` aparece como *skipped*
-e o build continua publicando as imagens normalmente.
+Enquanto essas variáveis não existirem, o job `deploy` fica **verde com o aviso
+"Deploy pulado"** e nada vai para a máquina; o build continua publicando as
+imagens normalmente. *Skipped* só aparece com o deploy pausado
+(`DEPLOY_AUTOMATICO=false`).
 
 **Testar a conexão sem fazer deploy:** no console da AWS, **Systems Manager →
 Fleet Manager** deve listar a instância como *Online*. Pela CLI:
@@ -803,9 +806,9 @@ Para acompanhar, abra **GitHub → Actions → `imagens`** e veja o último run 
 | Job | O que significa |
 |---|---|
 | `build` verde | Imagens publicadas no GHCR |
-| `deploy` verde | Versão no ar. O resumo do job mostra tag, commit e "ok" |
+| `deploy` verde | Versão no ar: o resumo mostra tag, commit e "ok". Se o resumo disser **"Deploy pulado"**, a AWS ainda não foi configurada e nada subiu |
 | `deploy` vermelho | O deploy falhou e o GitHub manda email. Veja o código no resumo (tabela abaixo) |
-| `deploy` *skipped* | O deploy automático está pausado ou a AWS ainda não foi configurada (o resumo avisa) |
+| `deploy` *skipped* | O deploy automático está pausado (`DEPLOY_AUTOMATICO=false`) |
 
 Códigos de saída do deploy, que aparecem no resumo:
 
@@ -894,7 +897,7 @@ runbook, de cima para baixo. Resumindo:
 6. **Primeiro deploy** com `scripts/deploy.sh --no-pull`, seed, e
    `llm-smoke` ok.
 7. **Criar o admin** com `scripts/criar-admin.ts`.
-8. **Parear o WhatsApp** pelo QR em Gestão → Admin.
+8. **Parear o WhatsApp** pelo QR em Gestão → Admin → "Mostrar QR" (só ADMIN).
 9. **Escolher o grupo** de vendas, também em Gestão → Admin.
 10. **Aviso de privacidade** da IJ publicado, **antes** de ligar o webhook.
 11. **Ligar o webhook** com `scripts/evolution.sh webhook`.
