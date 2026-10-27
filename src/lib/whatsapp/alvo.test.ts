@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolverAlvo, type Candidata } from "./alvo";
+import { MOTIVO_FECHADO_COM_ABERTO, MOTIVO_SEM_IDENTIDADE, resolverAlvo, type Candidata } from "./alvo";
 
 const T = (min: number) => new Date(Date.UTC(2026, 9, 26, 12, min));
 
@@ -20,12 +20,31 @@ describe("resolverAlvo — reply a uma confirmação fixa o alvo", () => {
 });
 
 describe("resolverAlvo — escolha da LLM só vale dentro da lista", () => {
-  it("id da lista, aberto → ele", () => {
-    expect(resolverAlvo({ alvoResposta: null, escolhaLlm: "b", candidatas: [c("a", { via: ["recente"] }), c("b", { via: ["recente"] })] })).toEqual({
+  it("id da lista casado por identidade, aberto → ele, sem revisar", () => {
+    expect(resolverAlvo({ alvoResposta: null, escolhaLlm: "b", candidatas: [c("a", { via: ["recente"] }), c("b", { via: ["contato", "recente"] })] })).toEqual({
       tipo: "EXISTENTE",
       id: "b",
       motivos: [],
     });
+  });
+
+  it("id da lista só por 'recente' ou 'dominio' → aceito, mas sempre com motivo (revisar)", () => {
+    for (const via of [["recente"], ["dominio"]] as const) {
+      expect(resolverAlvo({ alvoResposta: null, escolhaLlm: "b", candidatas: [c("b", { via: [...via] })] })).toEqual({
+        tipo: "EXISTENTE",
+        id: "b",
+        motivos: [MOTIVO_SEM_IDENTIDADE],
+      });
+    }
+  });
+
+  it("LLM escolheu um fechado mas há aberto por identidade → o aberto + revisar (não reabre)", () => {
+    const r = resolverAlvo({
+      alvoResposta: null,
+      escolhaLlm: "fechado",
+      candidatas: [c("fechado", { terminal: true, tocadaEm: T(9) }), c("aberto", { tocadaEm: T(1) })],
+    });
+    expect(r).toEqual({ tipo: "EXISTENTE", id: "aberto", motivos: [MOTIVO_FECHADO_COM_ABERTO] });
   });
 
   it("id fora da lista é ignorado (nunca confiar) e cai nas regras, marcando revisar", () => {

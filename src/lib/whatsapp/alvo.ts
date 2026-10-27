@@ -6,7 +6,10 @@
  * Ordem:
  * 1. Reply a uma confirmação do bot → o card dela, sem a LLM decidir.
  * 2. `oportunidade_id` da LLM, SÓ se estiver na lista de candidatas que foi
- *    enviada no contexto. Fora dela é ignorado (e marca revisar).
+ *    enviada no contexto. Fora dela é ignorado (e marca revisar). Escolha
+ *    sem identidade exata (só `recente`/`dominio`) vale, mas sempre com
+ *    revisar. Escolha de card fechado quando há um aberto por identidade →
+ *    o aberto + revisar (a LLM não decide reabrir).
  * 3. Regras sobre as candidatas por identidade exata (mesmo contato por
  *    telefone/email, mesma empresa por CNPJ):
  *    - 1 aberta → ela;
@@ -26,6 +29,8 @@ export type Alvo = { tipo: "EXISTENTE"; id: string; motivos: string[] } | { tipo
 export const MOTIVO_VARIOS_ABERTOS = "mais de um card aberto para esse contato/empresa";
 export const MOTIVO_REABERTO = "card anterior estava fechado (ganho/perdido); abri um novo";
 export const MOTIVO_ID_INVALIDO = "card indicado pela leitura não confere com o CRM";
+export const MOTIVO_SEM_IDENTIDADE = "card deduzido pela conversa recente, sem telefone/email/CNPJ que confirme";
+export const MOTIVO_FECHADO_COM_ABERTO = "leitura apontou um card fechado, mas há um aberto desse contato/empresa";
 
 const porIdentidade = (c: Candidata) => c.via.includes("contato") || c.via.includes("empresa");
 const maisRecente = (a: Candidata, b: Candidata) => b.tocadaEm.getTime() - a.tocadaEm.getTime() || a.id.localeCompare(b.id);
@@ -44,8 +49,11 @@ export function resolverAlvo(e: { alvoResposta: string | null; escolhaLlm: strin
   if (e.escolhaLlm) {
     const c = porId.get(e.escolhaLlm);
     if (c) {
+      // Fechado com um aberto do mesmo contato/empresa: atualiza o aberto, nunca reabre outro.
+      if (c.terminal && abertasIdentidade.length > 0) return { tipo: "EXISTENTE", id: abertasIdentidade[0].id, motivos: [MOTIVO_FECHADO_COM_ABERTO] };
+      if (!porIdentidade(c)) return escolhido(c, [MOTIVO_SEM_IDENTIDADE]);
       const outrasAbertas = abertasIdentidade.some((x) => x.id !== c.id);
-      return escolhido(c, outrasAbertas && porIdentidade(c) ? [MOTIVO_VARIOS_ABERTOS] : []);
+      return escolhido(c, outrasAbertas ? [MOTIVO_VARIOS_ABERTOS] : []);
     }
     motivos.push(MOTIVO_ID_INVALIDO);
   }
