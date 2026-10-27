@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { textoCriado, textoFalha, textoPendente } from "./confirmacao";
+import { textoCriado, textoCriadoSemTag, textoFalha, textoPendente } from "./confirmacao";
 
 const BASE = {
   titulo: "Gustavo — Economia Sensata",
@@ -61,5 +61,15 @@ describe("confirmação no grupo", () => {
     );
     expect(textoCriado({ ...BASE, revisar: true, motivosRevisar: ["x"] }, { reprocessada: true })).toMatch(/^⚠️ Reprocessada: Gustavo/u);
     expect(textoPendente("SEM_NOME", { reprocessada: true })).toBe("⚠️ Reprocessada: não identifiquei o lead — responde esta mensagem com o nome");
+  });
+
+  it("sem #crm (GAB-39): ↪️ deixa claro que não houve tag; revisar e reprocessada continuam", () => {
+    expect(textoCriadoSemTag(BASE)).toBe(
+      "↪️ entendi como atualização: Gustavo — Economia Sensata → Primeiro Contato. Resp: João. Próx.: mandar proposta (31/10)",
+    );
+    expect(textoCriadoSemTag({ ...BASE, revisar: true, motivosRevisar: ["x"] })).toMatch(/^↪️ entendi como atualização: Gustavo .*\nMarquei para revisar: x\.$/);
+    expect(textoCriadoSemTag(BASE, { reprocessada: true })).toMatch(/^↪️ Reprocessada: entendi como atualização: Gustavo/);
+    expect(textoCriadoSemTag(BASE)).not.toBe(textoCriado(BASE));
+    expect(textoPendente("SEM_TAG_INCERTO")).toMatch(/^⚠️ .*sem #crm.*fila de revisão/);
   });
 });

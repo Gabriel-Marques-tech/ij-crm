@@ -30,6 +30,9 @@
  * - `processarMensagem` nunca lança (roda dentro de `after()`): erro de
  *   banco ao carregar ou ao gravar a FALHA é registrado com ref e a linha
  *   fica para o GAB-41.
+ * - Mensagem sem `#crm` (`semTag`, GAB-39): `regra-sem-tag.ts` decide antes
+ *   de aplicar (IGNORAR apaga a linha; confiança < `LLM_LIMIAR_SEM_TAG` vira
+ *   pendente) e a confirmação começa com "↪️ entendi como atualização:".
  */
 import { Prisma } from "@prisma/client";
 import { modeloDoProvedorConfigurado, limiarConfianca } from "@/lib/config/env";
@@ -42,14 +45,18 @@ import { VERSAO_EXTRACAO } from "@/lib/llm/prompts/extracao.v1";
 import { ErroDeRegra } from "@/lib/oportunidades/erros";
 import { PIPELINE_VENDAS } from "@/lib/oportunidades/terminal-regras";
 import { aplicarExtracao, type Desfecho } from "./aplicar";
-import { textoCriado, textoFalha, textoPendente } from "./confirmacao";
+import { textoCriado, textoCriadoSemTag, textoFalha, textoPendente } from "./confirmacao";
+import { contarDescartada } from "./contadores";
 import { enviarWhatsApp } from "./enviar";
 import { extrairIdentificadores } from "./identificadores";
+import { regraSemTag } from "./regra-sem-tag";
 
 export type ResultadoProcessamento =
   | { tipo: "IGNORADA" }
   | { tipo: "PROCESSADA"; oportunidadeId: string; confirmacao: string }
   | { tipo: "PENDENTE_REVISAO"; confirmacao: string }
+  /** Sem #crm e a extração disse IGNORAR: linha apagada, só o contador (GAB-39). */
+  | { tipo: "DESCARTADA" }
   | { tipo: "FALHA"; ref: string; codigo: string; confirmacao: string }
   /** Erro inesperado fora do fluxo normal (ex.: banco fora); registrado com ref. */
   | { tipo: "ERRO"; ref: string };
@@ -79,6 +86,7 @@ function carregar(id: string) {
       remetenteUsuarioId: true,
       remetenteUsuario: { select: { nome: true } },
       erro: true,
+      semTag: true,
     },
   });
 }
@@ -244,8 +252,9 @@ async function processar(id: string, opts: { participantJid?: string | null }): 
     return falhar(m, tentativa, e, registroLlm(null, e instanceof ErroLlm ? e.bruto : undefined, e instanceof ErroLlm ? e.uso : undefined), opts.participantJid);
   }
   const llm = registroLlm(r);
+  const semTag = regraSemTag(m.semTag, r.extracao);
 
-  let desfecho: Desfecho;
+  let desfecho: Desfecho | null;
   try {
     desfecho = await db.$transaction(
       async (tx) => {
@@ -255,12 +264,20 @@ async function processar(id: string, opts: { participantJid?: string | null }): 
           UPDATE mensagem_bruta SET atualizado_em = now()
            WHERE id = ${m.id} AND status = 'PROCESSANDO' AND tentativas = ${tentativa}`;
         if (minha !== 1) throw new CercaPerdida();
-        const d = await aplicarExtracao(tx, {
-          mensagem: { id: m.id, texto: m.texto, recebidaEm: m.recebidaEm, remetenteUsuarioId: m.remetenteUsuarioId! },
-          extracao: r.extracao,
-          limiar: limiarConfianca(),
-          registroLlm: llm,
-        });
+        if (semTag === "DESCARTAR") {
+          await tx.mensagemBruta.delete({ where: { id: m.id } });
+          await contarDescartada(tx, m.recebidaEm);
+          return null;
+        }
+        const d: Desfecho =
+          semTag === "INCERTO"
+            ? { tipo: "PENDENTE", motivo: "SEM_TAG_INCERTO" }
+            : await aplicarExtracao(tx, {
+                mensagem: { id: m.id, texto: m.texto, recebidaEm: m.recebidaEm, remetenteUsuarioId: m.remetenteUsuarioId! },
+                extracao: r.extracao,
+                limiar: limiarConfianca(),
+                registroLlm: llm,
+              });
         await tx.mensagemBruta.update({
           where: { id: m.id },
           data: {
@@ -278,12 +295,13 @@ async function processar(id: string, opts: { participantJid?: string | null }): 
     return falhar(m, tentativa, e, llm, opts.participantJid);
   }
 
+  if (desfecho === null) return { tipo: "DESCARTADA" };
   if (desfecho.tipo === "PENDENTE") {
     const confirmacao = textoPendente(desfecho.motivo, { reprocessada });
     await responder(m, confirmacao, null, opts.participantJid);
     return { tipo: "PENDENTE_REVISAO", confirmacao };
   }
-  const confirmacao = textoCriado(desfecho, { reprocessada });
+  const confirmacao = (m.semTag ? textoCriadoSemTag : textoCriado)(desfecho, { reprocessada });
   await responder(m, confirmacao, desfecho.oportunidadeId, opts.participantJid);
   return { tipo: "PROCESSADA", oportunidadeId: desfecho.oportunidadeId, confirmacao };
 }

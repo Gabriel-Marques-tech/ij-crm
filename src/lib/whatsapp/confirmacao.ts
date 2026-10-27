@@ -9,6 +9,9 @@
  *
  * Mensagem que já tinha terminado em ❌ e foi reprocessada (GAB-41) ganha
  * "Reprocessada:" depois do emoji, para o grupo entender a 2ª resposta.
+ *
+ * Mensagem SEM `#crm` que o bot entendeu e aplicou (GAB-39) troca o emoji
+ * por "↪️ entendi como atualização:", para o grupo saber que não houve tag.
  */
 
 export type MotivoPendente =
@@ -17,7 +20,9 @@ export type MotivoPendente =
   | "IGNORAR"
   | "CONTATO_EXCLUIDO"
   | "EMPRESA_EXCLUIDA"
-  | "IDENTIFICADORES_CONFLITANTES";
+  | "IDENTIFICADORES_CONFLITANTES"
+  /** GAB-39: sem #crm e a extração não atingiu `LLM_LIMIAR_SEM_TAG`. */
+  | "SEM_TAG_INCERTO";
 
 export type ResumoCriado = {
   titulo: string;
@@ -38,6 +43,7 @@ const TEXTO_PENDENTE: Record<MotivoPendente, string> = {
   CONTATO_EXCLUIDO: "⚠️ esse telefone/email é de um contato excluído do CRM; ficou na fila de revisão",
   EMPRESA_EXCLUIDA: "⚠️ esse CNPJ é de uma empresa excluída do CRM; ficou na fila de revisão",
   IDENTIFICADORES_CONFLITANTES: "⚠️ os dados da mensagem batem com cadastros diferentes no CRM; ficou na fila de revisão",
+  SEM_TAG_INCERTO: "⚠️ parece atualização de venda (sem #crm), mas não tive certeza; ficou na fila de revisão do CRM",
 };
 
 /** `YYYY-MM-DD` → `DD/MM`. */
@@ -57,6 +63,8 @@ export function linha(s: string, max = MAX_TRECHO): string {
 
 type Opcoes = { reprocessada?: boolean };
 
+export const PREFIXO_SEM_TAG = "↪️ entendi como atualização:";
+
 /** "✅ texto" → "✅ Reprocessada: texto" quando for o caso. */
 function marcar(texto: string, { reprocessada }: Opcoes): string {
   if (!reprocessada) return texto;
@@ -70,6 +78,12 @@ export function textoCriado(r: ResumoCriado, opcoes: Opcoes = {}): string {
   else if (r.proximaAcaoEm) texto += ` Próx.: ${diaMes(r.proximaAcaoEm)}`;
   if (r.revisar) texto += `\nMarquei para revisar: ${linha(r.motivosRevisar[0] ?? "conferir os dados")}.`;
   return marcar(texto, opcoes);
+}
+
+/** Igual a `textoCriado`, mas deixa claro que a mensagem veio sem `#crm` (o "Marquei para revisar" continua). */
+export function textoCriadoSemTag(r: ResumoCriado, opcoes: Opcoes = {}): string {
+  const texto = textoCriado(r);
+  return marcar(`${PREFIXO_SEM_TAG} ${texto.slice(texto.indexOf(" ") + 1)}`, opcoes);
 }
 
 export function textoPendente(motivo: MotivoPendente, opcoes: Opcoes = {}): string {

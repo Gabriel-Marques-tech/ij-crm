@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/lib/db";
 import { dbTeste, limparBanco } from "@/test/db";
 import { fixtureEvolution, GRUPO_FIXTURE, type NomeFixture } from "@/test/fixtures/evolution";
+import { FIXTURES_CLASSIFICACAO } from "@/lib/llm/fixtures/classificacao";
 import { FIXTURES_EXTRACAO } from "@/lib/llm/fixtures/extracao";
 import { semear } from "../../../../../prisma/seed";
 
@@ -308,20 +309,55 @@ describe("POST /api/webhooks/evolution — ingestão", () => {
     expect(erro).not.toContain("Gustavo");
   });
 
-  it("sem tag → nada persistido, InboxEvento marcado e ContadorDescartadas do dia +1", async () => {
+  it("sem tag de vendedor → 200 antes da LLM; classificador (after) descarta: nada persistido, ContadorDescartadas +1", async () => {
     await vendedor();
     const p = fixtureEvolution("texto-grupo");
     (p.data as { message: { conversation: string } }).message.conversation = "bom dia pessoal, alguém viu meu carregador?";
     const r = await postar(p);
-    expect(r.json).toMatchObject({ ok: true, descartada: true });
+    expect(r.json).toEqual({ ok: true, emAvaliacao: true });
+    expect(await contagens()).toMatchObject({ inbox: 1, brutas: 0, descartadas: 0 });
+    await aguardarDepois();
     expect(await contagens()).toMatchObject({ inbox: 1, brutas: 0, enviadas: 0, desconhecidos: 0, descartadas: 1 });
+    expect(logs(console.info)).not.toContain("carregador");
 
     // Segunda mensagem sem tag no mesmo dia soma no mesmo registro.
     (p.data as { key: { id: string } }).key.id = "3EB0A1B2C3D4E5F6ZZZZ";
     await postar(p);
+    await aguardarDepois();
     const linhas = await dbT.contadorDescartadas.findMany();
     expect(linhas).toHaveLength(1);
     expect(linhas[0].total).toBe(2);
+
+    // Retry da Evolution do mesmo evento: DUPLICADO, sem nova classificação.
+    const retry = await postar(p);
+    expect(retry.json).toEqual({ ok: true, duplicado: true });
+    await aguardarDepois();
+    expect((await dbT.contadorDescartadas.findFirstOrThrow()).total).toBe(2);
+  });
+
+  it("sem tag e ruído óbvio (só emoji / curto) → descartada já na ingestão, sem LLM", async () => {
+    await vendedor();
+    const p = fixtureEvolution("texto-grupo");
+    (p.data as { message: { conversation: string } }).message.conversation = "👍👍👍";
+    const r = await postar(p);
+    expect(r.json).toMatchObject({ ok: true, descartada: true });
+    expect(await contagens()).toMatchObject({ inbox: 1, brutas: 0, descartadas: 1 });
+    expect(logs(console.info)).not.toContain("[llm] classificacao");
+  });
+
+  it("sem tag e relevante (fixture do classificador) → MensagemBruta semTag + processamento no after()", async () => {
+    await vendedor();
+    const p = fixtureEvolution("texto-grupo");
+    const texto = FIXTURES_CLASSIFICACAO.find((f) => f.saida.relevante)!.texto;
+    (p.data as { message: { conversation: string } }).message.conversation = texto;
+    const r = await postar(p);
+    expect(r.json).toEqual({ ok: true, emAvaliacao: true });
+    await aguardarDepois();
+    const brutas = await dbT.mensagemBruta.findMany();
+    expect(brutas).toHaveLength(1);
+    // Mock da extração sem fixture para este texto → confiança 0 → pendente, sem card.
+    expect(brutas[0]).toMatchObject({ semTag: true, status: "PENDENTE_REVISAO", texto });
+    expect(await contagens()).toMatchObject({ descartadas: 0 });
   });
 
   it("sem tag de número DESCONHECIDO → só o contador; nem a identidade é registrada", async () => {
