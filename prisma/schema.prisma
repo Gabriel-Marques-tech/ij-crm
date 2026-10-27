@@ -317,6 +317,7 @@ model TransicaoFase {
 
   @@index([oportunidadeId, em])
   @@index([usuarioId])
+  @@index([em]) // ranking por período (GAB-44)
   @@map("transicao_fase")
 }
 
@@ -335,6 +336,7 @@ model Timeline {
 
   @@index([oportunidadeId, em])
   @@index([mensagemBrutaId])
+  @@index([tipo, em]) // ranking: ações feitas por período (GAB-44)
   @@map("timeline")
 }
 

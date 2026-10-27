@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CONFIG_RANKING_PADRAO, type ConfigRanking } from "./config";
-import { acoesQueContam, avancosQueContam, calcularRanking, montarFeed, pontosDoGanho, type DadosRanking, type Transicao } from "./calculo";
+import { acoesQueContam, avancosQueContam, calcularRanking, cobreJanelaFeed, montarFeed, pontosDoGanho, type DadosRanking, type Transicao } from "./calculo";
 import { resolverPeriodo } from "./periodo";
 
 const sp = (iso: string) => new Date(`${iso}-03:00`);
@@ -150,9 +150,9 @@ describe("calcularRanking — pontuação e desempate", () => {
   it("soma por categoria com detalhamento; fora do período e de não participantes não entra", () => {
     const d = vazio();
     d.ganhos.push(
-      { oportunidadeId: "g1", titulo: "Padaria", responsavelId: "ana", dataGanho: sp("2026-10-20T10:00:00"), valorFechado: 12_500, criadoEm: sp("2026-10-10T10:00:00") },
-      { oportunidadeId: "g2", titulo: "Fora", responsavelId: "ana", dataGanho: sp("2026-10-26T00:00:00"), valorFechado: 1_000, criadoEm: sp("2026-10-10T10:00:00") },
-      { oportunidadeId: "g3", titulo: "Inativo", responsavelId: "ivo", dataGanho: sp("2026-10-20T10:00:00"), valorFechado: 1_000, criadoEm: sp("2026-10-10T10:00:00") },
+      { oportunidadeId: "g1", titulo: "Padaria", responsavelId: "ana", dataGanho: sp("2026-10-20T10:00:00"), valorFechado: 12_500, criadoEm: sp("2026-10-10T10:00:00"), origem: "UI" },
+      { oportunidadeId: "g2", titulo: "Fora", responsavelId: "ana", dataGanho: sp("2026-10-26T00:00:00"), valorFechado: 1_000, criadoEm: sp("2026-10-10T10:00:00"), origem: "UI" },
+      { oportunidadeId: "g3", titulo: "Inativo", responsavelId: "ivo", dataGanho: sp("2026-10-20T10:00:00"), valorFechado: 1_000, criadoEm: sp("2026-10-10T10:00:00"), origem: "UI" },
     );
     d.transicoes.push(tr("1", A, null, sp("2026-10-19T08:00:00")), tr("1", B, 0, sp("2026-10-19T09:00:00")));
     d.acoes.push({ oportunidadeId: "1", usuarioId: "ana", em: sp("2026-10-21T09:00:00") });
@@ -177,6 +177,7 @@ describe("calcularRanking — pontuação e desempate", () => {
       dataGanho: sp(`${dia}T10:00:00`),
       valorFechado: valor,
       criadoEm: sp("2026-10-01T10:00:00"),
+      origem: "UI" as const,
     });
     const cfg: ConfigRanking = { ...CFG, pesos: { ...P, bonusPorMil: 0, cardCriado: 100 } };
 
@@ -206,14 +207,14 @@ describe("calcularRanking — métricas e destaques", () => {
     const d = vazio();
     const g = (id: string, resp: string, valor: number | null, diasAteGanho: number) => {
       const dataGanho = sp("2026-10-21T10:00:00");
-      return { oportunidadeId: id, titulo: `T ${id}`, responsavelId: resp, dataGanho, valorFechado: valor, criadoEm: new Date(dataGanho.getTime() - diasAteGanho * 86_400_000) };
+      return { oportunidadeId: id, titulo: `T ${id}`, responsavelId: resp, dataGanho, valorFechado: valor, criadoEm: new Date(dataGanho.getTime() - diasAteGanho * 86_400_000), origem: "UI" as const };
     };
     d.ganhos.push(g("a1", "ana", 10_000, 10), g("a2", "ana", 30_000, 20), g("a3", "ana", null, 30), g("b1", "bia", 30_000, 4));
     d.perdas.push(
-      { oportunidadeId: "p1", responsavelId: "ana", em: sp("2026-10-20T10:00:00") },
-      { oportunidadeId: "p2", responsavelId: "bia", em: sp("2026-10-20T10:00:00") },
-      { oportunidadeId: "p3", responsavelId: "bia", em: sp("2026-10-20T10:00:00") },
-      { oportunidadeId: "p4", responsavelId: "bia", em: sp("2026-10-27T10:00:00") }, // fora
+      { oportunidadeId: "p1", responsavelId: "ana", em: sp("2026-10-20T10:00:00"), origem: "UI" },
+      { oportunidadeId: "p2", responsavelId: "bia", em: sp("2026-10-20T10:00:00"), origem: "UI" },
+      { oportunidadeId: "p3", responsavelId: "bia", em: sp("2026-10-20T10:00:00"), origem: "UI" },
+      { oportunidadeId: "p4", responsavelId: "bia", em: sp("2026-10-27T10:00:00"), origem: "UI" }, // fora
     );
     d.abertos.push({ responsavelId: "ana", quantidade: 4, orcamento: 12_000.5 }, { responsavelId: "caio", quantidade: 2, orcamento: 0 });
     return d;
@@ -281,8 +282,8 @@ describe("montarFeed", () => {
     const agora = sp("2026-10-26T12:00:00");
     const d = vazio();
     d.ganhos.push(
-      { oportunidadeId: "g1", titulo: "Padaria", responsavelId: "ana", dataGanho: sp("2026-10-25T10:00:00"), valorFechado: 5_000, criadoEm: sp("2026-10-01T10:00:00") },
-      { oportunidadeId: "g2", titulo: "Velho", responsavelId: "ana", dataGanho: sp("2026-10-19T11:00:00"), valorFechado: 5_000, criadoEm: sp("2026-10-01T10:00:00") },
+      { oportunidadeId: "g1", titulo: "Padaria", responsavelId: "ana", dataGanho: sp("2026-10-25T10:00:00"), valorFechado: 5_000, criadoEm: sp("2026-10-01T10:00:00"), origem: "UI" },
+      { oportunidadeId: "g2", titulo: "Velho", responsavelId: "ana", dataGanho: sp("2026-10-19T11:00:00"), valorFechado: 5_000, criadoEm: sp("2026-10-01T10:00:00"), origem: "UI" },
     );
     d.transicoes.push(tr("1", A, null, sp("2026-10-01T08:00:00")), tr("1", B, 0, sp("2026-10-24T09:00:00"), { usuarioId: "bia" }), tr("2", B, 0, sp("2026-10-24T09:00:00"), { usuarioId: "ivo" }));
     const f = montarFeed([ana, bia], d, agora);
@@ -290,5 +291,88 @@ describe("montarFeed", () => {
       ["GANHO", "g1", "ana"],
       ["AVANCO", "1", "bia"],
     ]);
+  });
+});
+
+describe("review: só origens UI/WhatsApp pontuam", () => {
+  const ganho = (id: string, origem: Transicao["origem"] | null) => ({
+    oportunidadeId: id,
+    titulo: id,
+    responsavelId: "ana",
+    dataGanho: sp("2026-10-20T10:00:00"),
+    valorFechado: null,
+    criadoEm: sp("2026-10-10T10:00:00"),
+    origem,
+  });
+
+  it("avanço por SISTEMA (fase arquivada/removida) ou IMPORT não pontua; WHATSAPP pontua", () => {
+    const t = [
+      tr("1", A, null, sp("2026-10-01T10:00:00")),
+      tr("1", B, 0, sp("2026-10-20T10:00:00"), { origem: "SISTEMA" }),
+      tr("2", A, null, sp("2026-10-01T10:00:00")),
+      tr("2", B, 0, sp("2026-10-20T10:00:00"), { origem: "WHATSAPP" }),
+      tr("3", B, 0, sp("2026-10-20T10:00:00"), { origem: "IMPORT" }),
+    ];
+    expect(avancosQueContam(t, SEMANA).map((x) => x.oportunidadeId)).toEqual(["2"]);
+  });
+
+  it("ganho importado, de sistema ou sem transição de entrada não conta (nem no feed); UI e WhatsApp contam", () => {
+    const d = vazio();
+    d.ganhos.push(ganho("ui", "UI"), ganho("wa", "WHATSAPP"), ganho("imp", "IMPORT"), ganho("sis", "SISTEMA"), ganho("sem", null));
+    const r = calcularRanking([ana], d, SEMANA, CFG);
+    expect(r.linhas[0].ganhos).toBe(2);
+    expect(r.time.ganhos).toBe(2);
+    expect(montarFeed([ana], d, sp("2026-10-21T10:00:00")).map((i) => i.oportunidadeId).sort()).toEqual(["ui", "wa"]);
+  });
+
+  it("perda por SISTEMA/IMPORT não é perda no ranking (conversão)", () => {
+    const d = vazio();
+    d.perdas.push(
+      { oportunidadeId: "p1", responsavelId: "ana", em: sp("2026-10-20T10:00:00"), origem: "UI" },
+      { oportunidadeId: "p2", responsavelId: "ana", em: sp("2026-10-20T10:00:00"), origem: "SISTEMA" },
+      { oportunidadeId: "p3", responsavelId: "ana", em: sp("2026-10-20T10:00:00"), origem: "IMPORT" },
+    );
+    expect(calcularRanking([ana], d, SEMANA, CFG).linhas[0].perdidos).toBe(1);
+  });
+});
+
+describe("review: feed filtrado por usuário antes do limite", () => {
+  it("40 itens mais novos de outros não escondem os do próprio vendedor", () => {
+    const d = vazio();
+    d.ganhos.push({ oportunidadeId: "meu", titulo: "Meu", responsavelId: "ana", dataGanho: sp("2026-10-20T08:00:00"), valorFechado: null, criadoEm: sp("2026-10-01T10:00:00"), origem: "UI" });
+    for (let i = 0; i < 40; i++) {
+      d.ganhos.push({ oportunidadeId: `b${i}`, titulo: `B${i}`, responsavelId: "bia", dataGanho: sp(`2026-10-21T${String(10 + (i % 10)).padStart(2, "0")}:${String(i).padStart(2, "0")}:00`), valorFechado: null, criadoEm: sp("2026-10-01T10:00:00"), origem: "UI" });
+    }
+    const agora = sp("2026-10-22T10:00:00");
+    expect(montarFeed([ana, bia], d, agora).some((i) => i.oportunidadeId === "meu")).toBe(false);
+    expect(montarFeed([ana, bia], d, agora, { apenas: "ana" }).map((i) => i.oportunidadeId)).toEqual(["meu"]);
+  });
+});
+
+describe("review: usuário desativado sai da lista mas conta no Time", () => {
+  it("ganho e valor do inativo entram só na linha Time", () => {
+    const d = vazio();
+    d.ganhos.push(
+      { oportunidadeId: "a", titulo: "A", responsavelId: "ana", dataGanho: sp("2026-10-20T10:00:00"), valorFechado: 1_000, criadoEm: sp("2026-10-10T10:00:00"), origem: "UI" },
+      { oportunidadeId: "i", titulo: "I", responsavelId: "ivo", dataGanho: sp("2026-10-20T10:00:00"), valorFechado: 50_000, criadoEm: sp("2026-10-10T10:00:00"), origem: "UI" },
+      { oportunidadeId: "x", titulo: "X", responsavelId: "estranho", dataGanho: sp("2026-10-20T10:00:00"), valorFechado: 9_000, criadoEm: sp("2026-10-10T10:00:00"), origem: "UI" },
+    );
+    const r = calcularRanking([ana], d, SEMANA, CFG, { soNoTime: ["ivo"] });
+    expect(r.linhas.map((l) => l.usuario.id)).toEqual(["ana"]);
+    expect(r.time.ganhos).toBe(2);
+    expect(r.time.fechado).toBe(51_000);
+    const d2 = Object.fromEntries(r.destaques.map((x) => [x.chave, x]));
+    expect(d2.maiorTicket.vencedores.map((v) => v.usuario.id)).toEqual(["ana"]);
+    expect(d2.maiorTicket.valor).toBe(1_000);
+  });
+});
+
+describe("review: feed reaproveita o agregado do período quando ele cobre os 7 dias", () => {
+  it("cobreJanelaFeed", () => {
+    const agora = sp("2026-10-26T12:00:00");
+    expect(cobreJanelaFeed(resolverPeriodo("mes", undefined, sp("2026-10-26T12:00:00")), agora)).toBe(true);
+    expect(cobreJanelaFeed(resolverPeriodo("semana", undefined, agora), agora)).toBe(false);
+    expect(cobreJanelaFeed(resolverPeriodo("mes", "2026-09-10", agora), agora)).toBe(false);
+    expect(cobreJanelaFeed(resolverPeriodo("mes", undefined, sp("2026-11-03T12:00:00")), sp("2026-11-03T12:00:00"))).toBe(false);
   });
 });

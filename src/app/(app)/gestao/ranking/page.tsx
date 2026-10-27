@@ -24,7 +24,11 @@ export default async function GestaoRankingPage() {
     <>
       <PageHeader eyebrow="gestão · ranking" title="Ranking" description="Pesos da pontuação, mínimos dos destaques e quem vê o ranking. Tudo é recalculado na leitura: mudar um peso vale para todos os períodos." />
       <div className="max-w-3xl space-y-4">
-        {c.atualizadoEm ? (
+        {c.invalido ? (
+          <p role="alert" className="font-mono text-xs text-warn">
+            valor salvo inválido — usando o padrão. Salve para corrigir.
+          </p>
+        ) : c.atualizadoEm ? (
           <p className="font-mono text-xs text-fg-mute">
             alterado em {formatarDataHora(c.atualizadoEm)}
             {autor ? ` por ${autor}` : ""}
@@ -32,7 +36,7 @@ export default async function GestaoRankingPage() {
         ) : (
           <p className="font-mono text-xs text-fg-mute">usando os valores padrão</p>
         )}
-        <ConfigRankingForm atual={c.valor} />
+        <ConfigRankingForm atual={c.valor} versao={c.atualizadoEm?.getTime() ?? null} />
       </div>
     </>
   );

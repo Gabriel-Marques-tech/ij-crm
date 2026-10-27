@@ -3,18 +3,25 @@
  * histórico (nada de pontos gravados: mudar um peso recalcula tudo na hora).
  *
  * Regras de pontuação e atribuição:
- * - Ganho: card de Vendas que ESTÁ numa fase de ganho e tem `data_ganho` no
- *   período → para o RESPONSÁVEL do card. Reaberto não conta (olha o estado
+ * Só contam movimentos feitos por gente: origem `UI` ou `WHATSAPP`
+ * (`ORIGENS_QUE_PONTUAM`). `SISTEMA` (fase arquivada/removida) e `IMPORT` não
+ * pontuam nem contam como ganho/perda.
+ *
+ * - Ganho: card de Vendas que ESTÁ numa fase de ganho, entrou nela (vindo de
+ *   fora do ganho) por UI/WhatsApp e tem `data_ganho` no período → para o
+ *   RESPONSÁVEL do card. Reaberto não conta (olha o estado
  *   atual); re-ganho conta pela nova `data_ganho`. Pontos = `ganho` +
  *   `bonusPorMil` a cada R$ 1.000 completos de `valor_fechado`, bônus até `tetoBonus`.
  * - Avanço de fase: TransicaoFase em Vendas para fase NÃO terminal de ordem
  *   maior que a de origem, e só se for a PRIMEIRA entrada do card naquela fase
- *   (a criação conta como entrada) → para quem moveu (`usuario_id`). Import não pontua.
+ *   (a criação conta como entrada) → para quem moveu (`usuario_id`).
  * - Próxima ação feita ("Marcar feita") → para quem marcou; no máximo
  *   `acoesPorDia` (padrão 4) por VENDEDOR por dia civil de SP (as primeiras do
  *   dia), em qualquer card — o mesmo card pode contar mais de uma vez.
  * - Card criado em Vendas (UI/WhatsApp) → para quem criou.
- * - Perdido: 0 ponto (entra só em conversão).
+ * - Perdido: 0 ponto (entra só em conversão), datado pela entrada no perdido.
+ * Usuário desativado sai da lista, das posições e dos destaques, mas o que fez
+ * continua na linha "Time" (é história do time): `soNoTime`.
  * Desempate: mais ganhos → maior R$ fechado → quem chegou primeiro à pontuação
  * final (instante do último evento que pontuou) → nome.
  */
@@ -27,8 +34,21 @@ export type Intervalo = { inicio: Date; fim: Date };
 
 export type Participante = { id: string; nome: string; fotoEm: number | null };
 
-export type Ganho = { oportunidadeId: string; titulo: string; responsavelId: string; dataGanho: Date; valorFechado: number | null; criadoEm: Date };
-export type Perda = { oportunidadeId: string; responsavelId: string; em: Date };
+/** `origem`: da transição que levou o card ao ganho/perda (null = sem histórico). */
+export type Ganho = {
+  oportunidadeId: string;
+  titulo: string;
+  responsavelId: string;
+  dataGanho: Date;
+  valorFechado: number | null;
+  criadoEm: Date;
+  origem: OrigemTransicao | null;
+};
+export type Perda = { oportunidadeId: string; responsavelId: string; em: Date; origem: OrigemTransicao | null };
+
+/** Movimentos feitos por gente. SISTEMA (migração de fase) e IMPORT ficam de fora. */
+export const ORIGENS_QUE_PONTUAM: ReadonlySet<OrigemTransicao> = new Set<OrigemTransicao>(["UI", "WHATSAPP"]);
+const porGente = (o: OrigemTransicao | null) => o !== null && ORIGENS_QUE_PONTUAM.has(o);
 export type Transicao = {
   id: string;
   oportunidadeId: string;
@@ -125,7 +145,7 @@ export function avancosQueContam(transicoes: Transicao[], intervalo: Intervalo):
     vistas.add(chave);
     if (!dentroDoPeriodo(t.em, intervalo)) continue;
     if (t.deOrdem === null || t.paraTerminal || t.paraOrdem <= t.deOrdem) continue;
-    if (t.origem === "IMPORT" || !t.usuarioId) continue;
+    if (!porGente(t.origem) || !t.usuarioId) continue;
     contam.push(t);
   }
   return contam;
@@ -194,15 +214,28 @@ function fechar(a: Acumulador): Metricas {
   };
 }
 
-export function calcularRanking(participantes: Participante[], dados: DadosRanking, periodo: Intervalo, config: ConfigRanking): Ranking {
+export function calcularRanking(
+  participantes: Participante[],
+  dados: DadosRanking,
+  periodo: Intervalo,
+  config: ConfigRanking,
+  opts: { soNoTime?: Iterable<string> } = {},
+): Ranking {
   const { pesos } = config;
   const acc = new Map(participantes.map((p) => [p.id, novo()]));
+  const soNoTime = new Set(opts.soNoTime ?? []);
   const time = novo();
-  const de = (id: string | null) => (id ? acc.get(id) : undefined);
+  /** Acumuladores que recebem o evento: participante → ele + Time; desativado → só Time. */
+  const alvos = (id: string | null): Acumulador[] => {
+    if (!id) return [];
+    const a = acc.get(id);
+    if (a) return [a, time];
+    return soNoTime.has(id) ? [time] : [];
+  };
 
-  const ganhosNoPeriodo = dados.ganhos.filter((g) => acc.has(g.responsavelId) && dentroDoPeriodo(g.dataGanho, periodo));
+  const ganhosNoPeriodo = dados.ganhos.filter((g) => porGente(g.origem) && dentroDoPeriodo(g.dataGanho, periodo));
   for (const g of ganhosNoPeriodo) {
-    for (const a of [acc.get(g.responsavelId)!, time]) {
+    for (const a of alvos(g.responsavelId)) {
       a.ganhos += 1;
       if (g.valorFechado !== null) {
         a.fechado += g.valorFechado;
@@ -213,39 +246,30 @@ export function calcularRanking(participantes: Participante[], dados: DadosRanki
     }
   }
   for (const p of dados.perdas) {
-    const a = de(p.responsavelId);
-    if (!a || !dentroDoPeriodo(p.em, periodo)) continue;
-    a.perdidos += 1;
-    time.perdidos += 1;
+    if (!porGente(p.origem) || !dentroDoPeriodo(p.em, periodo)) continue;
+    for (const a of alvos(p.responsavelId)) a.perdidos += 1;
   }
   for (const t of avancosQueContam(dados.transicoes, periodo)) {
-    const a = de(t.usuarioId);
-    if (!a) continue;
-    for (const x of [a, time]) {
+    for (const x of alvos(t.usuarioId)) {
       x.avancos += 1;
       pontuar(x, "avanco", pesos.avanco, t.em);
     }
   }
   for (const f of acoesQueContam(dados.acoes, periodo, pesos.acoesPorDia)) {
-    const a = de(f.usuarioId);
-    if (!a) continue;
-    for (const x of [a, time]) {
+    for (const x of alvos(f.usuarioId)) {
       x.acoesFeitas += 1;
       pontuar(x, "acaoFeita", pesos.acaoFeita, f.em);
     }
   }
   for (const c of dados.criacoes) {
-    const a = de(c.usuarioId);
-    if (!a || !dentroDoPeriodo(c.em, periodo)) continue;
-    for (const x of [a, time]) {
+    if (!dentroDoPeriodo(c.em, periodo)) continue;
+    for (const x of alvos(c.usuarioId)) {
       x.cardsCriados += 1;
       pontuar(x, "cardCriado", pesos.cardCriado, c.em);
     }
   }
   for (const ab of dados.abertos) {
-    const a = de(ab.responsavelId);
-    if (!a) continue;
-    for (const x of [a, time]) {
+    for (const x of alvos(ab.responsavelId)) {
       x.abertos += ab.quantidade;
       x.emAberto += ab.orcamento;
     }
@@ -266,7 +290,7 @@ export function calcularRanking(participantes: Participante[], dados: DadosRanki
     );
   linhas.forEach((l, i) => (l.posicao = i + 1));
 
-  return { linhas, time: fechar(time), destaques: calcularDestaques(linhas, ganhosNoPeriodo, config) };
+  return { linhas, time: fechar(time), destaques: calcularDestaques(linhas, ganhosNoPeriodo.filter((g) => acc.has(g.responsavelId)), config) };
 }
 
 /** Todos os empatados no melhor valor (maior, ou menor com `menor`); valores null/≤0 não concorrem. */
@@ -329,14 +353,29 @@ export type ItemFeed = {
 
 export const DIAS_FEED = 7;
 
-/** Feed "últimos 7 dias": ganhos e avanços que pontuam, de participantes, mais recentes primeiro. */
-export function montarFeed(participantes: Participante[], dados: DadosRanking, agora: Date, limite = 30): ItemFeed[] {
-  const janela = { inicio: new Date(agora.getTime() - DIAS_FEED * DIA_MS), fim: new Date(agora.getTime() + 1) };
-  const porId = new Map(participantes.map((p) => [p.id, p]));
+export function janelaFeed(agora: Date): Intervalo {
+  return { inicio: new Date(agora.getTime() - DIAS_FEED * DIA_MS), fim: new Date(agora.getTime() + 1) };
+}
+
+/** O agregado do período já traz tudo dos últimos 7 dias? (então o feed não precisa de outra consulta) */
+export function cobreJanelaFeed(periodo: Intervalo, agora: Date): boolean {
+  const j = janelaFeed(agora);
+  return periodo.inicio.getTime() <= j.inicio.getTime() && periodo.fim.getTime() >= j.fim.getTime();
+}
+
+/**
+ * Feed "últimos 7 dias": ganhos e avanços que pontuam, de participantes, mais
+ * recentes primeiro. `apenas` filtra pelo usuário ANTES do limite (ranking
+ * oculto: os itens mais novos dos outros não podem esconder os do vendedor).
+ */
+export function montarFeed(participantes: Participante[], dados: DadosRanking, agora: Date, opts: { limite?: number; apenas?: string } = {}): ItemFeed[] {
+  const { limite = 30, apenas } = opts;
+  const janela = janelaFeed(agora);
+  const porId = new Map(participantes.filter((p) => !apenas || p.id === apenas).map((p) => [p.id, p]));
   const itens: ItemFeed[] = [];
   for (const g of dados.ganhos) {
     const u = porId.get(g.responsavelId);
-    if (u && dentroDoPeriodo(g.dataGanho, janela)) itens.push({ tipo: "GANHO", em: g.dataGanho, oportunidadeId: g.oportunidadeId, titulo: g.titulo, usuario: u });
+    if (u && porGente(g.origem) && dentroDoPeriodo(g.dataGanho, janela)) itens.push({ tipo: "GANHO", em: g.dataGanho, oportunidadeId: g.oportunidadeId, titulo: g.titulo, usuario: u });
   }
   for (const t of avancosQueContam(dados.transicoes, janela)) {
     const u = t.usuarioId ? porId.get(t.usuarioId) : undefined;

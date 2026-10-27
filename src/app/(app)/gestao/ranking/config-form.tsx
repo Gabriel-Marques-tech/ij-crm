@@ -26,13 +26,34 @@ function valoresDe(c: ConfigRanking): Record<string, string> {
   return Object.fromEntries(CAMPOS.map((f) => [f.nome, String((c[f.grupo] as Record<string, number>)[f.nome])]));
 }
 
-export function ConfigRankingForm({ atual }: { atual: ConfigRanking }) {
+/**
+ * `versao` = `atualizado_em` (ms) da config carregada; vai junto no submit para
+ * a gravação condicional. Os campos remontam quando a versão muda (salvou aqui
+ * ou em outra aba e a página revalidou): nunca mostram valores velhos.
+ */
+export function ConfigRankingForm({ atual, versao }: { atual: ConfigRanking; versao: number | null }) {
   const [estado, action, pendente] = useActionState(salvarConfigRankingAction, undefined);
+  return (
+    <form action={action} className="space-y-6">
+      <input type="hidden" name="versao" value={versao ?? ""} />
+      <Campos key={versao ?? "padrao"} atual={atual} pendente={pendente} />
+      {estado?.erro ? (
+        <p role="alert" className="text-sm text-danger">
+          {estado.erro}
+        </p>
+      ) : null}
+      {estado?.ok ? <p className="text-sm text-success">Salvo. O ranking já usa os novos valores.</p> : null}
+      <p className="text-xs text-fg-faint">&quot;Restaurar padrão&quot; preenche os pesos e mínimos padrão; nada muda até salvar. A visibilidade não é alterada.</p>
+    </form>
+  );
+}
+
+function Campos({ atual, pendente }: { atual: ConfigRanking; pendente: boolean }) {
   const [valores, setValores] = useState(() => valoresDe(atual));
   const [mostrar, setMostrar] = useState(atual.mostrarAosVendedores);
 
   return (
-    <form action={action} className="space-y-6">
+    <>
       <section className="rounded-xl border border-border bg-surface p-5">
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -72,12 +93,6 @@ export function ConfigRankingForm({ atual }: { atual: ConfigRanking }) {
         </section>
       ))}
 
-      {estado?.erro ? (
-        <p role="alert" className="text-sm text-danger">
-          {estado.erro}
-        </p>
-      ) : null}
-      {estado?.ok ? <p className="text-sm text-success">Salvo. O ranking já usa os novos valores.</p> : null}
       <div className="flex flex-wrap gap-2">
         <Button type="submit" disabled={pendente}>
           {pendente ? "Salvando…" : "Salvar"}
@@ -86,7 +101,6 @@ export function ConfigRankingForm({ atual }: { atual: ConfigRanking }) {
           Restaurar padrão
         </Button>
       </div>
-      <p className="text-xs text-fg-faint">&quot;Restaurar padrão&quot; preenche os pesos e mínimos padrão; nada muda até salvar. A visibilidade não é alterada.</p>
-    </form>
+    </>
   );
 }
