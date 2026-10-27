@@ -80,6 +80,17 @@ describe("rodarCli", () => {
     expect(await db.oportunidade.count()).toBe(0);
   });
 
+  it("--motivo-perda: chave inválida recusa; válida aplica aos perdidos sem motivo", async () => {
+    await db.usuario.create({ data: { nome: "Admin", email: "admin@ij.test", papel: "ADMIN" } });
+    expect(lerArgs(["a.csv", "--motivo-perda", "preco"])).toMatchObject({ ok: true, args: { motivoPerda: "preco" } });
+    const ruim = io();
+    expect(await rodarCli([ARQ, "--motivo-perda", "caro"], ruim.x, AGORA)).toBe(1);
+    expect(ruim.erros[0]).toMatch(/^Motivo de perda padrão inválido/);
+    const seco = io();
+    expect(await rodarCli([ARQ], seco.x, AGORA)).toBe(0);
+    expect(seco.saida.join("\n")).not.toMatch(/perdidos sem motivo/); // a fixture tem motivo em todos os perdidos
+  });
+
   it("arquivo inexistente → erro legível", async () => {
     const r = io();
     expect(await rodarCli(["/nao/existe.csv"], r.x, AGORA)).toBe(1);
