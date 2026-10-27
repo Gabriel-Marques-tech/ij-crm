@@ -24,6 +24,8 @@
 set -euo pipefail
 # shellcheck source=scripts/_comum.sh
 source "$(dirname "${BASH_SOURCE[0]}")/_comum.sh"
+# shellcheck source=scripts/_llm.sh
+source "$(dirname "${BASH_SOURCE[0]}")/_llm.sh"
 
 HISTORICO="$RAIZ/.deploy/historico"
 IMAGENS_MANTER="${IMAGENS_MANTER:-5}"
@@ -62,6 +64,7 @@ checar_env() {
   for v in APP_DOMAIN ACME_EMAIL; do
     [[ -n "$(ler_env "$v")" ]] || { log "ERRO: $v vazio" >&2; erros=1; }
   done
+  checar_chave_llm "$(ler_env LLM_PROVEDOR)" "$(ler_env OPENAI_API_KEY)" "$(ler_env ANTHROPIC_API_KEY)" || erros=1
   [[ $erros -eq 0 ]] || falhar "corrija o .env (modelo: .env.prod.example)"
   resolver_imagens
   if [[ "$(ler_env NOTIFICATIONS_ENABLED)" == "true" ]]; then

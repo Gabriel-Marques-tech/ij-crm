@@ -40,9 +40,12 @@ export function descreverErro(e: unknown): string {
   return `lançado valor não-Error (${typeof e})`;
 }
 
-/** Loga `[contexto] ref=<ref> <descrição>` e devolve a ref (8 hex). */
-export function registrarErro(contexto: string, e: unknown): string {
-  const ref = crypto.randomUUID().replace(/-/g, "").slice(0, 8);
+/**
+ * Loga `[contexto] ref=<ref> <descrição>` e devolve a ref (8 hex, ou a recebida:
+ * o `digest` do Next, que é o que o error boundary mostra ao usuário).
+ */
+export function registrarErro(contexto: string, e: unknown, refDada?: string): string {
+  const ref = refDada ?? crypto.randomUUID().replace(/-/g, "").slice(0, 8);
   console.error(`[${contexto}] ref=${ref} ${descreverErro(e)}`);
   return ref;
 }

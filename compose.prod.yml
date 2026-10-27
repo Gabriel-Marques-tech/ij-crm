@@ -14,7 +14,7 @@
 # Memória (máquina pequena, ≤ 15 usuários): todo serviço tem `mem_limit` e os
 # processos são dimensionados para caber nele (heap do Node, buffers do Postgres,
 # maxmemory do Redis). Valores por variável com padrão para uma VPS de ~2 GB;
-# medição e instância mínima no runbook §10. Para mudar, defina no .env.
+# medição e instância mínima no runbook §11. Para mudar, defina no .env.
 #
 # Redes (alcance mínimo; `internal` = sem saída para a internet):
 #   edge            caddy, app            — Caddy → app; saída do app (API da Anthropic)
@@ -101,8 +101,10 @@ services:
       # Safe mode: só "true" libera envio real. Só o .env da VPS define true.
       NOTIFICATIONS_ENABLED: ${NOTIFICATIONS_ENABLED:-false}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      LLM_EXTRACAO_MODELO: ${LLM_EXTRACAO_MODELO:-claude-haiku-5-5}
-      LLM_PROVEDOR: ${LLM_PROVEDOR:-anthropic}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # Vazio = padrão do provedor (gpt-6.1-sol / claude-haiku-5-5).
+      LLM_EXTRACAO_MODELO: ${LLM_EXTRACAO_MODELO:-}
+      LLM_PROVEDOR: ${LLM_PROVEDOR:-openai}
       LLM_LIMIAR_CONFIANCA: ${LLM_LIMIAR_CONFIANCA:-0.7}
       LLM_CLASSIFICACAO_MODELO: ${LLM_CLASSIFICACAO_MODELO:-claude-haiku-5-5}
       # Único controle de acesso a /api/cron/* (header x-cron-secret, GAB-41).

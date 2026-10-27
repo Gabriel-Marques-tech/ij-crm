@@ -40,13 +40,18 @@ alcança `db` e `evolution`; a Evolution alcança `evolution-db`,
 - [ ] Crontab instalado (`crontab -l`), primeiro backup do cron no log.
 - [ ] Teste de restore feito uma vez na VPS (§3).
 - [ ] Número dedicado pareado (§5), webhook configurado, `GRUPO_JID` preenchido.
+- [ ] Conta da OpenAI com crédito pré-pago, **auto-reload desligado** e
+      `OPENAI_API_KEY` no `.env` (§10). O `deploy.sh` recusa se o provedor
+      selecionado em `LLM_PROVEDOR` (padrão `openai`) estiver sem chave.
+- [ ] Aviso de privacidade da IJ menciona a transferência internacional do
+      texto das mensagens `#crm` ao provedor de LLM (§10, "LGPD").
 - [ ] `NOTIFICATIONS_ENABLED=true` no `.env` da VPS **por último**, e `scripts/deploy.sh`.
 
 ## 0. Primeira instalação (VPS limpa)
 
 Pré-requisitos: Linux com Docker Engine + plugin compose v2, `git`, `curl`,
 `flock` (util-linux), `rclone` (off-site) e de preferência `qrencode` e `jq`;
-usuário de deploy no grupo `docker`. Instância mínima e swap: §10.
+usuário de deploy no grupo `docker`. Instância mínima e swap: §11.
 
 As imagens vêm prontas do GHCR (`ghcr.io/gabriel-marques-tech/ij-crm-app` e
 `…-ops`, buildadas pelo CI): a VPS **não builda**. Se os pacotes forem privados
@@ -111,7 +116,7 @@ O script, na ordem:
 3. confere o ambiente **como o compose resolve** (`docker compose config
    --environment`: `.env` + variáveis do shell): segredos com ≥ 32 caracteres e
    sem `troque-me`, senhas de banco/Redis seguras para URL, domínio e email
-   preenchidos. Erro aborta antes de mexer em algo. Avisa se `NOTIFICATIONS_ENABLED` ≠ `true`;
+   preenchidos, e a chave do provedor de LLM selecionado (§10). Erro aborta antes de mexer em algo. Avisa se `NOTIFICATIONS_ENABLED` ≠ `true`;
 4. `docker pull` das imagens `app` e `ops` da tag. `latest` é resolvida para a
    tag imutável `sha-<commit>` (label `org.opencontainers.image.revision` que o CI
    grava), então histórico e rollback nunca dependem de `latest`. Falha no pull
@@ -380,7 +385,58 @@ cliente e pode ser forjado.
 - Os contadores ficam em memória, com teto de 10 mil chaves por limitador.
   Reiniciar o container zera todos.
 
-## 10. Recursos: limites, medição e instância mínima
+## 10. Provedor de LLM e crédito da OpenAI
+
+Produção usa **OpenAI, GPT-6.1 Sol com raciocínio `low`** (`LLM_PROVEDOR=openai`,
+padrão). A Anthropic (Claude Haiku 5.5) segue como alternativa por env.
+
+**Trocar de provedor** (no `.env` da VPS, depois `scripts/deploy.sh`, que recria o
+app com o env novo):
+
+```bash
+# OpenAI (padrão)
+LLM_PROVEDOR=openai
+OPENAI_API_KEY=sk-...
+LLM_EXTRACAO_MODELO=          # vazio = gpt-6.1-sol
+
+# Anthropic (alternativa)
+LLM_PROVEDOR=anthropic
+ANTHROPIC_API_KEY=sk-ant-...
+LLM_EXTRACAO_MODELO=          # vazio = claude-haiku-5-5 (ou claude-sonnet-5-5)
+```
+
+Troque ou esvazie `LLM_EXTRACAO_MODELO` junto: modelo de um provedor com o outro
+selecionado faz toda mensagem ir para `FALHA` com "PROVEDOR_INVALIDO" (ref no
+grupo e motivo em Gestão → mensagens). Depois da troca, reprocesse as `FALHA` do
+período (o cron do GAB-41 faz isso sozinho).
+
+**Crédito pré-pago, recarga manual** (platform.openai.com → Settings → Billing):
+
+1. Na configuração da conta, **desligue o auto-reload** (auto recharge). A conta
+   fica só com o saldo comprado: nunca cobra o cartão sem alguém decidir.
+2. Compra mínima: **US$ 5**. Créditos **expiram 1 ano** depois da compra —
+   não compre muito adiantado.
+3. Sugestão para o volume da IJ: **US$ 50 a cada ~3 meses**. Confira o uso em
+   Usage e o custo real nos logs (`[llm] extracao ... tokens_in= tokens_out=
+   tokens_reasoning=`).
+4. Crie uma chave de **projeto** só para o CRM (Settings → API keys) e guarde a
+   cópia offline junto com o `.env`.
+
+**Saldo acabou:** a API responde `insufficient_quota` (ou
+`credit_balance_exhausted`), identificado pelo código do erro — nunca pelo texto.
+Cada mensagem `#crm` vai para `FALHA` com "sem crédito na API da OpenAI" + ref
+(sem re-tentar, sem gastar), e o grupo recebe "❌ ... (ref: ...)". Recarregue e as
+mensagens voltam pelo reprocessamento (GAB-41, mantendo `erro`).
+
+**LGPD — transferência internacional.** O texto das mensagens `#crm` vai para a
+API do provedor de LLM, nos EUA (OpenAI; antes, igualmente, Anthropic). Só vai o
+que chega à LLM: mensagens do grupo configurado marcadas com `#crm`, com o
+contexto mínimo (nomes/ids de candidatos e fases). A chamada usa `store: false`
+(a OpenAI não guarda a resposta para consulta) e nenhum log do CRM grava o texto
+da mensagem nem o texto devolvido pela API. O aviso de privacidade da IJ deve
+mencionar essa transferência ao provedor de LLM — decisão jurídica do usuário.
+
+## 11. Recursos: limites, medição e instância mínima
 
 Alvo: ≤ 15 usuários, numa instância pequena que também roda o site da IJ. Todo
 serviço do `compose.prod.yml` tem `mem_limit`, e o processo dentro dele é
