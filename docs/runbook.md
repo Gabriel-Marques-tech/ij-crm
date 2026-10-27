@@ -12,12 +12,12 @@ Do zero ao ar, em ordem. Cada passo aponta para a seção com os comandos
 
 1. **Instância**: EC2 `t3.small` (x86_64, 2 GiB), Ubuntu 24.04 LTS, disco gp3 de
    20–30 GiB e **2 GiB de swap** em arquivo ([§11](#11-recursos-limites-medição-e-instância-mínima)).
-   IP elástico. Security group: 80 e 443 TCP abertos (443 UDP opcional, HTTP/3);
-   22 aberto para `0.0.0.0/0` (e `::/0`) **só com login por chave** — os runners do
-   GitHub Actions não têm IP fixo ([Deploy automático](#deploy-automático-github-actions),
-   "Porta 22"). **Não** abra 8080 nem 3000.
+   IP elástico. Security group: **só** 80 e 443 TCP de entrada (443 UDP opcional,
+   HTTP/3). **Sem porta 22**: acesso de admin pelo Session Manager. **Não** abra
+   8080 nem 3000. Instance profile `ij-crm-ec2-ssm` (`AmazonSSMManagedInstanceCore`)
+   e agente SSM `Online` ([Deploy automático, "Configuração na AWS", passo 4](#deploy-automático-github-actions--aws-ssm)).
 2. **Docker Engine + plugin compose v2** ([§0, "Docker na VPS"](#docker-na-vps)) e o
-   **usuário `deploy`** no grupo `docker` ([Deploy automático, passo 1](#deploy-automático-github-actions)).
+   **usuário `deploy`** no grupo `docker` ([Deploy automático, "Usuário `deploy`"](#deploy-automático-github-actions--aws-ssm)).
 3. **Clonar em `/opt/ij-crm`** (dono: `deploy`) e criar `/var/backups/ij-crm` e
    `/var/log/ij-crm` ([§0](#0-primeira-instalação-vps-limpa)). Daqui em diante tudo
    roda como `deploy`: `sudo -iu deploy`.
@@ -51,11 +51,12 @@ Do zero ao ar, em ordem. Cada passo aponta para a seção com os comandos
     `scripts/backup.sh` mostrando `off-site: rclone copy` e o arquivo listado no
     remote ([§3, "Backup off-site"](#backup-off-site-rclone)). Restore testado uma vez ([§3](#3-restaurar-backup)).
     **Não entrar em produção sem isso.**
-14. **Deploy automático**: chave do GitHub no `authorized_keys` do `deploy` com o
-    comando forçado, host key conferida, environment `producao` com os 4 secrets
-    e um deploy de teste pelo Actions (re-run do último `imagens` da `main`)
-    ([Deploy automático](#deploy-automático-github-actions), passos 2–6).
-    Daí em diante cada merge na `main` vai ao ar sozinho.
+14. **Deploy automático** ([Deploy automático](#deploy-automático-github-actions--aws-ssm)): provedor OIDC, `sub`
+    customizado do repo, role `ij-crm-deploy-gha` com a policy, documento SSM
+    `ij-crm-deploy` testado com `send-command`, environment `producao` (só `main`)
+    com `AWS_DEPLOY_ROLE_ARN`, `AWS_REGION` e `DEPLOY_INSTANCE_ID`, e um deploy de
+    teste pelo Actions (re-run do último `imagens` da `main`). Proteção da `main`
+    conferida. Daí em diante cada merge na `main` vai ao ar sozinho.
 15. **Por último**: `NOTIFICATIONS_ENABLED=true` no `.env` e `scripts/deploy.sh`.
     Mandar um `#crm` de teste e conferir a confirmação no grupo.
 
@@ -67,9 +68,11 @@ alias dc='docker compose -f compose.prod.yml'
 
 | Arquivo | Para quê |
 |---|---|
-| `scripts/deploy.sh` | deploy (`checa → git pull → docker pull da imagem → backup → migrate → up → health`) e `rollback` por tag |
+| `scripts/deploy.sh` | deploy (`checa → git fetch + checkout do commit da tag → docker pull (por digest no automático) → backup → migrate → up → health`) e `rollback` por tag |
 | `.github/workflows/imagens.yml` | CI: builda as imagens `app` e `ops` a cada push na `main`, publica no GHCR e faz o deploy automático na VPS |
-| `scripts/deploy-remoto.sh` | comando forçado da chave SSH do deploy automático: aceita só `sha-<commit>` e roda `deploy.sh` |
+| `scripts/deploy-remoto.sh` | entrada do deploy automático (documento SSM `deploy/ssm-deploy.yaml`): valida tag/digests e commit na `main`, roda `deploy.sh` destacado |
+| `deploy/ssm-deploy.yaml`, `deploy/iam/` | documento SSM e policies IAM do deploy automático |
+| `scripts/checar-migrations.sh` | barra migration nova destrutiva sem `-- destrutiva-ok:` (CI) |
 | `scripts/backup.sh` | `pg_dump` do banco do CRM, retenção de 14 dias, cópia off-site (`BACKUP_REMOTE`) |
 | `scripts/restore.sh` | restaura um dump do CRM (destrutivo, pede confirmação) |
 | `scripts/evolution.sh` | instância do WhatsApp: criar, QR, estado, webhook, grupos, logout |
@@ -90,7 +93,8 @@ Pré-requisitos: Linux x86_64 com Docker Engine + plugin compose **recente**
 ensaiado com Docker 29.8 + Compose 5.6; um compose v2 antigo falha logo no
 `config` do deploy, antes de mexer em algo), `git`, `curl`, `flock` (util-linux), `rclone` (off-site) e de
 preferência `qrencode` e `jq`; usuário `deploy` no grupo `docker`, dono de
-`/opt/ij-crm` (criado no [Deploy automático, passo 1](#deploy-automático-github-actions)).
+`/opt/ij-crm` ([Deploy automático, "Usuário `deploy`"](#deploy-automático-github-actions--aws-ssm)). Acesso pelo
+Session Manager, sem SSH.
 Instância mínima e swap: §11.
 
 ### Docker na VPS
@@ -108,7 +112,7 @@ echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.
   | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
 sudo apt-get update
 sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-sudo usermod -aG docker "$USER"      # depois saia e entre de novo na sessão SSH
+sudo usermod -aG docker "$USER"      # depois saia e entre de novo na sessão
 sudo apt-get install -y git util-linux qrencode jq rclone
 docker compose version
 ```
@@ -137,7 +141,7 @@ printf '%s' "$GHCR_PAT" | docker login ghcr.io -u <usuario-github> --password-st
 unset GHCR_PAT    # credencial fica em ~/.docker/config.json (chmod 600)
 ```
 
-O repo também é público: o `git clone`/`git pull` da VPS usa HTTPS sem chave.
+O repo também é público: o `git clone`/`git fetch` da VPS usa HTTPS sem chave.
 
 ```bash
 sudo git clone https://github.com/Gabriel-Marques-tech/ij-crm.git /opt/ij-crm && sudo chown -R deploy:deploy /opt/ij-crm
@@ -176,7 +180,8 @@ evolution 206 MiB ociosos). Deploys seguintes da mesma tag: ~10 s.
 Fluxo: merge na `main` → o workflow **imagens** (GitHub Actions) builda e publica
 `ij-crm-app` e `ij-crm-ops` com as tags `sha-<commit curto>` e `latest` (≈ 5–10
 min; acompanhe na aba Actions) → o job `deploy` do mesmo workflow roda
-`scripts/deploy.sh sha-<commit>` na VPS por SSH ([Deploy automático](#deploy-automático-github-actions)).
+`scripts/deploy.sh sha-<commit>` (conferindo os digests) na VPS por AWS SSM
+([Deploy automático](#deploy-automático-github-actions--aws-ssm)).
 Deploy à mão (tag específica, workflow pausado, emergência), como `deploy`
 (`sudo -iu deploy`):
 
@@ -186,6 +191,11 @@ scripts/deploy.sh sha-1a2b3c4                       # uma tag específica (ver A
 scripts/deploy.sh --build-local                     # escape: sem CI/registry, builda NESTA máquina
 ```
 
+Voltar para um commit **anterior a este deploy por checkout** (PR #35): use
+`scripts/deploy.sh rollback sha-…` (troca só o app, sem checkout). Um `deploy.sh
+sha-<antigo>` deixaria no disco o `deploy.sh` antigo, que faz `git pull` e falha
+em HEAD destacado; para sair disso: `git checkout -q --detach origin/main`.
+
 `--build-local` gera `local-<commit>` com `docker compose build` na própria VPS:
 precisa de ~2 GB de RAM livres e alguns GB de disco de cache. Numa instância de
 2 GB, pare o app ou use swap. Só para emergência (GitHub fora, CI quebrado).
@@ -194,8 +204,13 @@ O script, na ordem:
 
 1. recusa se `git status --porcelain` mostrar qualquer coisa (mudança ou arquivo
    não rastreado). `--force` aceita;
-2. `git pull --ff-only` (traz `compose.prod.yml`, `Caddyfile` e scripts) e
-   re-executa a versão nova do próprio script;
+2. `git fetch` e `git checkout --detach <commit da tag>`: `compose.prod.yml`,
+   `Caddyfile` e scripts são **os do mesmo commit da imagem**, não os do HEAD da
+   `main` (se a `main` andou durante o deploy, os arquivos não se adiantam à
+   imagem). `latest` é resolvida antes para o `sha-…` dela; `--build-local` usa
+   `origin/main`. Commit que não existe no repo: recusa. Re-executa o próprio
+   script desse commit. O repo fica em HEAD destacado (normal; não faça `git pull`
+   à mão, use o `deploy.sh`);
 3. confere o ambiente **como o compose resolve** (`docker compose config
    --environment`: `.env` + variáveis do shell): segredos com ≥ 32 caracteres e
    sem `troque-me`, senhas de banco/Redis seguras para URL, domínio e email
@@ -203,7 +218,11 @@ O script, na ordem:
 4. `docker pull` das imagens `app` e `ops` da tag. `latest` é resolvida para a
    tag imutável `sha-<commit>` (label `org.opencontainers.image.revision` que o CI
    grava), então histórico e rollback nunca dependem de `latest`. Falha no pull
-   (tag não existe, sem `docker login`) aborta antes de mexer em algo;
+   (tag não existe, sem `docker login`) aborta antes de mexer em algo. Com
+   `--digest-app=sha256:… --digest-ops=sha256:…` (o deploy automático sempre
+   passa): baixa `<imagem>@<digest>` em vez da tag (tags do GHCR são mutáveis) e
+   recusa, antes de mexer em algo, se a imagem local `:<tag>` tiver outro digest
+   ou se o label de revisão não for do commit da tag;
 5. **backup sempre que o banco já tem dados** (existe `_prisma_migrations`);
 6. `prisma migrate deploy` no container one-shot `migrate`. Se falhar, para aqui:
    o app antigo segue no ar e o script mostra o dump do passo 5 (§2, "Migration falhou");
@@ -222,8 +241,9 @@ O script, na ordem:
    manual, volta para onde o operador deixou, não para a versão abandonada) e
    saída com erro (o schema não volta; ver §2).
 
-Um deploy/rollback por vez: o script segura `flock` em `.deploy/lock` e o
-segundo sai com "outro deploy/rollback em andamento". O comportamento do
+Um deploy/rollback por vez: o script segura `flock` em `.deploy/lock`; o
+segundo **espera** até `LOCK_ESPERA` s (padrão 900, do ambiente do shell) e só
+então sai com "outro deploy/rollback em andamento há mais de …". O comportamento do
 script (incluindo o rollback automático) tem teste sem Docker:
 `bash scripts/teste-deploy.sh`.
 
@@ -234,44 +254,88 @@ Depois de um rollback automático confira `dc ps`: ele só troca o `app`. Se o
 que falhou foi outro serviço (ex.: a Evolution não subiu), ele segue com o
 problema. Veja `dc logs <serviço>`.
 
-## Deploy automático (GitHub Actions)
+## Deploy automático (GitHub Actions + AWS SSM)
 
-Cada push na `main` (merge de PR) roda o workflow **imagens**: o job `build`
-publica as imagens e, se deu certo, o job `deploy` abre um SSH para a VPS e
-manda **só a tag** `sha-<commit curto>` do commit buildado. Na VPS, a chave do
-GitHub tem um **comando forçado** no `authorized_keys`: o sshd ignora o que o
-cliente pediu e roda `scripts/deploy-remoto.sh`, que aceita apenas
-`^sha-[0-9a-f]{7,40}$` (qualquer outra coisa: recusa, saída 2) e executa
-`scripts/deploy.sh <tag>` em `/opt/ij-crm`, com a saída ao vivo no log do
-Actions. Uma chave vazada só consegue disparar o deploy de uma tag que exista
-no GHCR: nada de shell, `latest`, opções, rollback, scp/sftp ou túnel.
+Cada push na `main` (merge de PR) roda o workflow **imagens**:
+
+1. job `build`: publica `ij-crm-app`/`ij-crm-ops` com `sha-<commit curto>` e
+   `latest` e exporta os **digests** das duas imagens;
+2. job `deploy` (environment `producao`): troca o token OIDC do GitHub por uma
+   credencial **temporária** da role `ij-crm-deploy-gha` (nenhuma chave guardada
+   no GitHub) e manda, por **SSM Run Command**, o documento `ij-crm-deploy`
+   (`deploy/ssm-deploy.yaml`) com `tag` + `digestApp` + `digestOps`;
+3. na VPS, o agente SSM roda como root só
+   `runuser -u deploy -- /opt/ij-crm/scripts/deploy-remoto.sh <tag> <digests>`,
+   que valida tudo de novo (`LC_ALL=C`), faz `git fetch` e **recusa commit que não
+   é ancestral de `origin/main`**, e roda `scripts/deploy.sh <tag> --digest-app=…
+   --digest-ops=…` destacado (`setsid`), com log em
+   `/var/log/ij-crm/deploy-<UTC>-<tag>.log`;
+4. o `deploy.sh` faz checkout do commit da tag (compose/Caddyfile/scripts batem
+   com a imagem), baixa as imagens **por digest** e recusa se o digest ou o
+   commit gravado na imagem não baterem; depois segue o fluxo normal do §1.
+
+**Porta 22 fechada**: o security group só tem entrada 80/443. Admin entra por
+**Session Manager** (passo 7). A role do GitHub só pode `ssm:SendCommand` com
+esse documento nessa instância: credencial vazada ou workflow alterado em outra
+branch não roda comando arbitrário, não faz deploy de imagem de branch (tag
+`branch-…`, recusada pelo padrão; digest de branch, recusado pelo commit da
+imagem) nem de commit fora da `main`.
 
 - **Resultado**: o código de saída do `deploy.sh` é o do job. Falha (inclusive
-  quando o rollback automático deu certo) = ❌ no Actions e email do GitHub para
-  quem fez o push. O resumo do job mostra tag, commit e resultado (ok, falhou com
-  rollback automático ok, rollback também falhou, recusado, SSH falhou).
+  com rollback automático bem-sucedido) = ❌ no Actions + email para quem fez o
+  push. O resumo do job traz tag, commit, digests, id do comando SSM e o
+  resultado: ok, rollback automático ok, rollback também falhou, recusado na
+  VPS, não entregue, timeout, cancelado. Se não dá para saber (API do SSM fora,
+  prazo do job), o resumo diz **"status desconhecido — verifique o status no
+  SSM"** e não afirma que falhou: `aws ssm get-command-invocation --command-id <id>
+  --instance-id <i-…>` ou Systems Manager → Run Command → Command history.
+- **Destacado do SSM**: timeout (45 min no documento), cancelamento ou queda do
+  canal não matam o `deploy.sh` no meio de uma migration; ele vai até o fim e
+  grava o código no log. Por isso, depois de "TimedOut"/"Cancelled", olhe o log na VPS.
 - **Ordem**: um deploy por vez (`concurrency: deploy-producao`, sem cancelar o
   que está rodando), e o workflow inteiro já é serializado na `main`. Com vários
   merges seguidos, o GitHub mantém **um** pendente: o intermediário é cancelado
-  e vai ao ar o mais novo (ele contém o anterior).
-- **Sem secrets** (antes de existir a VPS): o job passa com o aviso "Deploy
-  pulado" e nada é enviado. Secrets pela metade: o job falha dizendo quais faltam.
+  e vai ao ar o mais novo (ele contém o anterior). Deploy manual rodando: o
+  automático **espera** o lock até 15 min (`flock -w 900`).
+- **Sem configuração** (antes de existir a VPS): o job passa verde com o aviso
+  "Deploy pulado" e um *warning* "Deploy automático NÃO rodou" (para uma variável
+  apagada por engano não passar despercebida). Configuração pela metade ou
+  inválida: o job falha dizendo o quê.
 - **Escopo**: só `push` na `main`; PRs, outras branches e `workflow_dispatch`
-  não fazem deploy. O job não tem token do GitHub (`permissions: {}`) nem faz checkout.
-- O `deploy.sh` faz `git pull` antes: compose/Caddyfile/scripts vêm da `main`
-  atual, a imagem vem da tag pedida (igual ao deploy à mão).
+  não fazem deploy. Permissão do job: só `id-token: write` (sem checkout).
 
-### 1. Usuário `deploy` na VPS
+### Proteção da `main`
 
-Usuário dedicado, sem senha, no grupo `docker`, dono do repo, do `.env`, dos
-backups e do crontab. **Grupo `docker` = root na prática**: a proteção é a chave
-só rodar o comando forçado. O admin (ex.: `ubuntu`) continua entrando com a
-chave dele e opera como `deploy` via `sudo -iu deploy`.
+Já ligada (Settings → Branches → `main`): **só por PR** (0 aprovações
+obrigatórias), vale também para admins (`enforce_admins`), sem force-push e sem
+apagar a branch. É ela que dá sentido ao "ancestral de `origin/main`": código na
+`main` passou por PR. Conferir:
+
+```bash
+gh api repos/Gabriel-Marques-tech/ij-crm/branches/main/protection \
+  --jq '{pr: .required_pull_request_reviews.required_approving_review_count, admins: .enforce_admins.enabled, force_push: .allow_force_pushes.enabled, delete: .allow_deletions.enabled}'
+```
+
+Recomendado: marcar o check **verificacoes / deploy-e-migrations** como
+obrigatório (Settings → Branches → `main` → *Require status checks*).
+
+### Usuário `deploy` e o risco aceito
+
+Usuário dedicado, sem senha nem chave SSH, no grupo `docker`, dono de
+`/opt/ij-crm` (repo, `.env`, `.deploy/`), `/var/backups/ij-crm`,
+`/var/log/ij-crm`, do crontab e do `~/.config/rclone`. Admin opera como ele via
+`sudo -iu deploy` numa sessão do Session Manager.
+
+**Risco aceito: `scripts/` é gravável pelo `deploy`.** O deploy faz `git
+checkout` do commit da tag, que reescreve `scripts/`, `compose.prod.yml` e
+`Caddyfile`; com `scripts/` de root e só leitura, o checkout quebra. Na prática
+não muda nada: o `deploy` está no grupo `docker`, que já equivale a root no host,
+e ninguém de fora chega a um shell dele (sem SSH; o SSM só roda o documento
+fixo, que só chama `deploy-remoto.sh` com parâmetros validados).
 
 ```bash
 sudo useradd -m -s /bin/bash -c "deploy ij-crm" -G docker deploy
-sudo usermod -p '*' deploy      # sem senha (nenhuma confere), mas conta não "travada" para o sshd
-sudo install -d -m 700 -o deploy -g deploy /home/deploy/.ssh
+sudo passwd -l deploy           # sem senha; entra-se só por sudo -iu deploy
 ```
 
 Só se a VPS já foi instalada (§0) com outro usuário: passar tudo para o `deploy`.
@@ -279,115 +343,156 @@ Só se a VPS já foi instalada (§0) com outro usuário: passar tudo para o `dep
 ```bash
 sudo chown -R deploy:deploy /opt/ij-crm /var/backups/ij-crm /var/log/ij-crm
 crontab -l > /tmp/crontab.ij && sudo crontab -u deploy /tmp/crontab.ij && crontab -r && rm /tmp/crontab.ij
-# (rclone: copie ~/.config/rclone/rclone.conf para /home/deploy/.config/rclone/, chmod 600, dono deploy)
+# rclone: copie ~/.config/rclone/rclone.conf para /home/deploy/.config/rclone/ (chmod 600, dono deploy)
 ```
 
-Par de chaves **ed25519 sem passphrase** (o Actions não digita senha), gerado
-na sua máquina, fora do repo:
+### Configuração na AWS (uma vez)
+
+Rode da sua máquina, com a AWS CLI logada como admin da conta, na raiz do repo.
+Os JSON ficam em `deploy/iam/`; troque `<ACCOUNT_ID>`, `<REGION>` e
+`<INSTANCE_ID>` antes de usar (`sed` abaixo).
 
 ```bash
-ssh-keygen -t ed25519 -N '' -C github-actions-deploy@ij-crm -f ~/ij-crm-deploy
-# ~/ij-crm-deploy      → secret DEPLOY_SSH_KEY (passo 4); apagar depois
-# ~/ij-crm-deploy.pub  → authorized_keys do deploy (passo 2)
+export AWS_REGION=sa-east-1                     # região da VPS
+CONTA=$(aws sts get-caller-identity --query Account --output text)
+INST=i-0123456789abcdef0                        # EC2 → Instances
 ```
 
-### 2. `authorized_keys` com o comando forçado
-
-Uma linha só (opções + chave pública), em `/home/deploy/.ssh/authorized_keys`:
+**1. Provedor OIDC do GitHub** (uma vez por conta; a AWS não confere mais o thumbprint):
 
 ```bash
-echo "command=\"/opt/ij-crm/scripts/deploy-remoto.sh\",no-pty,no-port-forwarding,no-agent-forwarding,no-X11-forwarding $(cat ~/ij-crm-deploy.pub)"
-# cole a saída na VPS:
-sudo -u deploy tee -a /home/deploy/.ssh/authorized_keys      # cole, Enter, Ctrl-D
-sudo chmod 600 /home/deploy/.ssh/authorized_keys
+aws iam create-open-id-connect-provider \
+  --url https://token.actions.githubusercontent.com --client-id-list sts.amazonaws.com
 ```
 
-Teste da sua máquina (o primeiro tem de ser recusado; o segundo faz um deploy
-de verdade da tag que já roda, `cat /opt/ij-crm/.deploy/atual`):
+**2. Role `ij-crm-deploy-gha`**, que só o job `deploy` da `main`, no environment
+`producao`, consegue assumir. A AWS só deixa condicionar `aud` e `sub`, então o
+`job_workflow_ref` entra **dentro** do `sub`: primeiro o repo passa a emitir esse
+`sub` (`deploy/iam/oidc-sub-customization.json`):
 
 ```bash
-ssh -i ~/ij-crm-deploy deploy@<ip-elastico> latest          # → "deploy-remoto: recusado", saída 2
-ssh -i ~/ij-crm-deploy deploy@<ip-elastico> sha-<atual>     # → log do deploy.sh, saída 0
+gh api -X PUT repos/Gabriel-Marques-tech/ij-crm/actions/oidc/customization/sub \
+  --input deploy/iam/oidc-sub-customization.json
+# sub = repo:Gabriel-Marques-tech/ij-crm:environment:producao:job_workflow_ref:Gabriel-Marques-tech/ij-crm/.github/workflows/imagens.yml@refs/heads/main
+sed "s/<ACCOUNT_ID>/$CONTA/" deploy/iam/gha-trust.json > /tmp/gha-trust.json
+aws iam create-role --role-name ij-crm-deploy-gha --max-session-duration 3600 \
+  --assume-role-policy-document file:///tmp/gha-trust.json
 ```
 
-**Porta 22**: os runners do GitHub saem de faixas de IP enormes e variáveis, então
-o security group precisa aceitar 22 de qualquer lugar. Isso só é aceitável com
-**login por senha desligado** (padrão das AMIs Ubuntu; confira
-`sudo sshd -T | grep -Ei '^(passwordauthentication|kbdinteractiveauthentication|permitrootlogin)'`
-→ `no`, `no`, `prohibit-password`/`no`).
-
-### 3. Host key (nada de "trust on first use")
-
-O job usa `StrictHostKeyChecking=yes` com o known_hosts do secret: se a VPS
-trocar de chave (ou alguém se passar por ela), o deploy falha em vez de
-conectar. De uma rede confiável (sua casa, não Wi-Fi público), com o **mesmo
-endereço que vai em `DEPLOY_HOST`**:
+**3. Permissões da role**: `ssm:SendCommand` só no documento e na instância;
+`GetCommandInvocation`/`ListCommandInvocations` para acompanhar.
 
 ```bash
-ssh-keyscan -t ed25519 <ip-elastico> > ~/ij-crm-known_hosts
-ssh-keygen -lf ~/ij-crm-known_hosts       # → 256 SHA256:AbC… <ip> (ED25519)
+sed -e "s/<ACCOUNT_ID>/$CONTA/g" -e "s/<REGION>/$AWS_REGION/g" -e "s/<INSTANCE_ID>/$INST/g" \
+  deploy/iam/gha-deploy-policy.json > /tmp/gha-deploy-policy.json
+aws iam put-role-policy --role-name ij-crm-deploy-gha --policy-name ij-crm-deploy-ssm \
+  --policy-document file:///tmp/gha-deploy-policy.json
 ```
 
-Confira o `SHA256:…` com a fonte da AWS, que não passa pela rede:
-**EC2 → a instância → Actions → Monitor and troubleshoot → Get system log**,
-bloco `BEGIN SSH HOST KEY FINGERPRINTS` (impresso pelo cloud-init no 1º boot),
-ou numa sessão do **EC2 Instance Connect / Session Manager**:
-`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`. Diferente → **não use**.
+**4. Instance profile da VPS com `AmazonSSMManagedInstanceCore`** (o agente SSM
+se registra; sem ele não há Session Manager nem Run Command):
 
-### 4. Environment `producao` e secrets no GitHub
+```bash
+aws iam create-role --role-name ij-crm-ec2-ssm --assume-role-policy-document file://deploy/iam/ec2-trust.json
+aws iam attach-role-policy --role-name ij-crm-ec2-ssm \
+  --policy-arn arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+aws iam create-instance-profile --instance-profile-name ij-crm-ec2-ssm
+aws iam add-role-to-instance-profile --instance-profile-name ij-crm-ec2-ssm --role-name ij-crm-ec2-ssm
+aws ec2 associate-iam-instance-profile --instance-id "$INST" --iam-instance-profile Name=ij-crm-ec2-ssm
+```
 
-Settings → Environments → **New environment** `producao`:
+O agente vem instalado como **snap** na AMI do Ubuntu 24.04. Conferir o registro:
 
-- **sem** "Required reviewers" (o deploy é automático);
-- **Deployment branches and tags** → *Selected branches and tags* → `main`
-  (os secrets só chegam a jobs da `main`);
-- **Environment secrets**:
+```bash
+aws ssm describe-instance-information --filters "Key=InstanceIds,Values=$INST" \
+  --query 'InstanceInformationList[].{ping:PingStatus,agente:AgentVersion,so:PlatformName}'
+# ping "Online". Se não aparecer em ~5 min: na VPS, sudo snap list amazon-ssm-agent
+# e sudo snap restart amazon-ssm-agent (sem o snap: sudo snap install amazon-ssm-agent --classic)
+```
 
-| Secret | Valor |
+**5. Documento `ij-crm-deploy`** a partir do arquivo do repo:
+
+```bash
+aws ssm create-document --name ij-crm-deploy --document-type Command \
+  --document-format YAML --content file://deploy/ssm-deploy.yaml
+# Quando deploy/ssm-deploy.yaml mudar:
+aws ssm update-document --name ij-crm-deploy --document-version '$LATEST' \
+  --document-format YAML --content file://deploy/ssm-deploy.yaml
+aws ssm update-document-default-version --name ij-crm-deploy --document-version <versão nova>
+```
+
+Teste antes de ligar o Actions (tag/digests atuais: resumo do último run do
+**imagens**; a tag tem de ser da `main`):
+
+```bash
+aws ssm send-command --document-name ij-crm-deploy --instance-ids "$INST" \
+  --parameters '{"tag":["sha-1a2b3c4"],"digestApp":["sha256:…"],"digestOps":["sha256:…"]}' \
+  --query Command.CommandId --output text
+aws ssm get-command-invocation --command-id <id> --instance-id "$INST" \
+  --query '{status:Status,codigo:ResponseCode,saida:StandardOutputContent}'
+# "latest" ou qualquer coisa fora do padrão: o próprio SSM recusa (allowedPattern).
+```
+
+**6. Security group**: remova a regra de entrada da porta 22. Só 80/443 TCP (e
+443 UDP, se usar HTTP/3). Session Manager e Run Command saem da VPS para a AWS
+(HTTPS de saída), não precisam de porta aberta.
+
+### Configuração no GitHub
+
+Environment `producao` (Settings → Environments): **sem** "Required reviewers";
+**Deployment branches and tags** → *Selected branches and tags* → `main`; e as
+**variáveis** (não são segredos):
+
+| Variável (environment `producao`) | Valor |
 |---|---|
-| `DEPLOY_HOST` | IP elástico (o mesmo usado no `ssh-keyscan`) |
-| `DEPLOY_USER` | `deploy` |
-| `DEPLOY_SSH_KEY` | conteúdo inteiro de `~/ij-crm-deploy` (privada, com as linhas BEGIN/END) |
-| `DEPLOY_KNOWN_HOSTS` | conteúdo de `~/ij-crm-known_hosts` |
-
-Ou pelo `gh` (na raiz do repo):
+| `AWS_DEPLOY_ROLE_ARN` | `arn:aws:iam::<conta>:role/ij-crm-deploy-gha` |
+| `AWS_REGION` | região da VPS (ex.: `sa-east-1`) |
+| `DEPLOY_INSTANCE_ID` | `i-…` da VPS |
 
 ```bash
 gh api -X PUT repos/Gabriel-Marques-tech/ij-crm/environments/producao \
   -F 'deployment_branch_policy[protected_branches]=false' -F 'deployment_branch_policy[custom_branch_policies]=true'
 gh api -X POST repos/Gabriel-Marques-tech/ij-crm/environments/producao/deployment-branch-policies -f name=main
-gh secret set DEPLOY_HOST --env producao --body '<ip-elastico>'
-gh secret set DEPLOY_USER --env producao --body deploy
-gh secret set DEPLOY_SSH_KEY --env producao < ~/ij-crm-deploy
-gh secret set DEPLOY_KNOWN_HOSTS --env producao < ~/ij-crm-known_hosts
-shred -u ~/ij-crm-deploy          # a privada só fica no GitHub (gera outra se precisar)
+gh variable set AWS_DEPLOY_ROLE_ARN --env producao --body "arn:aws:iam::$CONTA:role/ij-crm-deploy-gha"
+gh variable set AWS_REGION --env producao --body "$AWS_REGION"
+gh variable set DEPLOY_INSTANCE_ID --env producao --body "$INST"
 ```
 
-### 5. Primeiro deploy pelo Actions
+Primeiro deploy pelo Actions: **imagens** → último run da `main` → *Re-run all
+jobs*. O job `deploy` deve terminar ✅ com "ok" no resumo. Histórico: aba
+**Environments → producao**; na VPS, `journalctl -t ij-crm-deploy` e
+`ls -t /var/log/ij-crm/deploy-*.log`.
 
-Actions → **imagens** → último run da `main` → **Re-run all jobs** (ou faça um
-merge). O job `deploy` deve terminar ✅ com o resumo "ok". Histórico de deploys:
-aba **Environments → producao** do repo. Na VPS, `journalctl -t ij-crm-deploy`
-lista cada pedido (aceito ou recusado) com o IP de origem.
+### Acesso de admin: Session Manager
 
-### 6. Deploy de uma tag específica e rollback (à mão)
-
-Igual a antes, pelo admin, como `deploy`:
+Sem SSH. Precisa da AWS CLI com o [Session Manager plugin](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html)
+(ou o console: EC2 → a instância → **Connect → Session Manager**):
 
 ```bash
-ssh ubuntu@<ip-elastico>
+aws ssm start-session --target i-0123456789abcdef0     # entra como ssm-user (com sudo)
 sudo -iu deploy
 cd /opt/ij-crm
-scripts/deploy.sh sha-1a2b3c4       # §1
+# túnel para o manager da Evolution (§5), da sua máquina:
+aws ssm start-session --target i-0123456789abcdef0 --document-name AWS-StartPortForwardingSession \
+  --parameters '{"portNumber":["8080"],"localPortNumber":["8080"]}'
+```
+
+### Deploy de uma tag específica e rollback (à mão)
+
+Igual a antes, numa sessão do Session Manager, como `deploy`:
+
+```bash
+sudo -iu deploy
+cd /opt/ij-crm
+scripts/deploy.sh sha-1a2b3c4       # §1 (pega os arquivos do commit dessa tag)
 scripts/deploy.sh rollback          # §2 (ou: rollback sha-1a2b3c4)
 ```
 
-Deploy à mão e automático disputam o mesmo `flock`: se um estiver rodando, o
-outro falha com "outro deploy/rollback em andamento" (no Actions: ❌; rode o
-re-run depois). **Depois de um rollback, pause o deploy automático** (passo 7)
-até corrigir: o próximo merge na `main` sobe a versão nova por cima.
+Deploy à mão e automático disputam o mesmo `flock`: o segundo espera até 15 min
+(`LOCK_ESPERA`) e só então desiste. **Depois de um rollback, pause o deploy
+automático** até corrigir: o próximo merge na `main` sobe a versão nova por cima.
 
-### 7. Pausar o deploy automático
+### Pausar o deploy automático
 
 Variável de **repositório** `DEPLOY_AUTOMATICO=false` (Settings → Secrets and
 variables → Actions → Variables): o build continua publicando imagens e o job
@@ -398,11 +503,13 @@ gh variable set DEPLOY_AUTOMATICO --body false     # pausar
 gh variable delete DEPLOY_AUTOMATICO               # voltar (ou --body true)
 ```
 
-Desabilitar o workflow inteiro (Actions → imagens → Disable workflow) também
-para o deploy, mas para o build junto. Revogar de vez: apague a linha do
-`authorized_keys` do `deploy` e o secret `DEPLOY_SSH_KEY`.
+Corte de emergência do lado da AWS: `aws iam delete-role-policy --role-name
+ij-crm-deploy-gha --policy-name ij-crm-deploy-ssm` (o job passa a falhar no
+`send-command`; recoloque com o passo 3).
 
-Teste do `deploy-remoto.sh` sem SSH nem Docker: `bash scripts/teste-deploy-remoto.sh`.
+Testes sem AWS nem Docker: `bash scripts/teste-deploy-remoto.sh` (entrada na
+VPS), `bash scripts/teste-workflow-deploy.sh` (passos do job com um `aws` falso),
+`bash scripts/teste-deploy.sh` e `bash scripts/teste-checar-migrations.sh`.
 
 ## 2. Rollback
 
@@ -421,10 +528,17 @@ imagem do alvo não está mais no host (limpeza do deploy), baixa do GHCR; tags
 `local-*` não existem no registry. Troca só o `app` (sem build) e confere o health. O rollback não reescreve o histórico; `:latest` passa a apontar para o
 que ficou rodando.
 
-**O schema do banco não volta.** Migrations deste projeto devem ser aditivas (o
-código antigo roda com colunas novas). Se a migration do deploy quebrou o código
-antigo, restaure o dump que o próprio deploy fez antes de migrar (§3) e então
-rode o rollback.
+**O schema do banco não volta.** Por isso a regra **expand/contract**: toda
+migration tem de funcionar com a versão **anterior** do app (a que segue no ar
+durante o deploy e é o alvo do rollback). Adicionar tabela/coluna (nullable ou
+com default) e índice: livre. Remover, renomear ou trocar tipo: **duas
+releases** — na 1ª o código para de usar (ou passa a escrever nos dois lugares),
+na 2ª a migration remove, com a linha `-- destrutiva-ok: <motivo>`. O CI
+(`scripts/checar-migrations.sh`, no PR e no build da `main`) recusa migration
+nova com `DROP TABLE`, `DROP COLUMN`, `ALTER COLUMN … TYPE` ou `RENAME` sem esse
+marcador. Se mesmo assim a migration do deploy quebrou o código antigo,
+restaure o dump que o próprio deploy fez antes de migrar (§3) e então rode o
+rollback.
 
 ### Migration falhou
 
@@ -548,13 +662,14 @@ Admin não tem grupo salvo; o valor do Admin vence. O webhook continua sendo pel
 `scripts/evolution.sh webhook`.
 
 Sem `qrencode`, o `qr` grava o PNG num diretório `~/.ij-crm.XXXX` com permissão
-só do dono e **apaga ao apertar Enter**. Se precisar copiar para ver,
-`scp` para a sua máquina e apague a cópia logo depois.
+só do dono e **apaga ao apertar Enter**. Sem SSH não há `scp`: instale o
+`qrencode` (QR no terminal) ou use a tela do Admin.
 
-Alternativa visual (manager web da Evolution), por túnel SSH a partir da sua máquina:
+Alternativa visual (manager web da Evolution), por túnel do Session Manager a partir da sua máquina:
 
 ```bash
-ssh -N -L 8080:127.0.0.1:8080 usuario@vps     # deixe aberto
+aws ssm start-session --target <i-…> --document-name AWS-StartPortForwardingSession \
+  --parameters '{"portNumber":["8080"],"localPortNumber":["8080"]}'     # deixe aberto
 # navegador: http://localhost:8080/manager → login com a EVOLUTION_API_KEY (do gerenciador de senhas)
 ```
 
