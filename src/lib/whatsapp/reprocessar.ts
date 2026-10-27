@@ -10,6 +10,8 @@
  *   `after()`); processa.
  * - `PROCESSANDO` há mais de 5 min volta a `RECEBIDA` — nunca antes (pior caso
  *   LLM 2×30 s + transação); a cerca derruba o worker antigo se ele acordar.
+ * - Travada ou órfã que já tem 3+ tentativas vai para `FALHA`
+ *   (`TENTATIVAS_ESGOTADAS ref=…`) em vez de voltar: sem laço infinito.
  * - `FALHA` com menos de 3 tentativas volta. `FALHA` por `SEM_CREDITO` volta
  *   sempre (é a recarga que resolve), mas a execução PARA no primeiro
  *   `SEM_CREDITO` de novo: no máximo uma chamada inútil a cada 10 min.
@@ -18,6 +20,7 @@
  */
 import type { StatusMensagem } from "@prisma/client";
 import { db } from "@/lib/db";
+import { registrarErro } from "@/lib/erros/registrar";
 import { processarMensagem, type ResultadoProcessamento } from "./processar";
 
 export const ORFA_MS = 2 * 60_000;
@@ -45,6 +48,8 @@ export async function reprocessarMensagem(id: string, de: StatusMensagem[]): Pro
 }
 
 export type ContagemRetomada = {
+  /** Travadas/órfãs que já tinham `MAX_TENTATIVAS_FALHA`: viraram FALHA TENTATIVAS_ESGOTADAS. */
+  esgotadas: number;
   destravadas: number;
   tentadas: number;
   processadas: number;
@@ -55,6 +60,8 @@ export type ContagemRetomada = {
   erros: number;
   /** Parou antes de esgotar a fila: ainda sem crédito, banco fora ou prazo. */
   interrompida: boolean;
+  /** Refs dos `ERRO` (banco/config fora), para o cron responder 500. */
+  refs: string[];
 };
 
 export async function retomarPendentes(
@@ -63,16 +70,35 @@ export async function retomarPendentes(
   const agora = opts.agora ?? new Date();
   const limite = opts.limite ?? LIMITE_POR_EXECUCAO;
   const prazo = opts.prazo ?? new Date(Date.now() + PRAZO_EXECUCAO_MS);
-  const c: ContagemRetomada = { destravadas: 0, tentadas: 0, processadas: 0, pendentes: 0, descartadas: 0, falhas: 0, ignoradas: 0, erros: 0, interrompida: false };
+  const c: ContagemRetomada = { esgotadas: 0, destravadas: 0, tentadas: 0, processadas: 0, pendentes: 0, descartadas: 0, falhas: 0, ignoradas: 0, erros: 0, interrompida: false, refs: [] };
+  const travadaAntes = new Date(agora.getTime() - TRAVADA_MS);
+  const orfaAntes = new Date(agora.getTime() - ORFA_MS);
+
+  // Travada/órfã que já gastou as tentativas não volta mais a RECEBIDA: o loop
+  // "reivindica → morre → destrava" pararia nunca. Vai para FALHA (fila do painel).
+  const esgotadas = await db.$queryRaw<{ id: string }[]>`
+    SELECT id FROM mensagem_bruta
+     WHERE tentativas >= ${MAX_TENTATIVAS_FALHA}
+       AND ((status = 'PROCESSANDO' AND atualizado_em < ${travadaAntes})
+         OR (status = 'RECEBIDA' AND atualizado_em < ${orfaAntes}))`;
+  if (esgotadas.length) {
+    const ids = esgotadas.map((e) => e.id);
+    const ref = registrarErro("cron.reprocessar", new Error(`TENTATIVAS_ESGOTADAS: ${ids.length} mensagem(ns) travada(s)/órfã(s) com ${MAX_TENTATIVAS_FALHA}+ tentativas: ${ids.join(",")}`));
+    c.esgotadas = await db.$executeRaw`
+      UPDATE mensagem_bruta SET status = 'FALHA', erro = ${`TENTATIVAS_ESGOTADAS ref=${ref}`}, atualizado_em = now()
+       WHERE id = ANY(${ids}) AND tentativas >= ${MAX_TENTATIVAS_FALHA}
+         AND ((status = 'PROCESSANDO' AND atualizado_em < ${travadaAntes})
+           OR (status = 'RECEBIDA' AND atualizado_em < ${orfaAntes}))`;
+  }
 
   // Não mexe em atualizado_em: a linha destravada já conta como órfã logo abaixo.
   c.destravadas = await db.$executeRaw`
     UPDATE mensagem_bruta SET status = 'RECEBIDA'
-     WHERE status = 'PROCESSANDO' AND atualizado_em < ${new Date(agora.getTime() - TRAVADA_MS)}`;
+     WHERE status = 'PROCESSANDO' AND atualizado_em < ${travadaAntes}`;
 
   const candidatas = await db.$queryRaw<{ id: string; status: StatusMensagem }[]>`
     SELECT id, status::text AS status FROM mensagem_bruta
-     WHERE (status = 'RECEBIDA' AND atualizado_em < ${new Date(agora.getTime() - ORFA_MS)})
+     WHERE (status = 'RECEBIDA' AND atualizado_em < ${orfaAntes} AND tentativas < ${MAX_TENTATIVAS_FALHA})
         OR (status = 'FALHA' AND (tentativas < ${MAX_TENTATIVAS_FALHA}
                                   OR resultado_llm -> 'aplicacao' ->> 'codigo' = ${CODIGO_SEM_CREDITO}))
      ORDER BY recebida_em, id
@@ -89,7 +115,10 @@ export async function retomarPendentes(
     else if (r.tipo === "PENDENTE_REVISAO") c.pendentes++;
     else if (r.tipo === "DESCARTADA") c.descartadas++;
     else if (r.tipo === "FALHA") c.falhas++;
-    else if (r.tipo === "ERRO") c.erros++;
+    else if (r.tipo === "ERRO") {
+      c.erros++;
+      c.refs.push(r.ref);
+    }
     else c.ignoradas++;
     // Ainda sem crédito, ou banco/config fora: o resto espera a próxima execução.
     if ((r.tipo === "FALHA" && r.codigo === CODIGO_SEM_CREDITO) || r.tipo === "ERRO") {

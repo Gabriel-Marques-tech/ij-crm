@@ -35,7 +35,7 @@ const min = (n: number) => new Date(AGORA.getTime() - n * 60_000);
 let joao: { id: string };
 let seq = 0;
 
-async function bruta(opts: { status?: StatusMensagem; tentativas?: number; erro?: string | null; atualizadoEm?: Date; resultadoLlm?: Prisma.InputJsonValue; texto?: string } = {}) {
+async function bruta(opts: { status?: StatusMensagem; tentativas?: number; erro?: string | null; atualizadoEm?: Date; resultadoLlm?: Prisma.InputJsonValue; texto?: string; semTag?: boolean } = {}) {
   seq++;
   const m = await dbT.mensagemBruta.create({
     data: {
@@ -49,6 +49,7 @@ async function bruta(opts: { status?: StatusMensagem; tentativas?: number; erro?
       tentativas: opts.tentativas ?? 0,
       erro: opts.erro ?? null,
       resultadoLlm: opts.resultadoLlm,
+      semTag: opts.semTag ?? false,
     },
   });
   const em = opts.atualizadoEm ?? min(30);
@@ -127,6 +128,29 @@ describe("reprocessarMensagem (botão do painel e cron)", () => {
   });
 });
 
+describe("sem #crm nunca fala no grupo (GAB-41 review)", () => {
+  it("falha de mensagem sem tag (1ª vez, painel ou cron) → FALHA sem ❌", async () => {
+    definirRespostaMock(() => {
+      throw new ErroLlm("HTTP", { status: 500 });
+    });
+    const m = await bruta({ status: "RECEBIDA", semTag: true });
+    const r = await reprocessarMensagem(m.id, ["RECEBIDA"]);
+    expect(r.tipo).toBe("FALHA");
+    expect(safeModes()).toBe(0);
+    await reprocessarMensagem(m.id, ["FALHA"]);
+    expect(safeModes()).toBe(0);
+  });
+
+  it("com #crm a 1ª falha continua mandando ❌", async () => {
+    definirRespostaMock(() => {
+      throw new ErroLlm("HTTP", { status: 500 });
+    });
+    const m = await bruta({ status: "RECEBIDA" });
+    await reprocessarMensagem(m.id, ["RECEBIDA"]);
+    expect(safeModes()).toBe(1);
+  });
+});
+
 describe("retomarPendentes (cron)", () => {
   it("RECEBIDA órfã só depois de 2 min; PROCESSANDO só depois de 5 min", async () => {
     const recente = await bruta({ status: "RECEBIDA", atualizadoEm: min(1) });
@@ -139,6 +163,31 @@ describe("retomarPendentes (cron)", () => {
     expect(await status(orfa.id)).toBe("PROCESSADA");
     expect(await status(andando.id)).toBe("PROCESSANDO");
     expect(await status(travada.id)).toBe("PROCESSADA");
+  });
+
+  it("travada ou órfã que já esgotou as tentativas → FALHA TENTATIVAS_ESGOTADAS com ref, sem chamar a LLM", async () => {
+    const chamadas = vi.fn(() => F.saida);
+    definirRespostaMock(chamadas);
+    const travada = await bruta({ status: "PROCESSANDO", tentativas: 3, atualizadoEm: min(6) });
+    const orfa = await bruta({ status: "RECEBIDA", tentativas: 4, atualizadoEm: min(3) });
+    const nova = await bruta({ status: "RECEBIDA", tentativas: 5, atualizadoEm: min(1) });
+    const r = await retomarPendentes({ agora: AGORA });
+    expect(r).toMatchObject({ esgotadas: 2, destravadas: 0, tentadas: 0 });
+    expect(chamadas).not.toHaveBeenCalled();
+    for (const m of [travada, orfa]) {
+      expect(await dbT.mensagemBruta.findUniqueOrThrow({ where: { id: m.id } })).toMatchObject({ status: "FALHA", erro: expect.stringMatching(/^TENTATIVAS_ESGOTADAS ref=[0-9a-f]{8}$/) });
+    }
+    expect(await status(nova.id)).toBe("RECEBIDA");
+    // Na próxima execução não volta (3+ tentativas e não é sem crédito).
+    expect((await retomarPendentes({ agora: AGORA })).tentadas).toBe(0);
+  });
+
+  it("ERRO (banco/config fora) entra em `refs`", async () => {
+    await bruta({ status: "RECEBIDA" });
+    const tecnica = await import("@/lib/config/tecnica");
+    vi.spyOn(tecnica, "carregarConfigTecnica").mockResolvedValue({ ok: false, ref: "cafe0001" } as never);
+    const r = await retomarPendentes({ agora: AGORA });
+    expect(r).toMatchObject({ erros: 1, interrompida: true, refs: ["cafe0001"] });
   });
 
   it("FALHA com menos de 3 tentativas volta mantendo `erro`; com 3 fica", async () => {
