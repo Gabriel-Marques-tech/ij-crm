@@ -37,6 +37,7 @@
  */
 import { Prisma } from "@prisma/client";
 import { modeloDoProvedorConfigurado, limiarConfianca } from "@/lib/config/env";
+import { contexto12h } from "@/lib/contexto/contexto-12h";
 import { encontrarContatoPorIdentificador, encontrarEmpresa } from "@/lib/contatos/match";
 import { db } from "@/lib/db";
 import { registrarErro } from "@/lib/erros/registrar";
@@ -98,10 +99,11 @@ function carregar(id: string) {
 
 /**
  * Contexto do passo 6: remetente, msg respondida, fases de vendas, candidatos
- * por identificador exato e oportunidades candidatas (GAB-38).
+ * por identificador exato e oportunidades candidatas (GAB-38), ledger da
+ * janela de 12 h + resumo da anterior (GAB-49, `contexto/contexto-12h.ts`).
  */
 export async function montarContexto(
-  m: Pick<Bruta, "texto" | "recebidaEm" | "respondendoEventoId" | "remetenteUsuario" | "remetenteUsuarioId"> & { semTag?: boolean },
+  m: Pick<Bruta, "texto" | "recebidaEm" | "respondendoEventoId" | "remetenteUsuario" | "remetenteUsuarioId"> & { id?: string; semTag?: boolean },
 ): Promise<ContextoExtracao & { respostaInvalida: MotivoRespostaInvalida | null }> {
   let respondendoA: string | null = null;
   if (m.respondendoEventoId) {
@@ -130,6 +132,7 @@ export async function montarContexto(
     if (r && !empresas.some((e) => e.id === r.empresa.id)) empresas.push({ id: r.empresa.id, nome: r.empresa.nome, via: r.via });
   }
 
+  const c12 = await contexto12h(m);
   const resposta = await alvoDaResposta(m.respondendoEventoId, m.recebidaEm);
   const alvoResposta = resposta?.tipo === "CARD" ? resposta.id : null;
   const oportunidades = await oportunidadesCandidatas({
@@ -138,6 +141,7 @@ export async function montarContexto(
     contatoIds: contatos.map((c) => c.id),
     empresas,
     alvoResposta,
+    ledger: c12.cards,
   });
 
   return {
@@ -151,6 +155,8 @@ export async function montarContexto(
     alvoResposta,
     respostaInvalida: resposta?.tipo === "INVALIDA" ? resposta.motivo : null,
     semTag: m.semTag ?? false,
+    historico: c12.historico,
+    resumoAnterior: c12.resumoAnterior,
   };
 }
 

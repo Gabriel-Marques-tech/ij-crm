@@ -234,7 +234,8 @@ describe("mensagens picadas", () => {
   });
 
   it("'recente' é só dos últimos 30 min e só do remetente", async () => {
-    const velho = await enviar("#crm falei com a Ana", () => saida({ contato: { nome: "Ana" } }));
+    // Ana veio na janela de 12 h anterior: nem 'recente' nem ledger (GAB-49).
+    const velho = await enviar("#crm falei com a Ana", () => saida({ contato: { nome: "Ana" } }), { recebidaEm: new Date(RECEBIDA_EM.getTime() - 12 * 60 * MIN) });
     const idVelho = (velho.r as { oportunidadeId: string }).oportunidadeId;
     // todos os toques do card da Ana ficam 31 min antes da próxima mensagem
     await dbT.timeline.updateMany({ where: { oportunidadeId: idVelho }, data: { em: new Date(RECEBIDA_EM.getTime() - 31 * MIN) } });

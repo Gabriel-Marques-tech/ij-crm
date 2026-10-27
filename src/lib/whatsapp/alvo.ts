@@ -8,7 +8,11 @@
  * 2. `oportunidade_id` da LLM, SÓ se estiver na lista de candidatas que foi
  *    enviada no contexto. Fora dela é ignorado (e marca revisar). Escolha
  *    sem identidade exata (só `recente`/`dominio`) vale com revisar — exceto
- *    quando é o ÚNICO card recente do remetente, aberto (mensagens picadas). Escolha de card fechado quando há um aberto por identidade →
+ *    quando é o ÚNICO card recente do remetente, aberto (mensagens picadas).
+ *    O ledger da janela de 12 h (GAB-49) entra nas duas pontas: um card que
+ *    só aparece no ledger (mexido há mais de 30 min) pode ser escolhido, mas
+ *    com revisar; e outro card no ledger desfaz o ✅ do único recente
+ *    (ambíguo → revisar). Escolha de card fechado quando há um aberto por identidade →
  *    o aberto + revisar (a LLM não decide reabrir).
  * 3. Regras sobre as candidatas por identidade exata (mesmo contato por
  *    telefone/email, mesma empresa por CNPJ):
@@ -20,7 +24,7 @@
  * Card escolhido que está em fase terminal também vira reabertura.
  */
 
-export type ViaCandidata = "contato" | "empresa" | "dominio" | "recente" | "resposta";
+export type ViaCandidata = "contato" | "empresa" | "dominio" | "recente" | "ledger" | "resposta";
 
 export type Candidata = { id: string; terminal: boolean; tocadaEm: Date; via: ViaCandidata[] };
 
@@ -39,14 +43,17 @@ function escolhido(c: Candidata, motivos: string[]): Alvo {
   return c.terminal ? { tipo: "REABRIR", deId: c.id, motivos: [MOTIVO_REABERTO, ...motivos] } : { tipo: "EXISTENTE", id: c.id, motivos };
 }
 
+const daConversa = (c: Candidata) => c.via.includes("recente") || c.via.includes("ledger");
+
 /**
- * Mensagens picadas sem ambiguidade: o remetente mexeu em UM só card nos
- * últimos 30 min, aberto, e a LLM escolheu exatamente ele, sem nenhum card
+ * Mensagens picadas sem ambiguidade: o card foi tocado pelo remetente nos
+ * últimos 30 min, está aberto, é o ÚNICO card da conversa dele (recentes +
+ * ledger da janela de 12 h) e a LLM escolheu exatamente ele, sem nenhum card
  * aberto por identidade concorrendo. Qualquer outra coisa → revisar.
  */
 function unicoRecente(c: Candidata, candidatas: Candidata[], abertasIdentidade: Candidata[]): boolean {
-  const recentes = candidatas.filter((x) => x.via.includes("recente"));
-  return !c.terminal && c.via.includes("recente") && recentes.length === 1 && recentes[0].id === c.id && abertasIdentidade.length === 0;
+  const conversa = candidatas.filter(daConversa);
+  return !c.terminal && c.via.includes("recente") && conversa.length === 1 && conversa[0].id === c.id && abertasIdentidade.length === 0;
 }
 
 export function resolverAlvo(e: { alvoResposta: string | null; escolhaLlm: string | null; candidatas: Candidata[] }): Alvo {

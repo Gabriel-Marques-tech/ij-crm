@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MOTIVO_FECHADO_COM_ABERTO, MOTIVO_SEM_IDENTIDADE, resolverAlvo, type Candidata } from "./alvo";
+import { MOTIVO_FECHADO_COM_ABERTO, MOTIVO_REABERTO, MOTIVO_SEM_IDENTIDADE, resolverAlvo, type Candidata } from "./alvo";
 
 const T = (min: number) => new Date(Date.UTC(2026, 9, 26, 12, min));
 
@@ -49,6 +49,36 @@ describe("resolverAlvo — escolha da LLM só vale dentro da lista", () => {
       id: "b",
       motivos: [MOTIVO_SEM_IDENTIDADE],
     });
+  });
+
+  it("GAB-49: card só do ledger (mexido há mais de 30 min) pode ser escolhido, mas com revisar", () => {
+    expect(resolverAlvo({ alvoResposta: null, escolhaLlm: "b", candidatas: [c("b", { via: ["ledger"] })] })).toEqual({
+      tipo: "EXISTENTE",
+      id: "b",
+      motivos: [MOTIVO_SEM_IDENTIDADE],
+    });
+    // Mesmo card recente E no ledger continua sendo um só.
+    expect(resolverAlvo({ alvoResposta: null, escolhaLlm: "b", candidatas: [c("b", { via: ["recente", "ledger"] })] })).toMatchObject({ motivos: [] });
+  });
+
+  it("GAB-49: ledger com OUTRO card aberto na janela → ambíguo, revisar (mesmo que só um seja dos últimos 30 min)", () => {
+    expect(
+      resolverAlvo({ alvoResposta: null, escolhaLlm: "b", candidatas: [c("a", { via: ["ledger"] }), c("b", { via: ["recente", "ledger"] })] }),
+    ).toEqual({ tipo: "EXISTENTE", id: "b", motivos: [MOTIVO_SEM_IDENTIDADE] });
+  });
+
+  it("GAB-49: card fechado no ledger também concorre (como um recente fechado); escolher o fechado nunca dispensa revisar", () => {
+    expect(
+      resolverAlvo({ alvoResposta: null, escolhaLlm: "b", candidatas: [c("x", { via: ["ledger"], terminal: true }), c("b", { via: ["recente"] })] }),
+    ).toMatchObject({ id: "b", motivos: [MOTIVO_SEM_IDENTIDADE] });
+    expect(resolverAlvo({ alvoResposta: null, escolhaLlm: "x", candidatas: [c("x", { via: ["ledger"], terminal: true })] })).toMatchObject({
+      tipo: "REABRIR",
+      motivos: [MOTIVO_REABERTO, MOTIVO_SEM_IDENTIDADE],
+    });
+  });
+
+  it("GAB-49: ledger sozinho nunca decide sem a LLM (sem id → NENHUM)", () => {
+    expect(resolverAlvo({ alvoResposta: null, escolhaLlm: null, candidatas: [c("b", { via: ["ledger"] })] })).toEqual({ tipo: "NENHUM" });
   });
 
   it("escolha só por 'dominio' → sempre com motivo (revisar)", () => {
