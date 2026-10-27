@@ -37,6 +37,7 @@
  */
 import { Prisma } from "@prisma/client";
 import { modeloDoProvedorConfigurado, limiarConfianca } from "@/lib/config/env";
+import { carregarConfigTecnica } from "@/lib/config/tecnica";
 import { contexto12h } from "@/lib/contexto/contexto-12h";
 import { encontrarContatoPorIdentificador, encontrarEmpresa } from "@/lib/contatos/match";
 import { db } from "@/lib/db";
@@ -245,6 +246,9 @@ async function falhar(
  */
 export async function processarMensagem(id: string, opts: { participantJid?: string | null } = {}): Promise<ResultadoProcessamento> {
   try {
+    // GAB-42: config do Admin > env. Banco fora → não reivindica: fica RECEBIDA para o cron.
+    const carga = await carregarConfigTecnica();
+    if (!carga.ok) return { tipo: "ERRO", ref: carga.ref };
     return await processar(id, opts);
   } catch (e) {
     const ref = registrarErro("processar", erroSeguro(e));

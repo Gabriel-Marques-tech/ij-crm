@@ -465,6 +465,40 @@ model Configuracao {
   @@map("configuracao")
 }
 
+// ---------------------------------------------------------------- logs técnicos (GAB-42)
+
+// Anel das últimas N chamadas do webhook (src/lib/logs). Sem corpo nem texto:
+// tipo do evento, chat mascarado, status/resultado e duração.
+model LogWebhook {
+  id        Int      @id @default(autoincrement())
+  em        DateTime @default(now())
+  tipo      String?
+  chat      String?
+  status    Int
+  resultado String
+  ms        Int
+
+  @@map("log_webhook")
+}
+
+// Anel das últimas N chamadas de LLM: modelo, tokens (incl. raciocínio), ms e
+// status. `ref` = id da MensagemBruta (correlaciona com o log do servidor).
+model LogLlm {
+  id               Int      @id @default(autoincrement())
+  em               DateTime @default(now())
+  operacao         String
+  provedor         String?
+  modelo           String?
+  tokensEntrada    Int?     @map("tokens_entrada")
+  tokensSaida      Int?     @map("tokens_saida")
+  tokensRaciocinio Int?     @map("tokens_raciocinio")
+  ms               Int?
+  status           String
+  ref              String?
+
+  @@map("log_llm")
+}
+
 // ---------------------------------------------------------------- contexto da LLM (GAB-49)
 
 enum StatusResumo {

@@ -398,7 +398,7 @@ para gestor/admin e usuário ativo; para os demais o servidor ignora e mostra a 
 - **Estado na URL** (`src/lib/tabela/params.ts`), compartilhável e igual ao Kanban onde coincide: `quadro` (chaves de pipeline), `fase` (ids), `resp`, `origem` (`SEM` = sem origem), `revisar` e `terminais` (`sim`/`nao`), `acao` (`vencida,hoje,semana,sem`, mesmas faixas da Minha Semana), `de`/`ate` (criação, `YYYY-MM-DD` em SP, inclusivo), `q` (título, empresa ou contato vivos; sem acento, sem caixa e com espaços colapsados como no Kanban, via `public.unaccent` da migration `20261024174500_review_fixes`; `%`/`_` literais), `ordem`/`dir` (lista branca, desempate por id) e `pagina`. Valor inválido é ignorado.
 - **CSV**: `GET /tabela/csv?<mesmos parâmetros>` exporta todas as linhas filtradas (sem limite de página), em streaming: UTF-8 com BOM, `;`, vírgula decimal e datas dd/mm/aaaa (abre direto no Excel pt-BR). Texto que começa com `= + - @`, tab ou CR (mesmo depois de espaços) ganha um `'` visível (mitigação padrão OWASP contra formula injection). Erro antes do primeiro byte → 500 com `ref`; erro no meio do streaming não vira 500 (o 200 já saiu): o arquivo termina com a linha `EXPORTAÇÃO INCOMPLETA: erro no servidor (ref: …)`, que é o sinal de arquivo truncado. Cada lote reaplica os filtros: toda linha exportada ainda batia neles no momento do lote, sem duplicar (não é um retrato único no tempo).
 - **Busca: Tabela × Kanban** (diferença intencional). O Kanban busca em título + empresa, no cliente, sobre os cards já carregados do quadro; a Tabela busca também no nome do contato, no banco, porque é a visão de pesquisa geral. Empresa/contato aparecem (tela e CSV) e são buscados pelo nome exibido, na regra do Kanban (`nomeExibido`): mesclado (mesmo se também excluído) → nome da principal se ela estiver viva, senão o próprio nome; merge tem 1 nível (`validarMerge`). Excluído sem merge aparece com "(excluída)" e não é achado pelo nome.
-- **Ordem por empresa/contato** (GAB-48): pelo nome exibido (mesclado → principal viva; excluído sem merge → o próprio nome), na colação ICU `ij_ptbr` (pt-BR, criada pela migration `20261027140000_colacao_ptbr`; acento e caixa só desempatam; a colação padrão do banco no Alpine compara bytes), vazios por último nos dois sentidos, desempate por id. Toda página (e o CSV) lê os ids filtrados já ordenados, cruza com a busca em memória (nunca um `IN` gigante: o Postgres recusa mais de 32.767 parâmetros) e carrega só a fatia reaplicando os filtros. Limite conhecido: lê todos os ids filtrados por página, ok na escala atual; se crescer, keyset/`OFFSET` no SQL.
+- **Ordem de texto** (GAB-48): título, responsável, empresa e contato ordenam em pt-BR (`ij_ptbr`); empresa/contato pelo nome exibido (mesclado → principal viva; excluído sem merge → o próprio nome), na colação ICU `ij_ptbr` (pt-BR, criada pela migration `20261027140000_colacao_ptbr`; acento e caixa só desempatam; a colação padrão do banco no Alpine compara bytes), vazios por último nos dois sentidos, desempate por id. Toda página (e o CSV) lê os ids filtrados já ordenados, cruza com a busca em memória (nunca um `IN` gigante: o Postgres recusa mais de 32.767 parâmetros) e carrega só a fatia reaplicando os filtros. Limite conhecido: lê todos os ids filtrados por página, ok na escala atual; se crescer, keyset/`OFFSET` no SQL.
 
 ## Preferências de visualização
 
@@ -496,6 +496,48 @@ ausente = padrão; linha que não passa no schema = padrão + log `[configuracao
 campos com problema, nunca o valor) e a tela avisa "valor salvo inválido". Gravação com concorrência
 otimista: o formulário manda o `atualizado_em` que carregou e, se outra pessoa salvou no meio, recebe
 "Outra pessoa alterou esta configuração. Recarregue para ver os valores atuais."
+
+## Admin: configuração técnica e logs
+
+Só ADMIN (gestor recebe 403): **Gestão → Admin**.
+
+- **Configuração** — `GRUPO_JID` (botão "Listar grupos" consulta a Evolution:
+  `GET /group/fetchAllGroups/{instância}?getParticipants=false`), provedor e modelos de
+  extração/classificação, limiares (com #crm, sem #crm, classificador) e timeout de envio.
+  Fica na tabela `configuracao` (chave `tecnica`, schema zod em `src/lib/config/tecnica.ts`).
+  Precedência **config > env > padrão**: o valor salvo vira sobrescrita das variáveis lidas por
+  `src/lib/config/env.ts` (mesmas validações de lá). Campo vazio = herda do env.
+- Salvar recusa combinação inválida (em português): modelo de outro provedor, limiar sem
+  #crm < com #crm, `mock` em produção, JID que não é de grupo, e qualquer salvar/restaurar que
+  deixe o CRM **sem grupo** (nem aqui nem no env). Grupo novo precisa estar em "Listar grupos";
+  com a Evolution fora, só com "salvar mesmo assim". Concorrência otimista (salvar e restaurar).
+- Modelo de classificação e limiares sem #crm/classificador valem para o classificador sem
+  #crm (GAB-39): ele lê pelas mesmas funções de `env.ts`, então segue a config daqui (inclusive a
+  regra sem #crm ≥ com #crm). No boot, `instrumentation.ts` carrega a config antes de
+  `validarConfigLlm()`. As chamadas do classificador também aparecem em Logs.
+- **Cache**: a config é lida do banco uma vez por processo (entrada do webhook e de
+  `processarMensagem`) e fica em memória; salvar/restaurar aplica na hora, então vale já na
+  próxima mensagem. Funciona porque o app roda em **um processo Next** — com réplicas seria
+  preciso TTL ou `LISTEN/NOTIFY`. Edição manual da linha no banco só vale após reiniciar.
+  Uma geração no cache impede que uma carga lenta sobrescreva um salvar feito no meio dela.
+  Config salva que virou inválida com o env (ex.: trocaram o provedor no env) é ignorada na
+  carga (log com ref, só a chave) e a tela avisa. Banco fora na carga → webhook responde 503
+  (a Evolution re-tenta) e `processarMensagem` não reivindica (fica RECEBIDA para o cron).
+- Segredos (chaves de API, chave da Evolution, segredo do webhook) e o safe mode
+  (`NOTIFICATIONS_ENABLED`) **não** são editáveis: a tela mostra só configurada/ausente e um
+  o safe mode com o ambiente: em produção avisa quando o bot está calado; fora dela, quando envia.
+  Também mostra quantos eventos de outro chat chegaram na última hora (sinal de GRUPO_JID errado).
+- **Estado da Evolution** (`GET /instance/connectionState/{instância}`) e botão "Mostrar QR"
+  (`GET /instance/connect/{instância}`; com a instância fechada isso inicia uma conexão). O QR
+  vincula o WhatsApp: action só-ADMIN, nunca logado nem cacheado, some ao fechar.
+- **Logs** — últimos 200 eventos do webhook (hora, tipo, chat mascarado, HTTP, resultado, ms)
+  e 200 chamadas de LLM (modelo, tokens de entrada/saída/raciocínio, ms, status, ref da
+  mensagem). Tabelas `log_webhook`/`log_llm` em anel: cada inserção apaga o que passou do
+  limite (`src/lib/logs/tecnicos.ts`). Nunca texto de mensagem, telefone ou email; tipo,
+  resultado e modelo só entram se parecem identificadores. Falha ao gravar log não afeta o
+  webhook. **401 não entra na tabela** (um flood empurraria os eventos reais): só um contador em
+  memória (zera ao reiniciar), mostrado em Logs, e no máximo uma linha `[webhook] … (401)` por
+  minuto no console. "Listar grupos" tem timeout próprio de 60 s.
 
 ## Erros e debug
 

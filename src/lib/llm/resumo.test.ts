@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { registrarLogLlm } from "@/lib/logs/tecnicos";
 import { definirResumoMock } from "./provedores/mock";
 import { resumirJanela } from "./resumo";
 import type { ProvedorLlm } from "./tipos";
+
+vi.mock("@/lib/logs/tecnicos", () => ({ registrarLogLlm: vi.fn(async () => {}) }));
 
 const ENTRADA = { vendedor: "João", mensagens: [{ em: new Date(0), texto: "fechou com a Alfa, tel 11 99999-8888", card: null }], cards: [] };
 
@@ -30,6 +33,7 @@ describe("resumirJanela", () => {
     const log = info.mock.calls.map((c) => c.join(" ")).join("\n");
     expect(log).toContain("[llm] resumo ref=R1 provedor=openai modelo=gpt-6.1-sol versao=resumo.v1 ms=7 tokens_in=10 tokens_out=5 ok");
     expect(log).not.toMatch(/Alfa|9999/);
+    expect(registrarLogLlm).toHaveBeenCalledWith(expect.objectContaining({ operacao: "resumo", status: "ok", ref: "R1", uso: expect.objectContaining({ tokensEntrada: 10 }) }));
   });
 
   it("saída fora do schema → ErroLlm SAIDA_INVALIDA; mock padrão responde", async () => {

@@ -17,6 +17,7 @@
  *   ledger não é copiado para lugar nenhum: o texto original segue a regra
  *   de 90 dias da `mensagem_bruta` (GAB-41).
  */
+import { carregarConfigTecnica } from "@/lib/config/tecnica";
 import { db } from "@/lib/db";
 import { registrarErro } from "@/lib/erros/registrar";
 import { resumirJanela } from "@/lib/llm/resumo";
@@ -130,6 +131,9 @@ export async function aplicarRetencaoResumos(agora: Date = new Date()): Promise<
 export async function gerarResumosPendentes(agora: Date = new Date()): Promise<{ gerados: number }> {
   let gerados = 0;
   try {
+    // GAB-42: provedor/modelo/chave da config do Admin (o webhook já carrega; o cron não).
+    const carga = await carregarConfigTecnica();
+    if (!carga.ok) return { gerados };
     const janela = janelaAnterior(agora);
     const remetentes = await db.mensagemBruta.findMany({
       where: { recebidaEm: { gte: janela.inicio, lt: janela.fim }, status: { not: "CLASSIFICADA_IRRELEVANTE" }, remetenteUsuarioId: { not: null } },

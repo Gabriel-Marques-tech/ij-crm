@@ -4,10 +4,12 @@
  * raciocínio `low`, JSON schema estrito de 1 campo). Mesmo timeout,
  * retentativa e tradução de erro dos provedores (`provedores/comum.ts`).
  *
- * Loga provedor, modelo, versão, latência e tokens — NUNCA o texto. Lança
+ * Loga provedor, modelo, versão, latência e tokens — NUNCA o texto — no log
+ * do servidor e em `log_llm` (Admin → Logs, GAB-42, `operacao=resumo`). Lança
  * `ErroLlm`; quem decide o que fazer com a falha (seguir sem resumo) é
  * `contexto/resumo.ts`.
  */
+import { registrarLogLlm } from "@/lib/logs/tecnicos";
 import { provedorConfigurado } from "./extracao";
 import {
   JSON_SCHEMA_RESUMO,
@@ -24,12 +26,14 @@ import { ErroLlm, type ProvedorLlm, type UsoLlm } from "./tipos";
 
 export type ResultadoResumo = { resumo: string; uso: UsoLlm; versao: string };
 
-function log(uso: UsoLlm | undefined, ref: string, resultado: string) {
+async function log(uso: UsoLlm | undefined, ref: string, resultado: string, status: string) {
   const base = `[llm] resumo ref=${ref}`;
-  if (!uso) return console.info(`${base} versao=${VERSAO_RESUMO} ${resultado}`);
-  console.info(
-    `${base} provedor=${uso.provedor} modelo=${uso.modelo} versao=${VERSAO_RESUMO} ms=${uso.ms} tokens_in=${uso.tokensEntrada} tokens_out=${uso.tokensSaida}${uso.tokensRaciocinio === undefined ? "" : ` tokens_reasoning=${uso.tokensRaciocinio}`} ${resultado}`,
-  );
+  if (!uso) console.info(`${base} versao=${VERSAO_RESUMO} ${resultado}`);
+  else
+    console.info(
+      `${base} provedor=${uso.provedor} modelo=${uso.modelo} versao=${VERSAO_RESUMO} ms=${uso.ms} tokens_in=${uso.tokensEntrada} tokens_out=${uso.tokensSaida}${uso.tokensRaciocinio === undefined ? "" : ` tokens_reasoning=${uso.tokensRaciocinio}`} ${resultado}`,
+    );
+  await registrarLogLlm({ operacao: "resumo", uso, status, ref: ref === "-" ? null : ref });
 }
 
 const codigo = (e: unknown) => (e instanceof ErroLlm ? e.codigo : "INESPERADO");
@@ -43,7 +47,7 @@ export async function resumirJanela(
   try {
     provedor = opts.provedor ?? provedorConfigurado();
   } catch (e) {
-    log(undefined, ref, `erro=${codigo(e)}`);
+    await log(undefined, ref, `erro=${codigo(e)}`, codigo(e));
     throw e;
   }
   let resposta;
@@ -56,15 +60,15 @@ export async function resumirJanela(
       maxTokens: MAX_TOKENS_RESUMO,
     });
   } catch (e) {
-    log(e instanceof ErroLlm ? e.uso : undefined, ref, `erro=${codigo(e)}`);
+    await log(e instanceof ErroLlm ? e.uso : undefined, ref, `erro=${codigo(e)}`, codigo(e));
     throw e;
   }
   const r = esquemaResumo.safeParse(resposta.bruto);
   if (!r.success) {
-    log(resposta.uso, ref, "erro=SAIDA_INVALIDA");
+    await log(resposta.uso, ref, "erro=SAIDA_INVALIDA", "SAIDA_INVALIDA");
     throw new ErroLlm("SAIDA_INVALIDA", { uso: resposta.uso });
   }
   const resumo = resumoFinal(r.data.resumo);
-  log(resposta.uso, ref, `ok chars=${resumo.length}`);
+  await log(resposta.uso, ref, `ok chars=${resumo.length}`, "ok");
   return { resumo, uso: resposta.uso, versao: VERSAO_RESUMO };
 }

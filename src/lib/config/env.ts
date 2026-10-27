@@ -9,6 +9,8 @@
  * falha com `ConfigFraca`. (GAB-41 deve aplicar a mesma regra a CRON_SECRET.)
  */
 
+import { sobrescrita } from "./sobrescritas";
+
 export const TAMANHO_MINIMO_SEGREDO = 32;
 const PREFIXO_PLACEHOLDER = "troque-me";
 
@@ -40,8 +42,9 @@ export type MotivoSegredoInvalido = "AUSENTE" | "PLACEHOLDER" | "CURTO";
 
 export type DiagnosticoSegredo = { ok: true; valor: string } | { ok: false; motivo: MotivoSegredoInvalido };
 
+/** Config técnica do Admin (GAB-42, `tecnica.ts`) vence o env; segredos nunca são sobrescritos. */
 function ler(nome: string): string | undefined {
-  const v = process.env[nome]?.trim();
+  const v = (sobrescrita(nome) ?? process.env[nome])?.trim();
   return v ? v : undefined;
 }
 
@@ -96,6 +99,16 @@ export function grupoJid(): string | undefined {
 /** Safe mode (padrão LocPay): só a string exata "true" libera envio real. */
 export function notificacoesAtivas(): boolean {
   return process.env.NOTIFICATIONS_ENABLED === "true";
+}
+
+export const TIMEOUT_ENVIO_PADRAO_MS = 60_000;
+export const TIMEOUT_ENVIO_MIN_MS = 5_000;
+export const TIMEOUT_ENVIO_MAX_MS = 120_000;
+
+/** Timeout do envio à Evolution (`EVOLUTION_TIMEOUT_ENVIO_MS`, 5–120 s); fora disso → 60 s. */
+export function timeoutEnvioMs(): number {
+  const n = Number(ler("EVOLUTION_TIMEOUT_ENVIO_MS"));
+  return Number.isInteger(n) && n >= TIMEOUT_ENVIO_MIN_MS && n <= TIMEOUT_ENVIO_MAX_MS ? n : TIMEOUT_ENVIO_PADRAO_MS;
 }
 
 // ---------------------------------------------------------------- LLM (GAB-34)
