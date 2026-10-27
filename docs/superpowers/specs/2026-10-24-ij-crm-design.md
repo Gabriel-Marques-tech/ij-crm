@@ -180,8 +180,10 @@ responde. Cron fica só para reprocessar `FALHA` e para backup.
 ### 4.4 LLM
 - Camada única `extrairAtualizacao(texto, contexto) → Json` e
   `classificar(texto) → {relevante, confianca}` com provedor por env var.
-- **Provisório:** Claude Sonnet 5.5 (extração) + Claude Haiku 5.5
-  (classificação), SDK oficial Anthropic, structured outputs.
+- **Produção:** OpenAI GPT-6.1 Sol com raciocínio `low` (SDK oficial
+  `openai`, Responses API, structured outputs estrito) — escolha do usuário
+  (GAB-45). **Alternativa:** Anthropic (Claude Haiku 5.5 / Sonnet 5.5), por
+  env (`LLM_PROVEDOR=anthropic`).
 - **Benchmark** (parte do plano): ~50 mensagens reais do grupo rotuladas;
   script roda Sonnet 5.5, Haiku 5.5, GPT-5 mini, GPT-5 nano no mesmo
   prompt/schema; mede campos corretos, fase, intenção, latência, custo.

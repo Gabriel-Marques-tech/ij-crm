@@ -39,6 +39,8 @@ alcança `db` e `evolution`; a Evolution alcança `evolution-db`,
 - [ ] Crontab instalado (`crontab -l`), primeiro backup do cron no log.
 - [ ] Teste de restore feito uma vez na VPS (§3).
 - [ ] Número dedicado pareado (§5), webhook configurado, `GRUPO_JID` preenchido.
+- [ ] Conta da OpenAI com crédito pré-pago, **auto-reload desligado** e
+      `OPENAI_API_KEY` no `.env` (§10).
 - [ ] `NOTIFICATIONS_ENABLED=true` no `.env` da VPS **por último**, e `scripts/deploy.sh`.
 
 ## 0. Primeira instalação (VPS limpa)
@@ -345,3 +347,46 @@ cliente e pode ser forjado.
   chave. Antes disso: configure `trusted_proxies` no Caddy e revise `ipDoCliente`.
 - Os contadores ficam em memória, com teto de 10 mil chaves por limitador.
   Reiniciar o container zera todos.
+
+## 10. Provedor de LLM e crédito da OpenAI
+
+Produção usa **OpenAI, GPT-6.1 Sol com raciocínio `low`** (`LLM_PROVEDOR=openai`,
+padrão). A Anthropic (Claude Haiku 5.5) segue como alternativa por env.
+
+**Trocar de provedor** (no `.env` da VPS, depois `scripts/deploy.sh`, que recria o
+app com o env novo):
+
+```bash
+# OpenAI (padrão)
+LLM_PROVEDOR=openai
+OPENAI_API_KEY=sk-...
+LLM_EXTRACAO_MODELO=          # vazio = gpt-6.1-sol
+
+# Anthropic (alternativa)
+LLM_PROVEDOR=anthropic
+ANTHROPIC_API_KEY=sk-ant-...
+LLM_EXTRACAO_MODELO=          # vazio = claude-haiku-5-5 (ou claude-sonnet-5-5)
+```
+
+Troque ou esvazie `LLM_EXTRACAO_MODELO` junto: modelo de um provedor com o outro
+selecionado faz toda mensagem ir para `FALHA` com "PROVEDOR_INVALIDO" (ref no
+grupo e motivo em Gestão → mensagens). Depois da troca, reprocesse as `FALHA` do
+período (o cron do GAB-41 faz isso sozinho).
+
+**Crédito pré-pago, recarga manual** (platform.openai.com → Settings → Billing):
+
+1. Na configuração da conta, **desligue o auto-reload** (auto recharge). A conta
+   fica só com o saldo comprado: nunca cobra o cartão sem alguém decidir.
+2. Compra mínima: **US$ 5**. Créditos **expiram 1 ano** depois da compra —
+   não compre muito adiantado.
+3. Sugestão para o volume da IJ: **US$ 50 a cada ~3 meses**. Confira o uso em
+   Usage e o custo real nos logs (`[llm] extracao ... tokens_in= tokens_out=
+   tokens_reasoning=`).
+4. Crie uma chave de **projeto** só para o CRM (Settings → API keys) e guarde a
+   cópia offline junto com o `.env`.
+
+**Saldo acabou:** a API responde `insufficient_quota` (ou
+`credit_balance_exhausted`), identificado pelo código do erro — nunca pelo texto.
+Cada mensagem `#crm` vai para `FALHA` com "sem crédito na API da OpenAI" + ref
+(sem re-tentar, sem gastar), e o grupo recebe "❌ ... (ref: ...)". Recarregue e as
+mensagens voltam pelo reprocessamento (GAB-41, mantendo `erro`).
