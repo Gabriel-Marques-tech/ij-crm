@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { dbTeste, limparBanco } from "@/test/db";
-import { LIMITE_LOG_LLM, LIMITE_LOG_WEBHOOK, listarLogsLlm, listarLogsWebhook, registrarLogLlm, registrarLogWebhook } from "./tecnicos";
+import { contagemNaoAutorizados, contarNaoAutorizado, LIMITE_LOG_LLM, LIMITE_LOG_WEBHOOK, listarLogsLlm, listarLogsWebhook, registrarLogLlm, registrarLogWebhook } from "./tecnicos";
 
 const dbT = dbTeste();
 
@@ -55,5 +55,23 @@ describe("log_llm (anel)", () => {
     for (let i = 0; i < LIMITE_LOG_LLM + 3; i++) await registrarLogLlm({ operacao: "extracao", status: "ok", ref: `m${i}` });
     expect(await dbT.logLlm.count()).toBe(LIMITE_LOG_LLM);
     expect((await listarLogsLlm())[0].ref).toBe(`m${LIMITE_LOG_LLM + 2}`);
+  });
+});
+
+describe("401 no webhook: só contador em memória + log amostrado", () => {
+  it("conta tudo, loga no máximo uma linha por minuto (com o total do intervalo), sem gravar no banco", async () => {
+    const aviso = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const t0 = 1_000_000_000_000;
+    const base = contagemNaoAutorizados().total;
+    contarNaoAutorizado(t0);
+    for (let i = 1; i <= 5; i++) contarNaoAutorizado(t0 + i * 1000);
+    expect(aviso).toHaveBeenCalledTimes(1);
+    contarNaoAutorizado(t0 + 61_000);
+    expect(aviso).toHaveBeenCalledTimes(2);
+    expect(String(aviso.mock.calls[1][0])).toMatch(/6 requisições não autenticadas \(401\)/);
+    const c = contagemNaoAutorizados();
+    expect(c.total).toBe(base + 7);
+    expect(c.ultimaEm).toEqual(new Date(t0 + 61_000));
+    expect(await dbT.logWebhook.count()).toBe(0);
   });
 });

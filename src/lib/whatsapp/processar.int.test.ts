@@ -7,6 +7,7 @@ import { definirRespostaMock } from "@/lib/llm/provedores/mock";
 import { ErroLlm } from "@/lib/llm/tipos";
 import { dbTeste, limparBanco } from "@/test/db";
 import { semear } from "../../../prisma/seed";
+import { invalidarConfigTecnica } from "@/lib/config/tecnica";
 import { processarMensagem } from "./processar";
 
 const dbT = dbTeste();
@@ -473,5 +474,18 @@ describe("contexto", () => {
     expect(usuario).toContain(`id=${c.id} nome="Gustavo" empresa=null via=telefone`);
     expect(usuario).toContain("Vendedor (remetente): João");
     expect(usuario).toContain("- primeiro_contato — Primeiro Contato");
+  });
+});
+
+describe("config técnica indisponível (GAB-42)", () => {
+  it("banco falha ao carregar a config → não reivindica: a mensagem fica RECEBIDA para o cron", async () => {
+    invalidarConfigTecnica();
+    vi.spyOn(db.configuracao, "findUnique").mockRejectedValueOnce(new Error("db fora"));
+    const m = await bruta("#crm falei com o Gustavo");
+    const r = await processarMensagem(m.id);
+    expect(r).toMatchObject({ tipo: "ERRO", ref: expect.stringMatching(/^[0-9a-f]{8}$/) });
+    const depois = await dbT.mensagemBruta.findUniqueOrThrow({ where: { id: m.id } });
+    expect(depois).toMatchObject({ status: "RECEBIDA", tentativas: 0 });
+    invalidarConfigTecnica();
   });
 });

@@ -72,3 +72,41 @@ export function listarLogsWebhook(limite = LIMITE_LOG_WEBHOOK) {
 export function listarLogsLlm(limite = LIMITE_LOG_LLM) {
   return db.logLlm.findMany({ orderBy: { id: "desc" }, take: limite });
 }
+
+// ------------------------------------------------- 401 do webhook (só memória)
+
+/**
+ * Requisição não autenticada não vira linha no anel (um flood empurraria os
+ * eventos reais para fora): só um contador em memória, mostrado em Admin →
+ * Logs, e no máximo uma linha de console por minuto com o total do intervalo.
+ * Zera ao reiniciar o app.
+ */
+type Contador401 = { total: number; desde: Date; ultimaEm: Date | null; ultimoLogEm: number; pendentes: number };
+const g401 = globalThis as unknown as { __ijContador401?: Contador401 };
+const INTERVALO_LOG_401_MS = 60_000;
+
+function contador401(): Contador401 {
+  return (g401.__ijContador401 ??= { total: 0, desde: new Date(), ultimaEm: null, ultimoLogEm: Number.NEGATIVE_INFINITY, pendentes: 0 });
+}
+
+export function contarNaoAutorizado(agora = Date.now()): void {
+  const c = contador401();
+  c.total++;
+  c.pendentes++;
+  c.ultimaEm = new Date(agora);
+  if (agora - c.ultimoLogEm >= INTERVALO_LOG_401_MS) {
+    console.warn(`[webhook] ${c.pendentes} ${c.pendentes === 1 ? "requisição não autenticada" : "requisições não autenticadas"} (401) desde a última linha`);
+    c.ultimoLogEm = agora;
+    c.pendentes = 0;
+  }
+}
+
+export function contagemNaoAutorizados(): { total: number; desde: Date; ultimaEm: Date | null } {
+  const { total, desde, ultimaEm } = contador401();
+  return { total, desde, ultimaEm };
+}
+
+/** Eventos de outro chat na última hora (dentro do anel): sinal de GRUPO_JID errado. */
+export function contarOutroChatUltimaHora(agora = new Date()): Promise<number> {
+  return db.logWebhook.count({ where: { resultado: "ignorado:OUTRO_CHAT", em: { gte: new Date(agora.getTime() - 3_600_000) } } });
+}

@@ -7,6 +7,7 @@ import { FIXTURES_EXTRACAO } from "@/lib/llm/fixtures/extracao";
 import { semear } from "../../../../../prisma/seed";
 import { definirSobrescritas } from "@/lib/config/sobrescritas";
 import { invalidarConfigTecnica } from "@/lib/config/tecnica";
+import { contagemNaoAutorizados } from "@/lib/logs/tecnicos";
 
 // `after()` do Next só funciona dentro de um request scope. Aqui o handler é
 // chamado direto, então a tarefa roda imediatamente e fica numa fila que o
@@ -527,8 +528,9 @@ describe("POST /api/webhooks/evolution — config técnica e logs (GAB-42)", () 
     expect(r.json).toMatchObject({ ok: true, persistida: true });
   });
 
-  it("grava log_webhook e log_llm sem texto, telefone ou JID em claro", async () => {
+  it("grava log_webhook e log_llm sem texto, telefone ou JID em claro; 401 só no contador", async () => {
     await vendedor();
+    const antes = contagemNaoAutorizados().total;
     await postar("texto-grupo");
     await postar("texto-grupo"); // duplicado
     await POST(requisicao(fixtureEvolution("texto-grupo"), { "x-webhook-secret": "errado" }));
@@ -538,15 +540,34 @@ describe("POST /api/webhooks/evolution — config técnica e logs (GAB-42)", () 
     expect(web.map((l) => [l.status, l.resultado])).toEqual([
       [200, "persistida"],
       [200, "duplicado"],
-      [401, "nao_autorizado"],
     ]);
+    expect(contagemNaoAutorizados().total).toBe(antes + 1);
     expect(web[0]).toMatchObject({ tipo: "messages.upsert", chat: expect.stringMatching(/^\d{2}\*+\d{2}@g\.us$/) });
-    expect(web[2]).toMatchObject({ tipo: null, chat: null });
     const llm = await dbT.logLlm.findMany();
     expect(llm).toHaveLength(1);
     expect(llm[0]).toMatchObject({ operacao: "extracao", status: "ok", provedor: "mock" });
 
     const tudo = JSON.stringify([web, llm]);
     for (const proibido of ["#crm", "Gustavo", "Economia", "5511999998888", "999998888", GRUPO_FIXTURE]) expect(tudo).not.toContain(proibido);
+  });
+
+  it("401 não lê a config (nem o banco)", async () => {
+    const { db } = await import("@/lib/db");
+    const leitura = vi.spyOn(db.configuracao, "findUnique");
+    const r = await postar("texto-grupo", { "x-webhook-secret": "errado" });
+    expect(r.status).toBe(401);
+    expect(leitura).not.toHaveBeenCalled();
+  });
+
+  it("config técnica ilegível (banco falhou) → 503 fechado, nada persistido; depois volta", async () => {
+    await vendedor();
+    const { db } = await import("@/lib/db");
+    vi.spyOn(db.configuracao, "findUnique").mockRejectedValueOnce(new Error("db fora"));
+    const r = await postar("texto-grupo");
+    expect(r.status).toBe(503);
+    expect(r.json).toMatchObject({ erro: "config_indisponivel", ref: expect.stringMatching(/^[0-9a-f]{8}$/) });
+    expect(await dbT.mensagemBruta.count()).toBe(0);
+    const de_novo = await postar("texto-grupo");
+    expect(de_novo.json).toMatchObject({ ok: true, persistida: true });
   });
 });

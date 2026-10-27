@@ -219,7 +219,9 @@ async function falhar(
  */
 export async function processarMensagem(id: string, opts: { participantJid?: string | null } = {}): Promise<ResultadoProcessamento> {
   try {
-    await carregarConfigTecnica(); // GAB-42: config do Admin > env (cache; nunca lança)
+    // GAB-42: config do Admin > env. Banco fora → não reivindica: fica RECEBIDA para o cron.
+    const carga = await carregarConfigTecnica();
+    if (!carga.ok) return { tipo: "ERRO", ref: carga.ref };
     return await processar(id, opts);
   } catch (e) {
     const ref = registrarErro("processar", erroSeguro(e));
