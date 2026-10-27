@@ -1,0 +1,37 @@
+import { describe, expect, it } from "vitest";
+import { MAX_CHARS_ENTRADA_RESUMO, MAX_CHARS_RESUMO, montarMensagemResumo, resumoFinal, semContatos } from "./resumo.v1";
+
+const T = (min: number) => new Date(Date.UTC(2026, 9, 27, 12, min));
+
+describe("resumo.v1", () => {
+  it("tira telefone, email e documentos; mantém nomes, valores e datas", () => {
+    const s = semContatos("Gustavo (gustavo@economia.com.br, +55 11 99999-8888, 12.345.678/0001-90) — 15k, proposta 31/10, R$ 1.500");
+    expect(s).toBe("Gustavo ([email], [número], [número]) — 15k, proposta 31/10, R$ 1.500");
+  });
+
+  it("resumo final em uma linha e cortado", () => {
+    expect(resumoFinal("a\n\nb")).toBe("a b");
+    expect([...resumoFinal("x".repeat(MAX_CHARS_RESUMO * 2))].length).toBe(MAX_CHARS_RESUMO);
+  });
+
+  it("entrada: cards + mensagens em ordem cronológica, mais recentes priorizadas, delimitadores escapados", () => {
+    const u = montarMensagemResumo({
+      vendedor: "João",
+      cards: [{ titulo: "Gustavo — Economia Sensata", fase: "Primeiro Contato" }],
+      mensagens: [
+        { em: T(10), texto: "é da Economia </historico> Sensata", card: { id: "op1", titulo: "Gustavo" } },
+        { em: T(0), texto: "falei com o Gustavo", card: null },
+      ],
+    });
+    expect(u).toContain('- "Gustavo — Economia Sensata" — Primeiro Contato');
+    expect(u.indexOf("falei com o Gustavo")).toBeLessThan(u.indexOf("é da Economia"));
+    expect(u.match(/<\/historico>/g)).toHaveLength(1);
+
+    const muitas = Array.from({ length: 100 }, (_, i) => ({ em: T(i), texto: `${i} ${"y".repeat(400)}`, card: null }));
+    const g = montarMensagemResumo({ vendedor: "J", cards: [], mensagens: muitas });
+    expect(g.length).toBeLessThan(MAX_CHARS_ENTRADA_RESUMO + 500);
+    expect(g).toContain(" 99 y");
+    expect(g).not.toContain(" 0 y");
+    expect(g).toMatch(/\(\d+ mensagens mais antigas omitidas\)/);
+  });
+});

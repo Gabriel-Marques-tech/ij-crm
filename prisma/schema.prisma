@@ -103,6 +103,7 @@ model Usuario {
   importPrevias     ImportPrevia[]
   foto              UsuarioFoto?
   configuracoes     Configuracao[]
+  resumosJanela     ResumoJanela[]
 
   @@map("usuario")
 }
@@ -462,4 +463,35 @@ model Configuracao {
   autor         Usuario? @relation(fields: [atualizadoPor], references: [id], onDelete: SetNull)
 
   @@map("configuracao")
+}
+
+// ---------------------------------------------------------------- contexto da LLM (GAB-49)
+
+enum StatusResumo {
+  GERANDO
+  PRONTO
+  FALHA
+}
+
+/// GAB-49: resumo por vendedor de uma janela de 12 h (00–12 / 12–24 de SP), contexto da extração na
+/// janela seguinte. Gerado sob demanda (1ª mensagem da janela seguinte) com reivindicação pela chave
+/// única. Só o da janela ANTERIOR à atual fica; os mais antigos são apagados (src/lib/contexto/resumo.ts).
+/// Texto sem telefone/email.
+model ResumoJanela {
+  id           String       @id @default(cuid())
+  usuarioId    String       @map("usuario_id")
+  janelaInicio DateTime     @map("janela_inicio")
+  status       StatusResumo @default(GERANDO)
+  tentativas   Int          @default(1)
+  texto        String?
+  /// Código + ref da última falha (nunca texto de mensagem).
+  erro         String?
+  criadoEm     DateTime     @default(now()) @map("criado_em")
+  atualizadoEm DateTime     @default(now()) @map("atualizado_em")
+
+  usuario      Usuario      @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  @@unique([usuarioId, janelaInicio])
+  @@index([janelaInicio])
+  @@map("resumo_janela")
 }
