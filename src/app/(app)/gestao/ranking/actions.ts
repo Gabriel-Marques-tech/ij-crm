@@ -24,6 +24,7 @@ export async function salvarConfigRankingAction(_prev: EstadoConfigRanking, form
         tetoBonus: numero(form, "tetoBonus"),
         avanco: numero(form, "avanco"),
         acaoFeita: numero(form, "acaoFeita"),
+        acoesPorDia: numero(form, "acoesPorDia"),
         cardCriado: numero(form, "cardCriado"),
       },
       minimos: { fechadosConversao: numero(form, "fechadosConversao"), ganhosTempo: numero(form, "ganhosTempo") },

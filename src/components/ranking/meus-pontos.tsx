@@ -8,7 +8,7 @@ export function MeusPontos({ eu, pesos, posicao }: { eu: LinhaPropria | null; pe
     ? [
         { rotulo: "Vendas ganhas", qtd: eu.ganhos, pts: eu.detalhe.ganho, regra: `${pesos.ganho} + ${pesos.bonusPorMil}/R$ 1.000 (até +${pesos.tetoBonus})` },
         { rotulo: "Avanços de fase", qtd: eu.avancos, pts: eu.detalhe.avanco, regra: `${pesos.avanco} cada · 1ª entrada na fase` },
-        { rotulo: "Próximas ações feitas", qtd: eu.acoesFeitas, pts: eu.detalhe.acaoFeita, regra: `${pesos.acaoFeita} cada · 1 por card/dia` },
+        { rotulo: "Próximas ações feitas", qtd: eu.acoesFeitas, pts: eu.detalhe.acaoFeita, regra: `${pesos.acaoFeita} cada · até ${pesos.acoesPorDia} por dia` },
         { rotulo: "Cards criados", qtd: eu.cardsCriados, pts: eu.detalhe.cardCriado, regra: `${pesos.cardCriado} cada` },
       ]
     : [];

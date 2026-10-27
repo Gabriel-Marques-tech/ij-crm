@@ -57,7 +57,7 @@ beforeEach(async () => {
 });
 
 describe("ranking a partir do histórico real (criar, mover, marcar feita, ganhar)", () => {
-  it("pontua criação, primeira entrada por fase, 1 ação por card/dia e ganho com bônus; participantes certos", async () => {
+  it("pontua criação, primeira entrada por fase, ações feitas e ganho com bônus; participantes certos", async () => {
     const s = await semear();
     const id = await novoCard(s, s.ana, "Padaria"); // +1
     await ok(moverCard(id, fase(s, "em_negociacao"), s.ana)); // +5
@@ -66,7 +66,7 @@ describe("ranking a partir do histórico real (criar, mover, marcar feita, ganha
     await db.oportunidade.update({ where: { id }, data: { proximaAcao: "ligar", proximaAcaoEm: new Date() } });
     const hoje = diaEmFuso(new Date());
     await ok(marcarAcaoFeita(id, { proximaAcao: "ligar", dia: hoje }, { tipo: "nova", proximaAcao: "mandar proposta", proximaAcaoEm: new Date() }, s.ana)); // +2
-    await ok(marcarAcaoFeita(id, { proximaAcao: "mandar proposta", dia: hoje }, { tipo: "nenhuma" }, s.ana)); // mesmo card/dia: 0
+    await ok(marcarAcaoFeita(id, { proximaAcao: "mandar proposta", dia: hoje }, { tipo: "nenhuma" }, s.ana)); // mesmo card no dia: conta (+2; cota é 4/dia por vendedor)
     // Quem move para o ganho é o Bruno; o ganho é do responsável (Ana).
     await ok(moverCard(id, fase(s, "contrato_assinado"), s.bruno, { dadosTerminal: { valorFechado: "12.500" } })); // +112
 
@@ -81,8 +81,8 @@ describe("ranking a partir do histórico real (criar, mover, marcar feita, ganha
     const nomes = v.ranking.linhas.map((l) => l.usuario.nome);
     expect(nomes).toEqual(["Ana Vendas", "Gil Gestor", "Bruno Lima"]);
     const ana = v.ranking.linhas[0];
-    expect(ana.detalhe).toEqual({ ganho: 112, avanco: 5, acaoFeita: 2, cardCriado: 1 });
-    expect(ana.pontos).toBe(120);
+    expect(ana.detalhe).toEqual({ ganho: 112, avanco: 5, acaoFeita: 4, cardCriado: 1 });
+    expect(ana.pontos).toBe(122);
     expect(ana.fechado).toBe(12_500);
     expect(v.ranking.linhas[1]).toMatchObject({ pontos: 1, abertos: 1, emAberto: 8000.5 });
     expect(v.eu?.posicao).toBe(1);
@@ -173,6 +173,15 @@ describe("visibilidade e configuração", () => {
     expect(await obterConfigRanking()).toEqual(novo);
     const linha = await db.configuracao.findUniqueOrThrow({ where: { chave: "ranking" } });
     expect(linha.atualizadoPor).toBe(s.gil.id);
+
+    // Config gravada antes de `acoesPorDia` existir mantém os pesos e ganha o limite padrão (4).
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { acoesPorDia, ...pesosAntigos } = novo.pesos;
+    await db.configuracao.update({ where: { chave: "ranking" }, data: { valor: { ...novo, pesos: pesosAntigos } } });
+    expect(await obterConfigRanking()).toEqual(novo);
+    expect((await obterConfigRanking()).pesos.acoesPorDia).toBe(4);
+    const limite = await salvarConfigRanking({ ...novo, pesos: { ...novo.pesos, acoesPorDia: 101 } }, s.gil);
+    expect(limite).toMatchObject({ ok: false, erro: "DADOS_INVALIDOS" });
 
     // JSON quebrado no banco (edição manual, versão antiga) vira o padrão, não erro.
     await db.configuracao.update({ where: { chave: "ranking" }, data: { valor: { pesos: "x" } } });

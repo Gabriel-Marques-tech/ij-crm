@@ -87,35 +87,62 @@ describe("avancosQueContam — só a primeira entrada de cada card em cada fase"
   });
 });
 
-describe("acoesQueContam — máx. 1 por card por dia (SP)", () => {
-  it("mesmo card no mesmo dia de SP conta uma vez; cards diferentes contam", () => {
-    const acoes = [
-      { oportunidadeId: "1", usuarioId: "ana", em: sp("2026-10-20T09:00:00") },
-      { oportunidadeId: "1", usuarioId: "ana", em: sp("2026-10-20T18:00:00") },
-      { oportunidadeId: "2", usuarioId: "ana", em: sp("2026-10-20T18:00:00") },
-    ];
-    expect(acoesQueContam(acoes, SEMANA)).toHaveLength(2);
+describe("acoesQueContam — máx. N por vendedor por dia (SP)", () => {
+  const acao = (usuarioId: string, oportunidadeId: string, iso: string) => ({ oportunidadeId, usuarioId, em: sp(iso) });
+
+  it("vendedor com 6 ações no mesmo dia: contam as 4 primeiras (padrão)", () => {
+    const acoes = ["09", "10", "11", "12", "13", "14"].map((h, i) => acao("ana", String(i % 2), `2026-10-20T${h}:00:00`));
+    const r = acoesQueContam(acoes, SEMANA, P.acoesPorDia);
+    expect(P.acoesPorDia).toBe(4);
+    expect(r).toHaveLength(4);
+    expect(r.map((a) => a.em)).toEqual(acoes.slice(0, 4).map((a) => a.em));
   });
 
-  it("o dia é o de SP: 23:30 e 00:30 do dia seguinte são dias diferentes (mesmo dia em UTC)", () => {
-    const acoes = [
-      { oportunidadeId: "1", usuarioId: "ana", em: sp("2026-10-20T21:30:00") }, // 00:30Z do dia 21
-      { oportunidadeId: "1", usuarioId: "ana", em: sp("2026-10-20T23:30:00") }, // 02:30Z do dia 21
-      { oportunidadeId: "1", usuarioId: "ana", em: sp("2026-10-21T00:30:00") }, // 03:30Z do dia 21
-    ];
-    expect(acoesQueContam(acoes, SEMANA)).toHaveLength(2);
+  it("mesmo card várias vezes no dia conta (não há mais limite por card)", () => {
+    const acoes = [acao("ana", "1", "2026-10-20T09:00:00"), acao("ana", "1", "2026-10-20T10:00:00"), acao("ana", "1", "2026-10-20T11:00:00")];
+    expect(acoesQueContam(acoes, SEMANA, 4)).toHaveLength(3);
   });
 
-  it("o limite é por card e dia, não por usuário: a 2ª pessoa no mesmo card/dia não pontua", () => {
+  it("o limite é por vendedor: outra pessoa tem a própria cota no mesmo dia/card", () => {
     const acoes = [
-      { oportunidadeId: "1", usuarioId: "ana", em: sp("2026-10-20T09:00:00") },
-      { oportunidadeId: "1", usuarioId: "bia", em: sp("2026-10-20T10:00:00") },
+      ...["09", "10", "11", "12", "13"].map((h) => acao("ana", "1", `2026-10-20T${h}:00:00`)),
+      acao("bia", "1", "2026-10-20T15:00:00"),
     ];
-    expect(acoesQueContam(acoes, SEMANA).map((a) => a.usuarioId)).toEqual(["ana"]);
+    const r = acoesQueContam(acoes, SEMANA, 4);
+    expect(r.filter((a) => a.usuarioId === "ana")).toHaveLength(4);
+    expect(r.filter((a) => a.usuarioId === "bia")).toHaveLength(1);
   });
 
-  it("fora do período não conta", () => {
-    expect(acoesQueContam([{ oportunidadeId: "1", usuarioId: "ana", em: sp("2026-10-26T00:00:00") }], SEMANA)).toEqual([]);
+  it("o dia é o de SP: 23:59 e 00:00 do dia seguinte são cotas diferentes (mesmo dia em UTC)", () => {
+    // 20/10 20:00–23:59 SP = 21/10 23:00Z..02:59Z; 21/10 00:00 SP = 21/10 03:00Z.
+    const acoes = [
+      acao("ana", "1", "2026-10-20T21:00:00"),
+      acao("ana", "1", "2026-10-20T22:00:00"),
+      acao("ana", "1", "2026-10-20T23:00:00"),
+      acao("ana", "1", "2026-10-20T23:59:00"),
+      acao("ana", "1", "2026-10-20T23:59:30"), // 5ª do dia 20: fora
+      acao("ana", "1", "2026-10-21T00:00:00"), // 1ª do dia 21: conta
+    ];
+    const r = acoesQueContam(acoes, SEMANA, 4);
+    expect(r).toHaveLength(5);
+    expect(r.at(-1)!.em).toEqual(sp("2026-10-21T00:00:00"));
+  });
+
+  it("limite configurável (inclusive 0 = ação feita não pontua) e fora do período não conta", () => {
+    const acoes = ["09", "10", "11"].map((h) => acao("ana", "1", `2026-10-20T${h}:00:00`));
+    expect(acoesQueContam(acoes, SEMANA, 2)).toHaveLength(2);
+    expect(acoesQueContam(acoes, SEMANA, 0)).toEqual([]);
+    expect(acoesQueContam([acao("ana", "1", "2026-10-26T00:00:00")], SEMANA, 4)).toEqual([]);
+  });
+
+  it("calcularRanking aplica o limite configurado", () => {
+    const d = vazio();
+    d.acoes.push(...["09", "10", "11", "12", "13", "14"].map((h) => acao("ana", "1", `2026-10-20T${h}:00:00`)));
+    const l = calcularRanking([ana], d, SEMANA, CFG).linhas[0];
+    expect(l.acoesFeitas).toBe(4);
+    expect(l.detalhe.acaoFeita).toBe(8);
+    const cfg = { ...CFG, pesos: { ...P, acoesPorDia: 6 } };
+    expect(calcularRanking([ana], d, SEMANA, cfg).linhas[0].detalhe.acaoFeita).toBe(12);
   });
 });
 

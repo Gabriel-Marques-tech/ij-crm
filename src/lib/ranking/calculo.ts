@@ -10,8 +10,9 @@
  * - Avanço de fase: TransicaoFase em Vendas para fase NÃO terminal de ordem
  *   maior que a de origem, e só se for a PRIMEIRA entrada do card naquela fase
  *   (a criação conta como entrada) → para quem moveu (`usuario_id`). Import não pontua.
- * - Próxima ação feita ("Marcar feita") → para quem marcou; no máximo 1 por card
- *   por dia civil de SP (a primeira do dia).
+ * - Próxima ação feita ("Marcar feita") → para quem marcou; no máximo
+ *   `acoesPorDia` (padrão 4) por VENDEDOR por dia civil de SP (as primeiras do
+ *   dia), em qualquer card — o mesmo card pode contar mais de uma vez.
  * - Card criado em Vendas (UI/WhatsApp) → para quem criou.
  * - Perdido: 0 ponto (entra só em conversão).
  * Desempate: mais ganhos → maior R$ fechado → quem chegou primeiro à pontuação
@@ -130,14 +131,15 @@ export function avancosQueContam(transicoes: Transicao[], intervalo: Intervalo):
   return contam;
 }
 
-/** "Marcar feita" que pontuam: a primeira de cada card em cada dia de SP. */
-export function acoesQueContam(acoes: AcaoFeita[], intervalo: Intervalo): AcaoFeita[] {
+/** "Marcar feita" que pontuam: as `limitePorDia` primeiras de cada vendedor em cada dia de SP. */
+export function acoesQueContam(acoes: AcaoFeita[], intervalo: Intervalo, limitePorDia: number): AcaoFeita[] {
   const ordenadas = acoes.filter((a) => dentroDoPeriodo(a.em, intervalo)).sort((a, b) => a.em.getTime() - b.em.getTime());
-  const vistas = new Set<string>();
+  const usadas = new Map<string, number>();
   return ordenadas.filter((a) => {
-    const chave = `${a.oportunidadeId}|${diaEmFuso(a.em)}`;
-    if (vistas.has(chave)) return false;
-    vistas.add(chave);
+    const chave = `${a.usuarioId}|${diaEmFuso(a.em)}`;
+    const n = usadas.get(chave) ?? 0;
+    if (n >= limitePorDia) return false;
+    usadas.set(chave, n + 1);
     return true;
   });
 }
@@ -224,7 +226,7 @@ export function calcularRanking(participantes: Participante[], dados: DadosRanki
       pontuar(x, "avanco", pesos.avanco, t.em);
     }
   }
-  for (const f of acoesQueContam(dados.acoes, periodo)) {
+  for (const f of acoesQueContam(dados.acoes, periodo, pesos.acoesPorDia)) {
     const a = de(f.usuarioId);
     if (!a) continue;
     for (const x of [a, time]) {

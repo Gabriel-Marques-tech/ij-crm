@@ -18,8 +18,10 @@ export const PESOS_PADRAO = {
   tetoBonus: 100,
   /** Primeira entrada do card numa fase aberta de ordem maior (Vendas). */
   avanco: 5,
-  /** "Marcar feita" da Minha Semana (máx. 1 por card por dia). */
+  /** "Marcar feita" da Minha Semana… */
   acaoFeita: 2,
+  /** …no máximo esta quantidade por vendedor por dia de SP. */
+  acoesPorDia: 4,
   /** Card criado em Vendas (UI ou WhatsApp). */
   cardCriado: 1,
 } as const;
@@ -38,6 +40,8 @@ export const rankingSchema = z.object({
     tetoBonus: inteiro("Teto do bônus", 100_000),
     avanco: inteiro("Avanço de fase", 1_000),
     acaoFeita: inteiro("Próxima ação feita", 1_000),
+    // `default`: config gravada antes deste campo continua válida (não cai toda no padrão).
+    acoesPorDia: inteiro("Ações feitas por dia", 100).default(PESOS_PADRAO.acoesPorDia),
     cardCriado: inteiro("Card criado", 1_000),
   }),
   minimos: z.object({

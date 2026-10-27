@@ -307,7 +307,7 @@ uma consulta `UNION ALL` por período em `servico.ts`), só com cards vivos do q
 |---|---|---|
 | card em fase de ganho com `data_ganho` no período | 100 + 1 por R$ 1.000 de `valor_fechado` (bônus até 100) | responsável do card |
 | primeira entrada do card numa fase **aberta** de ordem maior (import não conta) | 5 | quem moveu (`transicao_fase.usuario_id`) |
-| "Marcar feita" da Minha Semana (Timeline `NOTA` com `feito`), 1 por card por dia de SP | 2 | quem marcou |
+| "Marcar feita" da Minha Semana (Timeline `NOTA` com `feito`), até 4 por vendedor por dia de SP (configurável) | 2 | quem marcou |
 | card criado em Vendas (UI/WhatsApp) | 1 | quem criou |
 
 Perdido vale 0 (entra na conversão, pela `fase_desde`); venda reaberta perde o ganho e re-ganho
