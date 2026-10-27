@@ -17,6 +17,6 @@ PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 # (+ cópia off-site se BACKUP_REMOTE estiver no .env).
 15 6 * * * /opt/ij-crm/scripts/backup.sh >> /var/log/ij-crm/backup.log 2>&1
 
-# Reprocessar mensagens pendentes/FALHA a cada 10 min (rota do GAB-41; até ela
-# existir, o app responde 404 e a linha só registra erro no log).
+# Manutenção a cada 10 min (GAB-41): reprocessa mensagens órfãs/travadas/FALHA,
+# retenção de 90 dias do JSON da LLM, prévias de import e sessões vencidas.
 */10 * * * * /opt/ij-crm/scripts/cron-reprocessar.sh >> /var/log/ij-crm/cron.log 2>&1

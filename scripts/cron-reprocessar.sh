@@ -2,13 +2,13 @@
 # Disparado pelo cron do host a cada 10 min (deploy/crontab.example):
 # POST /api/cron/reprocessar com o segredo no header `x-cron-secret`.
 #
-# A rota é implementada no GAB-41; até lá o app responde 404 e este script sai
-# com erro (fica registrado no log do cron, sem efeito colateral).
-# Contrato da rota (GAB-41, ver README "#crm → card"): devolve a RECEBIDA e
-# chama processarMensagem para MensagemBruta em RECEBIDA há mais de N min
-# (morreu antes do after()), PROCESSANDO há mais de 5 min (nunca antes: pior
-# caso LLM 2×30 s + transação) e FALHA (mantendo `erro`, que marca a resposta
-# como "Reprocessada").
+# Rota do GAB-41 (`src/app/api/cron/reprocessar/route.ts`, contrato no README
+# "Painel de mensagens e cron"): retoma RECEBIDA órfã (> 2 min), PROCESSANDO
+# travada (> 5 min), FALHA com < 3 tentativas ou sem crédito (mantendo `erro`,
+# que marca a resposta como "Reprocessada"), no máximo 20 por execução; apaga o
+# JSON da LLM com mais de 90 dias, prévias de import vencidas e sessões
+# expiradas. Uma execução por vez (advisory lock): se a anterior ainda roda,
+# responde 200 sem fazer nada. 500 = algum passo falhou (ref no log do app).
 # O segredo vai pelo stdin do curl (`-H @-`), não pela linha de comando: não
 # aparece em `ps` nem fica escrito no crontab.
 # Log: só horário + status HTTP. O corpo da resposta é descartado (nunca vai

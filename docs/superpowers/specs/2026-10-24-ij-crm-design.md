@@ -288,6 +288,15 @@ Matriz de papéis:
   provedor de LLM nos EUA — OpenAI em produção, como antes ia à Anthropic —
   com `store: false` e sem texto em log. O aviso de privacidade da IJ deve
   citar essa transferência internacional (runbook §10).
+- **Retenção (GAB-41, decisão do usuário): 90 dias** para o JSON que a LLM
+  devolveu — `mensagem_bruta.resultado_llm` e a chave `saida` do payload das
+  entradas `MENSAGEM_WHATSAPP` da Timeline são apagados pelo cron
+  (`src/lib/whatsapp/retencao.ts`, em lotes, idempotente). O **texto original**
+  da mensagem fica (é o registro da venda). Prévias de import vencidas e sessões
+  expiradas também são apagadas pelo mesmo cron.
+- `/api/cron/*`: segredo `CRON_SECRET` forte (mesma regra dos outros segredos,
+  tempo constante, falha fechado), uma execução por vez (advisory lock) e
+  resposta só com contagens.
 - Google OAuth depois, sem quebrar o modelo (Usuario ganha `google_sub`).
 
 ### 4.7 Importação Pipefy
