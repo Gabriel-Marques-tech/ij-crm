@@ -84,7 +84,10 @@ services:
       LLM_EXTRACAO_MODELO: ${LLM_EXTRACAO_MODELO:-}
       LLM_PROVEDOR: ${LLM_PROVEDOR:-openai}
       LLM_LIMIAR_CONFIANCA: ${LLM_LIMIAR_CONFIANCA:-0.7}
-      LLM_CLASSIFICACAO_MODELO: ${LLM_CLASSIFICACAO_MODELO:-claude-haiku-5-5}
+      # Sem #crm (GAB-39): vazio = modelo da extração; limiares do classificador e para agir sem tag.
+      LLM_CLASSIFICACAO_MODELO: ${LLM_CLASSIFICACAO_MODELO:-}
+      LLM_LIMIAR_CLASSIFICADOR: ${LLM_LIMIAR_CLASSIFICADOR:-0.7}
+      LLM_LIMIAR_SEM_TAG: ${LLM_LIMIAR_SEM_TAG:-0.85}
       # Único controle de acesso a /api/cron/* (header x-cron-secret, GAB-41).
       CRON_SECRET: ${CRON_SECRET:?defina CRON_SECRET no .env}
     networks: [edge, rede-app, rede-whatsapp]

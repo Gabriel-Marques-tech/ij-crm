@@ -96,7 +96,7 @@ A Evolution não guarda mensagens, contatos nem chats no banco dela (`DATABASE_S
 Nesta fatia (GAB-28) o bot só reage a mensagens com `#crm` de usuários ativos com
 `telefoneWhatsapp`/`whatsappLid` cadastrado; o resto é contado (`contador_descartadas`,
 `remetente_desconhecido`) e descartado sem persistir conteúdo. O que acontece com a mensagem
-`#crm` está em [#crm → card](#crm--card-llm); o classificador sem tag é GAB-39.
+`#crm` está em [#crm → card](#crm--card-llm); sem tag, em [Mensagens sem #crm](#mensagens-sem-crm-classificador-gab-39).
 
 ## #crm → card (LLM)
 
@@ -173,6 +173,38 @@ com `maxRetries: 0`, 2ª tentativa só em 5xx/timeout/rede).
   ms=… tokens_in=… tokens_out=… tokens_reasoning=… ok` (`tokens_out` já inclui os de raciocínio).
 - Crédito pré-pago com recarga manual (auto-reload desligado, mínimo US$ 5, expira em 1 ano,
   sugestão US$ 50 a cada ~3 meses): `docs/runbook.md` §10.
+
+## Mensagens sem #crm (classificador, GAB-39)
+
+Mensagem do grupo **sem** `#crm` de vendedor cadastrado (design §4.3 passo 4, §2):
+
+1. **Ingestão** (tx do dedup): ruído óbvio — menos de 8 caracteres ou sem nenhuma letra/dígito (só
+   emoji) — ou remetente desconhecido → só `contador_descartadas.total` do dia; nada de LLM. Senão o
+   `InboxEvento` fica `PROCESSADO`, o webhook responde `200 {emAvaliacao: true}` e agenda
+   `avaliarSemTag` (`src/lib/whatsapp/sem-tag.ts`) em `after()`. Retry da Evolution → `DUPLICADO`.
+2. **Classificador** (`src/lib/llm/classificacao.ts`, prompt `prompts/classificacao.v1.ts`): mesmo
+   provedor/modelo da extração (GPT-6.1 Sol, raciocínio low; `LLM_CLASSIFICACAO_MODELO` opcional, ignorado
+   se for de outro provedor), prompt curto, contexto = só a mensagem respondida (300 caracteres),
+   saída `{relevante, confianca}` em JSON schema estrito. Log: `[llm] classificacao ref=<evento>
+   … relevante=… confianca=…` — nunca o texto.
+3. `relevante=false` ou `confianca < LLM_LIMIAR_CLASSIFICADOR` (0.7) → **descartada**: nenhuma
+   `MensagemBruta`, só `contador_descartadas.total` +1 (dia civil de SP, só data + número).
+4. Relevante → grava `MensagemBruta` com `sem_tag = true` e segue o fluxo de [#crm → card](#crm--card-llm),
+   com régua mais alta: confiança da extração `< LLM_LIMIAR_SEM_TAG` (0.85) → `PENDENTE_REVISAO`
+   ("⚠️ parece atualização de venda (sem #crm), mas não tive certeza…"); intenção `IGNORAR` → a linha é
+   apagada e conta como descartada; se agir, a confirmação começa com
+   `↪️ entendi como atualização: Gustavo — Economia Sensata → Primeiro Contato. Resp: João.`
+
+**Falha do classificador** (sem crédito, provedor fora, saída inválida): o texto **não** é gravado
+(guardar "por via das dúvidas" seria guardar conversa do grupo). Em troca:
+`contador_descartadas.nao_classificadas` +1, log `[sem-tag] ref=… LLM <código>` e um aviso no grupo
+citando a mensagem, no máximo 1 a cada 30 min: "⚠️ não consegui avaliar mensagens sem #crm agora
+(ref: …). O que for para o CRM, mande com #crm." Limitação aceita: se o processo morrer entre o 200 e
+o fim do `after()`, a mensagem sem tag se perde (não há cópia para retomar).
+
+Fixtures: `src/lib/llm/fixtures/classificacao.ts` (10 de venda + 10 de conversa do grupo); o `mock`
+responde por elas (texto desconhecido → não relevante). Os limiares saem do env quando a config do
+admin (GAB-42) existir.
 
 ## Kanban
 
