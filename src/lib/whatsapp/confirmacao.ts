@@ -2,6 +2,13 @@
  * Texto da resposta do bot no grupo (design doc §4.3 passo 9). Puro.
  * 1–3 linhas, emoji de status primeiro: ✅ criado, ⚠️ criado para revisar ou
  * pendente, ❌ falha (com a ref do log).
+ *
+ * Todo texto que veio da LLM (ou de cadastro) passa por `linha()`: quebras e
+ * espaços colapsados e corte em ~80 caracteres com "…", para a resposta
+ * nunca passar de 3 linhas nem ecoar um bloco grande no grupo.
+ *
+ * Mensagem que já tinha terminado em ❌ e foi reprocessada (GAB-41) ganha
+ * "Reprocessada:" depois do emoji, para o grupo entender a 2ª resposta.
  */
 
 export type MotivoPendente =
@@ -39,17 +46,34 @@ function diaMes(dia: string): string {
   return `${d}/${m}`;
 }
 
-export function textoCriado(r: ResumoCriado): string {
-  let linha = `${r.revisar ? "⚠️" : "✅"} ${r.titulo} → ${r.faseNome}. Resp: ${r.responsavelNome}.`;
-  if (r.proximaAcao) linha += ` Próx.: ${r.proximaAcao}${r.proximaAcaoEm ? ` (${diaMes(r.proximaAcaoEm)})` : ""}`;
-  else if (r.proximaAcaoEm) linha += ` Próx.: ${diaMes(r.proximaAcaoEm)}`;
-  if (!r.revisar) return linha;
-  const motivo = r.motivosRevisar[0] ?? "conferir os dados";
-  return `${linha}\nMarquei para revisar: ${motivo}.`;
+export const MAX_TRECHO = 80;
+
+/** Uma linha só, sem espaços sobrando, no máximo `max` caracteres (com "…"). */
+export function linha(s: string, max = MAX_TRECHO): string {
+  const t = s.replace(/\s+/gu, " ").trim();
+  const chars = [...t];
+  return chars.length <= max ? t : `${chars.slice(0, max - 1).join("").trimEnd()}…`;
 }
 
-export function textoPendente(motivo: MotivoPendente): string {
-  return TEXTO_PENDENTE[motivo];
+type Opcoes = { reprocessada?: boolean };
+
+/** "✅ texto" → "✅ Reprocessada: texto" quando for o caso. */
+function marcar(texto: string, { reprocessada }: Opcoes): string {
+  if (!reprocessada) return texto;
+  const i = texto.indexOf(" ");
+  return `${texto.slice(0, i)} Reprocessada: ${texto.slice(i + 1)}`;
+}
+
+export function textoCriado(r: ResumoCriado, opcoes: Opcoes = {}): string {
+  let texto = `${r.revisar ? "⚠️" : "✅"} ${linha(r.titulo)} → ${linha(r.faseNome)}. Resp: ${linha(r.responsavelNome)}.`;
+  if (r.proximaAcao) texto += ` Próx.: ${linha(r.proximaAcao)}${r.proximaAcaoEm ? ` (${diaMes(r.proximaAcaoEm)})` : ""}`;
+  else if (r.proximaAcaoEm) texto += ` Próx.: ${diaMes(r.proximaAcaoEm)}`;
+  if (r.revisar) texto += `\nMarquei para revisar: ${linha(r.motivosRevisar[0] ?? "conferir os dados")}.`;
+  return marcar(texto, opcoes);
+}
+
+export function textoPendente(motivo: MotivoPendente, opcoes: Opcoes = {}): string {
+  return marcar(TEXTO_PENDENTE[motivo], opcoes);
 }
 
 export function textoFalha(ref: string): string {

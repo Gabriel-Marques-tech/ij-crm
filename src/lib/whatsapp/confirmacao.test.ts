@@ -37,4 +37,29 @@ describe("confirmação no grupo", () => {
     }
     expect(textoFalha("ab12cd34")).toBe("❌ não consegui processar, veja no CRM (ref: ab12cd34)");
   });
+
+  it("texto vindo da LLM é achatado (sem quebras) e cortado: continua 1–3 linhas", () => {
+    const longo = "x".repeat(500);
+    const r = textoCriado({
+      ...BASE,
+      titulo: "Gustavo\n\n\nlinha extra — Eco\r\nnomia",
+      proximaAcao: `mandar\nproposta ${longo}`,
+      revisar: true,
+      motivosRevisar: [`motivo\ncom\nquebras ${longo}`],
+    });
+    const linhas = r.split("\n");
+    expect(linhas.length).toBeLessThanOrEqual(3);
+    expect(linhas[0]).toMatch(/^⚠️ Gustavo linha extra — Eco nomia → /u);
+    expect(r).toContain("…");
+    expect(r).not.toContain("x".repeat(100));
+    for (const l of linhas) expect(l.length).toBeLessThan(300);
+  });
+
+  it("reprocessada depois de um ❌: avisa no começo, emoji primeiro", () => {
+    expect(textoCriado(BASE, { reprocessada: true })).toBe(
+      "✅ Reprocessada: Gustavo — Economia Sensata → Primeiro Contato. Resp: João. Próx.: mandar proposta (31/10)",
+    );
+    expect(textoCriado({ ...BASE, revisar: true, motivosRevisar: ["x"] }, { reprocessada: true })).toMatch(/^⚠️ Reprocessada: Gustavo/u);
+    expect(textoPendente("SEM_NOME", { reprocessada: true })).toBe("⚠️ Reprocessada: não identifiquei o lead — responde esta mensagem com o nome");
+  });
 });
