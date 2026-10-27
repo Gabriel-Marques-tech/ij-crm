@@ -129,7 +129,7 @@ describe("ponta a ponta: criar → atualizar → mover → reply-corrigir", () =
       { recebidaEm: new Date(RECEBIDA_EM.getTime() + MIN) },
     );
     expect(a.prompt).toMatch(new RegExp(`- id=${id} titulo="Gustavo — Sensata Ltda" fase="Primeiro Contato" via=recente`));
-    expect(a.r).toMatchObject({ tipo: "PROCESSADA", oportunidadeId: id, confirmacao: "⚠️ Gustavo — Sensata Ltda (Primeiro Contato): atualizado. Próx.: mandar proposta (31/10)" + SEM_ID });
+    expect(a.r).toMatchObject({ tipo: "PROCESSADA", oportunidadeId: id, confirmacao: "✅ Gustavo — Sensata Ltda (Primeiro Contato): atualizado. Próx.: mandar proposta (31/10)" });
 
     // 3. mover — caso do ticket
     const mv = await enviar(
@@ -144,7 +144,7 @@ describe("ponta a ponta: criar → atualizar → mover → reply-corrigir", () =
         }),
       { recebidaEm: new Date(RECEBIDA_EM.getTime() + 2 * MIN) },
     );
-    expect(mv.r).toMatchObject({ tipo: "PROCESSADA", oportunidadeId: id, confirmacao: "⚠️ Gustavo — Sensata Ltda: Primeiro Contato → Reunião Diagnóstica. Próx.: reunião (30/10)" + SEM_ID });
+    expect(mv.r).toMatchObject({ tipo: "PROCESSADA", oportunidadeId: id, confirmacao: "✅ Gustavo — Sensata Ltda: Primeiro Contato → Reunião Diagnóstica. Próx.: reunião (30/10)" });
     const eventoMove = `BOT${eventosBot}`;
     expect(await dbT.mensagemEnviada.findUnique({ where: { eventoId: eventoMove } })).toMatchObject({ oportunidadeId: id });
 
@@ -155,7 +155,7 @@ describe("ponta a ponta: criar → atualizar → mover → reply-corrigir", () =
       { respondendoEventoId: eventoMove, recebidaEm: new Date(RECEBIDA_EM.getTime() + 3 * MIN) },
     );
     expect(rp.prompt).toContain(`Card da confirmação respondida: id=${id}`);
-    expect(rp.prompt).toMatch(/<respondendo_a>\n⚠️ Gustavo — Sensata Ltda: Primeiro Contato → Reunião Diagnóstica/);
+    expect(rp.prompt).toMatch(/<respondendo_a>\n✅ Gustavo — Sensata Ltda: Primeiro Contato → Reunião Diagnóstica/);
     expect(rp.r).toMatchObject({ tipo: "PROCESSADA", oportunidadeId: id, confirmacao: "⚠️ Gustavo — Economia Sensata (Reunião Diagnóstica): atualizado.\nMarquei para revisar: empresa corrigida por resposta: “Sensata Ltda” → “Economia Sensata”.",
     });
 
@@ -207,15 +207,30 @@ describe("mensagens picadas", () => {
       { recebidaEm: new Date(t0 + 2 * MIN) },
     );
     for (const r of [r2.r, r3.r]) expect(r).toMatchObject({ tipo: "PROCESSADA", oportunidadeId: id });
-    expect(r2.r).toMatchObject({ confirmacao: "⚠️ Gustavo — Economia Sensata (Primeiro Contato): atualizado." + SEM_ID });
+    expect(r2.r).toMatchObject({ confirmacao: "✅ Gustavo — Economia Sensata (Primeiro Contato): atualizado." });
+    expect(r3.r).toMatchObject({ confirmacao: expect.stringMatching(/^✅ Gustavo — Economia Sensata \(Primeiro Contato\): atualizado\. Próx\.: mandar proposta/u) });
 
     expect(await dbT.oportunidade.count()).toBe(1);
     expect(await dbT.empresa.count()).toBe(1);
     const card = await cardDe(id);
-    expect(card).toMatchObject({ titulo: "Gustavo — Economia Sensata", proximaAcao: "mandar proposta", revisar: true });
+    expect(card).toMatchObject({ titulo: "Gustavo — Economia Sensata", proximaAcao: "mandar proposta", revisar: false });
     expect(diaEmFuso(card.proximaAcaoEm!)).toBe(resolverDataRelativa("sexta", new Date(t0 + 2 * MIN)));
     expect(card.contato?.empresaId).toBe(card.empresaId);
     for (const m of await dbT.mensagemBruta.findMany()) expect(m.status).toBe("PROCESSADA");
+  });
+
+  it("dois cards recentes do remetente → a escolha da LLM vale, mas ⚠️ + revisar", async () => {
+    await enviar("#crm falei com a Ana", () => saida({ contato: { nome: "Ana" } }));
+    const g = await enviar("#crm falei com o Gustavo", () => saida({ contato: { nome: "Gustavo" } }));
+    const id = (g.r as { oportunidadeId: string }).oportunidadeId;
+    const r = await enviar("#crm mando proposta sexta", () =>
+      saida({ intencao: "ATUALIZAR", oportunidade_id: id, campos: { proxima_acao: "mandar proposta", proxima_acao_em: "sexta" } }),
+    );
+    expect(r.prompt.match(/via=recente/g)).toHaveLength(2);
+    expect(r.r).toMatchObject({ tipo: "PROCESSADA", oportunidadeId: id });
+    expect((r.r as { confirmacao: string }).confirmacao).toMatch(/^⚠️ Gustavo/u);
+    expect((r.r as { confirmacao: string }).confirmacao.endsWith(SEM_ID)).toBe(true);
+    expect((await cardDe(id)).revisar).toBe(true);
   });
 
   it("'recente' é só dos últimos 30 min e só do remetente", async () => {
@@ -314,7 +329,7 @@ describe("mover para terminal pelo WhatsApp", () => {
     const r = await enviar("#crm fechamos o Gustavo, 18 mil", (p) =>
       saida({ intencao: "ATUALIZAR", oportunidade_id: idCandidata(p, "recente"), fase_chave: "contrato_assinado", campos: { valor_fechado: "18 mil" } }),
     );
-    expect(r.r).toMatchObject({ tipo: "PROCESSADA", confirmacao: "⚠️ Gustavo — Economia Sensata: Primeiro Contato → Contrato assinado." + SEM_ID });
+    expect(r.r).toMatchObject({ tipo: "PROCESSADA", confirmacao: "✅ Gustavo — Economia Sensata: Primeiro Contato → Contrato assinado." });
     const card = await cardDe(id);
     expect(card.fase.chave).toBe("contrato_assinado");
     expect(card.valorFechado?.toFixed(2)).toBe("18000.00");
@@ -374,7 +389,7 @@ describe("intenção e alvo", () => {
     const r = await enviar("#crm mando proposta", () => saida({ intencao: "ATUALIZAR", oportunidade_id: id, campos: { proxima_acao: "mandar proposta" } }), {
       erro: "LLM HTTP ref=abc",
     });
-    expect((r.r as { confirmacao: string }).confirmacao).toBe("⚠️ Reprocessada: Gustavo (Primeiro Contato): atualizado. Próx.: mandar proposta" + SEM_ID);
+    expect((r.r as { confirmacao: string }).confirmacao).toBe("✅ Reprocessada: Gustavo (Primeiro Contato): atualizado. Próx.: mandar proposta");
   });
 });
 

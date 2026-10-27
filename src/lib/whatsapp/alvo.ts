@@ -7,8 +7,8 @@
  * 1. Reply a uma confirmação do bot → o card dela, sem a LLM decidir.
  * 2. `oportunidade_id` da LLM, SÓ se estiver na lista de candidatas que foi
  *    enviada no contexto. Fora dela é ignorado (e marca revisar). Escolha
- *    sem identidade exata (só `recente`/`dominio`) vale, mas sempre com
- *    revisar. Escolha de card fechado quando há um aberto por identidade →
+ *    sem identidade exata (só `recente`/`dominio`) vale com revisar — exceto
+ *    quando é o ÚNICO card recente do remetente, aberto (mensagens picadas). Escolha de card fechado quando há um aberto por identidade →
  *    o aberto + revisar (a LLM não decide reabrir).
  * 3. Regras sobre as candidatas por identidade exata (mesmo contato por
  *    telefone/email, mesma empresa por CNPJ):
@@ -39,6 +39,16 @@ function escolhido(c: Candidata, motivos: string[]): Alvo {
   return c.terminal ? { tipo: "REABRIR", deId: c.id, motivos: [MOTIVO_REABERTO, ...motivos] } : { tipo: "EXISTENTE", id: c.id, motivos };
 }
 
+/**
+ * Mensagens picadas sem ambiguidade: o remetente mexeu em UM só card nos
+ * últimos 30 min, aberto, e a LLM escolheu exatamente ele, sem nenhum card
+ * aberto por identidade concorrendo. Qualquer outra coisa → revisar.
+ */
+function unicoRecente(c: Candidata, candidatas: Candidata[], abertasIdentidade: Candidata[]): boolean {
+  const recentes = candidatas.filter((x) => x.via.includes("recente"));
+  return !c.terminal && c.via.includes("recente") && recentes.length === 1 && recentes[0].id === c.id && abertasIdentidade.length === 0;
+}
+
 export function resolverAlvo(e: { alvoResposta: string | null; escolhaLlm: string | null; candidatas: Candidata[] }): Alvo {
   const porId = new Map(e.candidatas.map((c) => [c.id, c]));
   const abertasIdentidade = e.candidatas.filter((c) => porIdentidade(c) && !c.terminal).sort(maisRecente);
@@ -51,7 +61,7 @@ export function resolverAlvo(e: { alvoResposta: string | null; escolhaLlm: strin
     if (c) {
       // Fechado com um aberto do mesmo contato/empresa: atualiza o aberto, nunca reabre outro.
       if (c.terminal && abertasIdentidade.length > 0) return { tipo: "EXISTENTE", id: abertasIdentidade[0].id, motivos: [MOTIVO_FECHADO_COM_ABERTO] };
-      if (!porIdentidade(c)) return escolhido(c, [MOTIVO_SEM_IDENTIDADE]);
+      if (!porIdentidade(c)) return escolhido(c, unicoRecente(c, e.candidatas, abertasIdentidade) ? [] : [MOTIVO_SEM_IDENTIDADE]);
       const outrasAbertas = abertasIdentidade.some((x) => x.id !== c.id);
       return escolhido(c, outrasAbertas ? [MOTIVO_VARIOS_ABERTOS] : []);
     }

@@ -187,7 +187,8 @@ contexto). Só o pipeline **Vendas**; `projetos` é UI.
   gravada a cada confirmação), **sem a LLM decidir** (vale mesmo se ela disser CRIAR) — só se a confirmação
   tem até 30 dias e o card está vivo em Vendas; senão `PENDENTE_REVISAO` (nunca vira CRIAR). Senão o
   `oportunidade_id` da LLM, **só se estiver na lista enviada**; escolha só pela conversa recente (sem
-  identificador exato) vale com `revisar`; card fechado com um aberto da mesma identidade → o aberto. Senão, entre as candidatas por identidade:
+  identificador exato) vale sem `revisar` só se for o ÚNICO card que o remetente tocou nos 30 min (aberto,
+  sem card aberto por identidade concorrendo); qualquer outra ambiguidade → `revisar`; card fechado com um aberto da mesma identidade → o aberto. Senão, entre as candidatas por identidade:
   1 aberta → ela; >1 → a tocada mais recentemente + `revisar`; só fechadas → card **novo** com
   `reaberta_de_id` + `revisar`. Nenhum → `PENDENTE_REVISAO` ("não achei o card para atualizar").
 - **Aplicação** (`atualizar.ts`, mesma transação/cerca do CRIAR): aplica só campos presentes (nunca

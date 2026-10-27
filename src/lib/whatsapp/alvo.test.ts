@@ -28,14 +28,35 @@ describe("resolverAlvo — escolha da LLM só vale dentro da lista", () => {
     });
   });
 
-  it("id da lista só por 'recente' ou 'dominio' → aceito, mas sempre com motivo (revisar)", () => {
-    for (const via of [["recente"], ["dominio"]] as const) {
-      expect(resolverAlvo({ alvoResposta: null, escolhaLlm: "b", candidatas: [c("b", { via: [...via] })] })).toEqual({
-        tipo: "EXISTENTE",
-        id: "b",
-        motivos: [MOTIVO_SEM_IDENTIDADE],
-      });
-    }
+  it("único card recente (aberto) e a LLM escolheu ele → ✅ sem revisar (caso das mensagens picadas)", () => {
+    expect(resolverAlvo({ alvoResposta: null, escolhaLlm: "b", candidatas: [c("b", { via: ["recente"] })] })).toEqual({
+      tipo: "EXISTENTE",
+      id: "b",
+      motivos: [],
+    });
+  });
+
+  it("dois cards recentes → a escolha da LLM vale, mas com motivo (revisar)", () => {
+    const r = resolverAlvo({ alvoResposta: null, escolhaLlm: "b", candidatas: [c("a", { via: ["recente"] }), c("b", { via: ["recente"] })] });
+    expect(r).toEqual({ tipo: "EXISTENTE", id: "b", motivos: [MOTIVO_SEM_IDENTIDADE] });
+  });
+
+  it("recente escolhido com outro recente FECHADO, ou com aberto por identidade → ambíguo, revisar", () => {
+    expect(
+      resolverAlvo({ alvoResposta: null, escolhaLlm: "b", candidatas: [c("x", { via: ["recente"], terminal: true }), c("b", { via: ["recente"] })] }),
+    ).toMatchObject({ id: "b", motivos: [MOTIVO_SEM_IDENTIDADE] });
+    expect(resolverAlvo({ alvoResposta: null, escolhaLlm: "b", candidatas: [c("id1"), c("b", { via: ["recente"] })] })).toMatchObject({
+      id: "b",
+      motivos: [MOTIVO_SEM_IDENTIDADE],
+    });
+  });
+
+  it("escolha só por 'dominio' → sempre com motivo (revisar)", () => {
+    expect(resolverAlvo({ alvoResposta: null, escolhaLlm: "b", candidatas: [c("b", { via: ["dominio"] })] })).toEqual({
+      tipo: "EXISTENTE",
+      id: "b",
+      motivos: [MOTIVO_SEM_IDENTIDADE],
+    });
   });
 
   it("LLM escolheu um fechado mas há aberto por identidade → o aberto + revisar (não reabre)", () => {
