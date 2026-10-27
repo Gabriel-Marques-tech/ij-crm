@@ -41,7 +41,9 @@ services:
       db:
         condition: service_healthy
     # Roda a cada `up`: idempotente, mas o install pode levar alguns minutos na 1ª vez.
-    command: sh -c "pnpm install --frozen-lockfile && pnpm prisma migrate deploy && pnpm prisma db seed && pnpm dev"
+    # `prisma generate` explícito: o install só regenera o client quando as deps
+    # mudam; schema novo com client velho quebra o app em runtime.
+    command: sh -c "pnpm install --frozen-lockfile && pnpm prisma generate && pnpm prisma migrate deploy && pnpm prisma db seed && pnpm dev"
 
   # ---- WhatsApp: Evolution API v2 (GAB-28) ----
   # Perfil `whatsapp`: `docker compose --profile whatsapp up -d`. Sem o perfil,
