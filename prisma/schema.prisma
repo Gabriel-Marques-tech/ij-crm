@@ -60,6 +60,8 @@ enum TipoTimeline {
   MENSAGEM_WHATSAPP
   IMPORT
   VINCULO_PROJETO
+  EXCLUSAO     // card foi para a lixeira (GAB-36)
+  RESTAURACAO  // card voltou da lixeira (GAB-36)
 }
 
 enum StatusMensagem {
@@ -135,6 +137,7 @@ model Empresa {
   @@index([nome])
   @@index([nome(ops: raw("gin_trgm_ops"))], type: Gin, map: "empresa_nome_trgm_idx")
   @@index([dominioEmail])
+  @@index([mergedIntoId])
   @@map("empresa")
 }
 
@@ -158,6 +161,7 @@ model Contato {
   @@index([nome])
   @@index([nome(ops: raw("gin_trgm_ops"))], type: Gin, map: "contato_nome_trgm_idx")
   @@index([empresaId])
+  @@index([mergedIntoId])
   @@map("contato")
 }
 
@@ -255,7 +259,8 @@ model Oportunidade {
   responsavel           Usuario    @relation("responsavel", fields: [responsavelId], references: [id])
   origemOportunidade    Oportunidade?  @relation("projetoDeVenda", fields: [origemOportunidadeId], references: [id])
   projeto               Oportunidade?  @relation("projetoDeVenda")
-  reabertaDe            Oportunidade?  @relation("reabertura", fields: [reabertaDeId], references: [id])
+  // SET NULL explícito: card reaberto é histórico e sobrevive à deleção definitiva da origem (GAB-36).
+  reabertaDe            Oportunidade?  @relation("reabertura", fields: [reabertaDeId], references: [id], onDelete: SetNull)
   reaberturas           Oportunidade[] @relation("reabertura")
   transicoes            TransicaoFase[]
   timeline              Timeline[]
@@ -354,7 +359,8 @@ model MensagemEnviada {
   texto          String
   em             DateTime     @default(now())
 
-  oportunidade   Oportunidade? @relation(fields: [oportunidadeId], references: [id])
+  // SET NULL explícito: mensagem enviada é histórico e sobrevive à deleção definitiva do card (GAB-36).
+  oportunidade   Oportunidade? @relation(fields: [oportunidadeId], references: [id], onDelete: SetNull)
 
   @@index([oportunidadeId])
   @@map("mensagem_enviada")

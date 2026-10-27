@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRightLeft, MessageSquareText, Pencil, Plus, Download, MessageCircle, Link2 } from "lucide-react";
+import { ArrowRightLeft, MessageSquareText, Pencil, Plus, Download, MessageCircle, Link2, Trash2, ArchiveRestore } from "lucide-react";
 import type { TipoTimeline } from "@prisma/client";
 import { ehCampoEditavel, ROTULO_CAMPO } from "@/lib/oportunidades/campos";
 import { ROTULO_CAMPO_TERMINAL, ehCampoTerminal, formatarCampoTerminal, formatarDataHora, formatarValorCampo } from "@/lib/oportunidades/formatar";
@@ -17,6 +17,8 @@ const ICONE: Record<TipoTimeline, typeof Plus> = {
   MENSAGEM_WHATSAPP: MessageCircle,
   IMPORT: Download,
   VINCULO_PROJETO: Link2,
+  EXCLUSAO: Trash2,
+  RESTAURACAO: ArchiveRestore,
 };
 
 /** Card ligado a este (venda ↔ projeto), para os links da Timeline. */
@@ -79,6 +81,15 @@ function Descricao({
           </>
         );
       }
+      if (p.evento === "venda_apagada" || p.evento === "projeto_apagado" || p.evento === "origem_reabertura_apagada") {
+        const quem = p.evento === "venda_apagada" ? "a venda de origem" : p.evento === "projeto_apagado" ? "o card de projeto" : "o card de origem (do qual este foi reaberto)";
+        return (
+          <>
+            apagou definitivamente {quem}
+            {typeof p.titulo === "string" ? <> “{p.titulo}”</> : null}; o vínculo foi desfeito
+          </>
+        );
+      }
       if (p.evento === "reaberta" || p.evento === "perdida") {
         return (
           <>
@@ -103,6 +114,7 @@ function Descricao({
         <>
           moveu de <b className="font-medium text-foreground">{fase(p.deFaseId)}</b> para <b className="font-medium text-foreground">{fase(p.paraFaseId)}</b>
           {p.motivo === "fase_arquivada" || p.motivo === "fase_removida" ? " (fase de origem removida pela gestão)" : ""}
+          {p.motivo === "restauracao" ? " ao restaurar da lixeira (a fase original foi arquivada)" : ""}
         </>
       );
     case "CAMPO_ALTERADO": {
@@ -112,6 +124,7 @@ function Descricao({
           <>
             alterou <b className="font-medium text-foreground">{ROTULO_VINCULO[p.campo]}</b>:{" "}
             <span className="text-fg-mute line-through decoration-fg-faint">{nome(p.antes)}</span> → <span className="text-foreground">{nome(p.depois)}</span>
+            {p.motivo === "apagado_definitivamente" ? " (apagado definitivamente da lixeira)" : null}
           </>
         );
       }
@@ -146,6 +159,10 @@ function Descricao({
       return <>mensagem do WhatsApp</>;
     case "IMPORT":
       return <>importado do Pipefy</>;
+    case "EXCLUSAO":
+      return <>excluiu o card (foi para a lixeira)</>;
+    case "RESTAURACAO":
+      return <>restaurou o card da lixeira</>;
   }
 }
 

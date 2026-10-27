@@ -5,7 +5,8 @@
  * presente: repetir um CNPJ devolve `CNPJ_DUPLICADO` com a empresa dona.
  * Domínio de email entra normalizado e nunca é provedor pessoal (gmail…).
  * Leitura nunca mostra empresa soft-deletada/mesclada nem oportunidade
- * soft-deletada.
+ * soft-deletada. Merge (GAB-36) é soft-pointer: o principal mostra contatos e
+ * oportunidades das empresas mescladas nele (consulta pelo grupo).
  */
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
@@ -14,6 +15,7 @@ import { interpretarCampoEmpresa, interpretarCnpj, interpretarDominio, validarNo
 import { prefixoPrimeiro, termoDeBusca } from "@/lib/entidades/busca";
 import { SELECAO_REF, descreverVinculos } from "@/lib/entidades/vinculo";
 import { resolverEmpresas } from "@/lib/contatos/match";
+import { idsDoGrupo } from "@/lib/merge/merge";
 
 export type FalhaEmpresa =
   | { ok: false; erro: "NOME_INVALIDO" | "EMPRESA_NAO_ENCONTRADA" }
@@ -95,12 +97,12 @@ export async function listarEmpresas(busca?: string) {
     ? {
         OR: [
           { nome: { contains: q, mode: "insensitive" } },
-          ...(cnpj ? [{ cnpj }] : []),
-          ...(dominio ? [{ dominioEmail: dominio }] : []),
+          ...(cnpj ? [{ cnpj }, { mergedFrom: { some: { deletadoEm: null, cnpj } } }] : []),
+          ...(dominio ? [{ dominioEmail: dominio }, { mergedFrom: { some: { deletadoEm: null, dominioEmail: dominio } } }] : []),
         ],
       }
     : {};
-  return db.empresa.findMany({
+  const lista = await db.empresa.findMany({
     where: { ...VIVO, ...filtro },
     orderBy: [{ nome: "asc" }, { id: "asc" }],
     take: LISTA_MAX,
@@ -112,21 +114,31 @@ export async function listarEmpresas(busca?: string) {
       cidade: true,
       estado: true,
       _count: { select: { contatos: { where: VIVO }, oportunidades: { where: { deletadoEm: null } } } },
+      // Mescladas nesta: contatos e oportunidades contam aqui (soft-pointer).
+      mergedFrom: { where: { deletadoEm: null }, select: { _count: { select: { contatos: { where: VIVO }, oportunidades: { where: { deletadoEm: null } } } } } },
     },
   });
+  return lista.map(({ mergedFrom, ...e }) => ({
+    ...e,
+    _count: {
+      contatos: e._count.contatos + mergedFrom.reduce((s, m) => s + m._count.contatos, 0),
+      oportunidades: e._count.oportunidades + mergedFrom.reduce((s, m) => s + m._count.oportunidades, 0),
+    },
+  }));
 }
 
 export async function obterEmpresa(id: string) {
-  const e = await db.empresa.findFirst({
-    where: { id, ...VIVO },
-    include: {
-      contatos: {
-        where: VIVO,
+  const e = await db.empresa.findFirst({ where: { id, ...VIVO } });
+  if (!e) return null;
+  const grupo = await idsDoGrupo("empresa", id);
+  const [contatos, oportunidades] = await Promise.all([
+    db.contato.findMany({
+        where: { ...VIVO, empresaId: { in: grupo } },
         orderBy: [{ nome: "asc" }, { id: "asc" }],
         select: { id: true, nome: true, cargo: true, pontos: { orderBy: [{ tipo: "asc" }, { criadoEm: "asc" }], select: { id: true, tipo: true, valorNormalizado: true } } },
-      },
-      oportunidades: {
-        where: { deletadoEm: null },
+      }),
+    db.oportunidade.findMany({
+        where: { deletadoEm: null, empresaId: { in: grupo } },
         orderBy: [{ atualizadoEm: "desc" }, { id: "asc" }],
         select: {
           id: true,
@@ -136,12 +148,10 @@ export async function obterEmpresa(id: string) {
           responsavel: { select: { nome: true } },
           contato: { select: SELECAO_REF },
         },
-      },
-    },
-  });
-  if (!e) return null;
-  const contatos = await descreverVinculos("contato", e.oportunidades.map((o) => o.contato));
-  return { ...e, oportunidades: e.oportunidades.map((o) => ({ ...o, contato: o.contato ? (contatos.get(o.contato.id) ?? null) : null })) };
+      }),
+  ]);
+  const vinculos = await descreverVinculos("contato", oportunidades.map((o) => o.contato));
+  return { ...e, contatos, oportunidades: oportunidades.map((o) => ({ ...o, contato: o.contato ? (vinculos.get(o.contato.id) ?? null) : null })) };
 }
 
 export type DetalheEmpresa = NonNullable<Awaited<ReturnType<typeof obterEmpresa>>>;

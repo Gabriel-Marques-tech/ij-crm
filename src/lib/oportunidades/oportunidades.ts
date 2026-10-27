@@ -15,6 +15,7 @@
  */
 import type { Fase, Origem, Prisma, TipoTerminal, TipoTimeline } from "@prisma/client";
 import { db } from "@/lib/db";
+import { SELECAO_NOME_EXIBIDO, nomeExibido } from "@/lib/entidades/vinculo";
 import { listarPipelines, travarPipelines } from "@/lib/fases/fases";
 import { diaEmFuso } from "./aging";
 import { validarTitulo, type CampoEditavel, type ValorCampo } from "./campos";
@@ -101,13 +102,18 @@ export async function listarQuadro(pipelineChave: string): Promise<Quadro | null
       origem: true,
       estado: true,
       responsavel: { select: { id: true, nome: true } },
-      empresa: { select: { nome: true } },
+      // Empresa mesclada aparece com o nome da principal (merge 1 nível, GAB-36).
+      empresa: { select: SELECAO_NOME_EXIBIDO },
       valorFechado: true,
       motivoPerda: true,
       origemOportunidade: { select: { deletadoEm: true, fase: { select: { tipoTerminal: true } } } },
     },
   });
-  return { pipeline: { id: p.id, chave: p.chave, nome: p.nome }, fases: p.fases, cards };
+  return {
+    pipeline: { id: p.id, chave: p.chave, nome: p.nome },
+    fases: p.fases,
+    cards: cards.map((c) => ({ ...c, empresa: c.empresa ? { nome: nomeExibido(c.empresa) } : null })),
+  };
 }
 
 export async function obterCard(id: string) {

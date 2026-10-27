@@ -51,3 +51,14 @@ export function textoVinculo(tipo: "empresa" | "contato", v: Vinculo | null | un
 export function sufixoVinculo(tipo: "empresa" | "contato", estado: "EXCLUIDO" | "MESCLADO"): string {
   return SUFIXO[tipo][estado];
 }
+
+/**
+ * Nome curto da empresa nas visões de card (Kanban, Minha Semana): mesclada →
+ * nome da principal, mas só se ela estiver viva; senão, o próprio nome
+ * (principal excluída nunca aparece como ativa). Merge tem 1 nível.
+ */
+export const SELECAO_NOME_EXIBIDO = { nome: true, mergedInto: { select: { nome: true, deletadoEm: true } } } as const;
+
+export function nomeExibido(r: { nome: string; mergedInto: { nome: string; deletadoEm: Date | null } | null }): string {
+  return r.mergedInto && !r.mergedInto.deletadoEm ? r.mergedInto.nome : r.nome;
+}
