@@ -138,7 +138,7 @@ lança (roda no `after()`): erro de banco vira log com ref e a linha fica para o
   `DUPLICADO` e não reprocessa);
 - `PROCESSANDO` há **mais de 5 min** (`atualizado_em`; pior caso LLM 2×30 s + transação) — nunca antes,
   ou dois workers pagam a LLM (a cerca impede só a gravação dupla);
-- `FALHA` (inclusive "sem crédito na API da Anthropic", depois da recarga), **mantendo `erro`**.
+- `FALHA` (inclusive "sem crédito na API de LLM/da OpenAI/da Anthropic", depois da recarga), **mantendo `erro`**.
 
 Env: `LLM_PROVEDOR=openai|anthropic|mock` (padrão `openai`; ver "Provedor de LLM" abaixo; dev sem chave: `mock`, que responde com as fixtures de
 `src/lib/llm/fixtures/extracao.ts`), `OPENAI_API_KEY`/`ANTHROPIC_API_KEY` (a do provedor escolhido;
