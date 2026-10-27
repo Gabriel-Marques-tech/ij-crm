@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { sufixoVinculo, type Vinculo } from "@/lib/entidades/vinculo";
+import { sufixoVinculo } from "@/lib/entidades/sufixo-vinculo";
+import type { Vinculo } from "@/lib/entidades/vinculo";
 
 const ROTA = { empresa: "/empresas", contato: "/contatos" } as const;
 
