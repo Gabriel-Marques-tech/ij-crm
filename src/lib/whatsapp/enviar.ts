@@ -5,11 +5,12 @@
  * inicia conversa — só quem já tem uma mensagem para citar chama isto.
  */
 import { db } from "@/lib/db";
-import { configEvolution, notificacoesAtivas } from "@/lib/config/env";
+import { configEvolution, notificacoesAtivas, TIMEOUT_ENVIO_PADRAO_MS, timeoutEnvioMs } from "@/lib/config/env";
 import { descreverErro } from "@/lib/erros/registrar";
 import { mascararJid } from "./mascarar";
 
-export const TIMEOUT_ENVIO_MS = 60_000;
+/** Padrão; o valor em uso vem de `timeoutEnvioMs()` (config do Admin > env > padrão). */
+export const TIMEOUT_ENVIO_MS = TIMEOUT_ENVIO_PADRAO_MS;
 
 export type Citacao = {
   /** `key.id` da mensagem citada. */
@@ -89,8 +90,9 @@ export async function enviarWhatsApp({ para, texto, citar, oportunidadeId = null
     };
   }
 
+  const timeoutMs = timeoutEnvioMs();
   const controlador = new AbortController();
-  const timer = setTimeout(() => controlador.abort(), TIMEOUT_ENVIO_MS);
+  const timer = setTimeout(() => controlador.abort(), timeoutMs);
   let json: unknown;
   let status: number;
   try {
@@ -105,7 +107,7 @@ export async function enviarWhatsApp({ para, texto, citar, oportunidadeId = null
     json = await lerJson(resposta, controlador.signal);
   } catch (e) {
     if (e instanceof ErroEnvioWhatsApp) throw e;
-    const motivo = controlador.signal.aborted ? `timeout após ${TIMEOUT_ENVIO_MS}ms` : "falha de rede";
+    const motivo = controlador.signal.aborted ? `timeout após ${timeoutMs}ms` : "falha de rede";
     throw new ErroEnvioWhatsApp(`Evolution sendText: ${motivo}`);
   } finally {
     clearTimeout(timer);
