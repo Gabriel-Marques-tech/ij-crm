@@ -126,14 +126,21 @@ O script, na ordem:
    o app antigo segue no ar e o script mostra o dump do passo 5 (§2, "Migration falhou");
 7. `up -d --wait` com a imagem nova (espera todos os healthchecks) e
    `GET https://APP_DOMAIN/api/health` pelo Caddy (TLS de verdade) = 200;
-8. sucesso: registra a tag em `.deploy/historico`, marca `:latest` local e apaga
+8. sucesso: registra a tag em `.deploy/historico` e em `.deploy/atual`, marca `:latest` local e apaga
    as imagens `app`/`ops` fora das últimas `IMAGENS_MANTER` (padrão 5) tags do
    histórico, mais as camadas órfãs.
-   **Falha no passo 7: rollback automático** do app para o último deploy bom
-   do histórico e saída com erro (o schema não volta; ver §2).
+   **Falha no passo 7: rollback automático** do app para a tag de
+   `.deploy/atual` (o último deploy **ou rollback** bom: depois de um rollback
+   manual, volta para onde o operador deixou, não para a versão abandonada) e
+   saída com erro (o schema não volta; ver §2).
+
+Um deploy/rollback por vez: o script segura `flock` em `.deploy/lock` e o
+segundo sai com "outro deploy/rollback em andamento". O comportamento do
+script (incluindo o rollback automático) tem teste sem Docker:
+`bash scripts/teste-deploy.sh`.
 
 Comandos úteis: `dc ps` (estado + health), `dc logs -f app`,
-`cat .deploy/historico` (deploys bons em ordem; o último é o "último bom").
+`cat .deploy/historico` (deploys bons em ordem), `cat .deploy/atual` (a tag boa que deve estar rodando).
 
 Depois de um rollback automático confira `dc ps`: ele só troca o `app`. Se o
 que falhou foi outro serviço (ex.: a Evolution não subiu), ele segue com o
@@ -149,7 +156,9 @@ scripts/deploy.sh rollback sha-1a2b3c4   # tag específica (ver .deploy/historic
 Sem tag: lê a tag do container `app` que está rodando e volta para o deploy bom
 **anterior a ela** no histórico. Rollbacks seguidos vão andando para trás. Se o
 que roda não está no histórico (deploy que falhou), volta para o último bom.
-Recusa quando já está no mais antigo e quando o alvo é o que já roda. Se a
+A tag tem de ser `sha-…` ou `local-…` (`rollback latest` é recusado: o
+`latest` local pode ser velho ou o que acabou de falhar). Rollback bem-sucedido
+grava `.deploy/atual`. Recusa quando já está no mais antigo e quando o alvo é o que já roda. Se a
 imagem do alvo não está mais no host (limpeza do deploy), baixa do GHCR; tags
 `local-*` não existem no registry. Troca só o `app` (sem build) e confere o health. O rollback não reescreve o histórico; `:latest` passa a apontar para o
 que ficou rodando.
