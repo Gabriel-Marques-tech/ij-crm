@@ -7,13 +7,14 @@ import type { Papel } from "@prisma/client";
 import { itemAtivo, itensParaPapel } from "./nav-config";
 import { useQuadroAtivo } from "./quadro-ativo";
 import { SimboloIJ } from "@/components/marca/marca";
+import type { DestinoInicio } from "@/lib/preferencias/preferencias";
 
 /**
  * Rail lateral (desktop) + barra inferior (mobile).
  * Visual: bg-subtle (sidebar) com borda, item ativo em primary-soft + coral.
  * Recebe só o papel (serializável); ícones são resolvidos aqui, no client.
  */
-export function Rail({ papel, inicio }: { papel: Papel; inicio: string }) {
+export function Rail({ papel, inicio }: { papel: Papel; inicio: DestinoInicio }) {
   const pathname = usePathname();
   // Vendas e Projetos são o mesmo /kanban: na lista o quadro vem do ?quadro=;
   // no detalhe, a página declara o quadro do card (`MarcarQuadroAtivo`).

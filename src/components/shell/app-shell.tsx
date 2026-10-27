@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import type { UsuarioSessao } from "@/lib/auth/sessao";
+import type { DestinoInicio } from "@/lib/preferencias/preferencias";
 import { QuadroAtivoProvider } from "./quadro-ativo";
 import { Rail } from "./rail";
 import { Topbar } from "./topbar";
@@ -8,7 +9,7 @@ import { Topbar } from "./topbar";
  * `inicio` = destino já resolvido da página inicial (preferência do usuário).
  * O logo aponta direto para ele, sem passar pelo redirect de "/".
  */
-export function AppShell({ children, usuario, inicio }: { children: ReactNode; usuario: UsuarioSessao; inicio: string }) {
+export function AppShell({ children, usuario, inicio }: { children: ReactNode; usuario: UsuarioSessao; inicio: DestinoInicio }) {
   return (
     <QuadroAtivoProvider>
       <div className="flex min-h-screen">
