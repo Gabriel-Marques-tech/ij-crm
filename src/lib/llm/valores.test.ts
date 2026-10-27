@@ -26,6 +26,14 @@ describe("lerValorInformal", () => {
     ["não sei", null],
     ["muito caro", null],
     ["-5k", null],
+    // Multiplicador só colado ao número (ou fechando um intervalo).
+    ["15 pessoas, orçamento 20 mil", "20000.00"],
+    ["10 a 15k", "10000.00"],
+    ["de 10 até 15 mil", "10000.00"],
+    ["entre 10k e 15k", "10000.00"],
+    ["3 sócios, uns 50 mil", "50000.00"],
+    ["15 pessoas, mil coisas", null],
+    ["para 15 pessoas, orçamento 20000", null],
   ])("%j → %s", (expr, esperado) => {
     expect(lerValorInformal(expr)).toBe(esperado);
   });
