@@ -7,7 +7,7 @@
  * Provedor por `LLM_PROVEDOR` (`anthropic` | `mock`). Cada chamada loga
  * provedor, modelo, versão do prompt, latência e tokens — NUNCA o texto.
  */
-import { chaveAnthropic, modeloExtracao, provedorLlm } from "@/lib/config/env";
+import { ConfigInvalida, chaveAnthropic, modeloExtracao, provedorLlm } from "@/lib/config/env";
 import {
   JSON_SCHEMA_EXTRACAO,
   PROMPT_SISTEMA,
@@ -28,7 +28,13 @@ export type ResultadoExtracao = { extracao: Extracao; bruto: unknown; uso: UsoLl
 
 /** Provedor configurado no ambiente. Lança `ErroLlm` (PROVEDOR_INVALIDO / SEM_CHAVE). */
 export function provedorConfigurado(): ProvedorLlm {
-  const nome = provedorLlm();
+  let nome: ReturnType<typeof provedorLlm>;
+  try {
+    nome = provedorLlm();
+  } catch (e) {
+    if (e instanceof ConfigInvalida) throw new ErroLlm("PROVEDOR_INVALIDO", { detalhe: e.message });
+    throw e;
+  }
   if (nome === "mock") return criarProvedorMock();
   if (nome === "anthropic") {
     const apiKey = chaveAnthropic();

@@ -7,6 +7,7 @@ import {
   diagnosticarSegredo,
   grupoJid,
   notificacoesAtivas,
+  provedorLlm,
   segredoWebhook,
 } from "./env";
 
@@ -99,5 +100,21 @@ describe("env", () => {
     expect(notificacoesAtivas()).toBe(false);
     process.env.NOTIFICATIONS_ENABLED = "true";
     expect(notificacoesAtivas()).toBe(true);
+  });
+});
+
+describe("provedorLlm", () => {
+  it("mock em produção é recusado com erro claro (falha fechada)", () => {
+    process.env.LLM_PROVEDOR = "mock";
+    (process.env as Record<string, string>).NODE_ENV = "production";
+    expect(() => provedorLlm()).toThrow(/LLM_PROVEDOR=mock não é permitido em produção/);
+    (process.env as Record<string, string>).NODE_ENV = "test";
+    expect(provedorLlm()).toBe("mock");
+  });
+
+  it("anthropic em produção segue valendo", () => {
+    process.env.LLM_PROVEDOR = "anthropic";
+    (process.env as Record<string, string>).NODE_ENV = "production";
+    expect(provedorLlm()).toBe("anthropic");
   });
 });

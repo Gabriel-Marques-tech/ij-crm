@@ -37,6 +37,14 @@ describe("provedor por env", () => {
     await expect(extrairAtualizacao("#crm x", CTX)).rejects.toMatchObject({ name: "ErroLlm", codigo: "SEM_CHAVE" });
   });
 
+  it("mock em produção → PROVEDOR_INVALIDO com o motivo (a mensagem vai para FALHA)", () => {
+    process.env.LLM_PROVEDOR = "mock";
+    (process.env as Record<string, string>).NODE_ENV = "production";
+    expect(() => provedorConfigurado()).toThrow(
+      expect.objectContaining({ codigo: "PROVEDOR_INVALIDO", message: expect.stringContaining("não é permitido em produção") }),
+    );
+  });
+
   it("valor desconhecido → PROVEDOR_INVALIDO", () => {
     process.env.LLM_PROVEDOR = "openai";
     expect(() => provedorConfigurado()).toThrow(expect.objectContaining({ codigo: "PROVEDOR_INVALIDO" }));

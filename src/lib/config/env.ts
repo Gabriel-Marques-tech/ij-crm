@@ -19,6 +19,13 @@ export class ConfigAusente extends Error {
   }
 }
 
+export class ConfigInvalida extends Error {
+  constructor(motivo: string) {
+    super(motivo);
+    this.name = "ConfigInvalida";
+  }
+}
+
 export class ConfigFraca extends Error {
   constructor(
     public readonly variavel: string,
@@ -106,9 +113,12 @@ export const LIMIAR_CONFIANCA_PADRAO = 0.7;
 /**
  * `LLM_PROVEDOR`: `anthropic` (padrão) ou `mock` (dev/testes, sem rede).
  * Qualquer outro valor → `null`: o pipeline marca a mensagem `FALHA`.
+ * `mock` com `NODE_ENV=production` → lança `ConfigInvalida` (idem, `FALHA`).
  */
 export function provedorLlm(): NomeProvedorLlm | null {
   const v = (ler("LLM_PROVEDOR") ?? "anthropic").toLowerCase();
+  // Falha fechada: em produção o mock criaria cards com dados de fixture.
+  if (v === "mock" && process.env.NODE_ENV === "production") throw new ConfigInvalida("LLM_PROVEDOR=mock não é permitido em produção");
   return v === "anthropic" || v === "mock" ? v : null;
 }
 

@@ -26,6 +26,18 @@ const TENTATIVAS = 2;
 
 type Opcoes = { apiKey: string; modelo: string; fetch?: typeof fetch };
 
+/**
+ * A API já respondeu saldo esgotado como 400 `invalid_request_error` (sem
+ * `billing_error`). Fallback estreito: só esse status + tipo + a frase
+ * conhecida. A mensagem é só testada, nunca logada nem copiada no erro.
+ */
+function saldoBaixoFormatoAntigo(e: InstanceType<typeof Anthropic.APIError>, status: number | undefined): boolean {
+  if (status !== 400 || e.type !== "invalid_request_error") return false;
+  const corpo = e.error as { error?: { message?: unknown } } | undefined;
+  const msg = corpo?.error?.message;
+  return typeof msg === "string" && /credit balance is too low/i.test(msg);
+}
+
 function traduzirErro(e: unknown): { erro: ErroLlm; retentavel: boolean } {
   if (e instanceof Anthropic.APIConnectionTimeoutError) return { erro: new ErroLlm("TIMEOUT"), retentavel: true };
   if (e instanceof Anthropic.APIConnectionError) return { erro: new ErroLlm("REDE"), retentavel: true };
@@ -33,7 +45,9 @@ function traduzirErro(e: unknown): { erro: ErroLlm; retentavel: boolean } {
     const status = typeof e.status === "number" ? e.status : undefined;
     // Saldo esgotado: identificado pelo tipo do corpo (`billing_error`, 402),
     // nunca pela mensagem humana. Não re-tenta; reprocessa após recarga.
-    if (e.type === "billing_error" || status === 402) return { erro: new ErroLlm("SEM_CREDITO", { status }), retentavel: false };
+    if (e.type === "billing_error" || status === 402 || saldoBaixoFormatoAntigo(e, status)) {
+      return { erro: new ErroLlm("SEM_CREDITO", { status }), retentavel: false };
+    }
     return { erro: new ErroLlm("HTTP", { status }), retentavel: status !== undefined && status >= 500 };
   }
   return { erro: new ErroLlm("REDE", { detalhe: e instanceof Error ? e.name : typeof e }), retentavel: false };

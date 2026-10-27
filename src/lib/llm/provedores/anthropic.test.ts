@@ -86,6 +86,22 @@ describe("provedor Anthropic (SDK oficial, fetch falso)", () => {
     await expect(provedor(fetch).extrair(PEDIDO)).rejects.toMatchObject({ codigo: "SEM_CREDITO", status: 400 });
   });
 
+  it("400 invalid_request_error de saldo baixo (formato antigo) → SEM_CREDITO; outro 400 continua HTTP", async () => {
+    const saldo = vi.fn().mockResolvedValue(
+      resposta(400, { type: "error", error: { type: "invalid_request_error", message: "Your credit balance is too low to access the Anthropic API." } }),
+    );
+    const e = await provedor(saldo).extrair(PEDIDO).catch((x) => x);
+    expect(e).toMatchObject({ codigo: "SEM_CREDITO", status: 400 });
+    expect(e.message).not.toContain("credit balance");
+    expect(saldo).toHaveBeenCalledTimes(1);
+
+    const outro = vi.fn().mockResolvedValue(resposta(400, { type: "error", error: { type: "invalid_request_error", message: "max_tokens: too large" } }));
+    await expect(provedor(outro).extrair(PEDIDO)).rejects.toMatchObject({ codigo: "HTTP", status: 400 });
+    // Mesma frase com outro tipo/status não vale.
+    const naoBate = vi.fn().mockResolvedValue(resposta(403, { type: "error", error: { type: "permission_error", message: "Your credit balance is too low" } }));
+    await expect(provedor(naoBate).extrair(PEDIDO)).rejects.toMatchObject({ codigo: "HTTP", status: 403 });
+  });
+
   it("5xx re-tenta uma vez e então funciona", async () => {
     const fetch = vi
       .fn()
