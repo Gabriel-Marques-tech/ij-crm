@@ -99,6 +99,7 @@ model Usuario {
   transicoes        TransicaoFase[]
   timeline          Timeline[]
   mensagensBrutas   MensagemBruta[]
+  mensagensResolvidas MensagemBruta[] @relation("resolvidaPor")
   sessoes           Sessao[]
   importPrevias     ImportPrevia[]
   foto              UsuarioFoto?
@@ -368,10 +369,14 @@ model MensagemBruta {
   erro                String?
   /// GAB-39: chegou sem #crm e o classificador achou relevante — limiar de extração mais alto e confirmação "↪️".
   semTag              Boolean        @default(false) @map("sem_tag")
+  /// GAB-41: "Resolver manualmente" no painel (PROCESSADA sem LLM): quem e quando.
+  resolvidaPorId      String?        @map("resolvida_por_id")
+  resolvidaEm         DateTime?      @map("resolvida_em")
   criadoEm            DateTime       @default(now()) @map("criado_em")
   atualizadoEm        DateTime       @updatedAt @map("atualizado_em")
 
   remetenteUsuario    Usuario?       @relation(fields: [remetenteUsuarioId], references: [id])
+  resolvidaPor        Usuario?       @relation("resolvidaPor", fields: [resolvidaPorId], references: [id], onDelete: SetNull)
   timeline            Timeline[]
 
   @@index([status])
