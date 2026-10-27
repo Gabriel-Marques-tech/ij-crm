@@ -1,5 +1,6 @@
 // @vitest-environment node
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { db as dbApp } from "@/lib/db";
 import { dbTeste, limparBanco } from "@/test/db";
 import { invalidarCachePipelines } from "@/lib/fases/cache";
 import { inicioDoDia } from "@/lib/oportunidades/campos";
@@ -102,6 +103,10 @@ beforeEach(async () => {
   await limparBanco(["transicao_fase", "timeline", "oportunidade", "fase", "pipeline", "contato", "empresa", "sessao", "usuario"]);
   invalidarCachePipelines();
   seq = 0;
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 describe("listarTabela", () => {
@@ -275,6 +280,79 @@ describe("listarTabela", () => {
     expect(r.linhas[0]).toMatchObject({ titulo: "d", diasNaFase: 14, aging: "vermelho" });
     expect(r.linhas[1]).toMatchObject({ diasNaFase: 4, aging: "verde" });
     expect(r.linhas.find((l) => l.titulo === "d")!.orcamentoPrevisto).toBe("5000.00");
+  });
+
+  it("ordena empresa/contato pelo nome exibido (mesclada → principal viva; excluída → o próprio), pt-BR, vazios por último", async () => {
+    const s = await semear();
+    const bravo = await db.empresa.create({ data: { nome: "Bravo" } });
+    const zulu = await db.empresa.create({ data: { nome: "Zulu Dup", mergedIntoId: bravo.id } });
+    const agil = await db.empresa.create({ data: { nome: "Ágil" } });
+    const carlos = await db.empresa.create({ data: { nome: "carlos" } });
+    const contatoZ = await db.contato.create({ data: { nome: "Zé Dup", mergedIntoId: s.maria.id } });
+    const contatoB = await db.contato.create({ data: { nome: "Beto" } });
+    await card(s, "zulu", { empresaId: zulu.id, contatoId: contatoZ.id });
+    await card(s, "velha", { empresaId: s.velha.id, contatoId: contatoB.id });
+    await card(s, "sem");
+    await card(s, "agil", { empresaId: agil.id });
+    await card(s, "carlos", { empresaId: carlos.id });
+    const asc = await listarTabela(estado({}, { ordem: { coluna: "empresa", dir: "asc" } }), AGORA);
+    expect(asc.linhas.map((l) => l.empresa?.nome ?? null)).toEqual(["Ágil", "Bravo", "carlos", "Velha SA (excluída)", null]);
+    expect(await titulos(estado({}, { ordem: { coluna: "empresa", dir: "desc" } }))).toEqual(["velha", "carlos", "zulu", "agil", "sem"]);
+    // Contato: "Zé Dup" é exibido como "Maria 50% Silva" → vem depois de "Beto".
+    const contatos = await listarTabela(estado({}, { ordem: { coluna: "contato", dir: "asc" } }), AGORA);
+    expect(contatos.linhas.map((l) => l.contato?.nome ?? null).slice(0, 2)).toEqual(["Beto", "Maria 50% Silva"]);
+  });
+
+  it("ordem por empresa pagina sem duplicar nem pular (mesclada, empates por id) e o CSV segue a mesma ordem", async () => {
+    const s = await semear();
+    const bravo = await db.empresa.create({ data: { nome: "Bravo" } });
+    const zulu = await db.empresa.create({ data: { nome: "Zulu Dup", mergedIntoId: bravo.id } });
+    const charlie = await db.empresa.create({ data: { nome: "Charlie" } });
+    const criados = [];
+    for (let i = 0; i < 55; i++) criados.push(await card(s, `c${String(i).padStart(2, "0")}`, { empresaId: i % 2 ? zulu.id : charlie.id }));
+    const porId = (x: { id: string }, y: { id: string }) => (x.id < y.id ? -1 : 1);
+    const esperado = [...criados.filter((_, i) => i % 2).sort(porId), ...criados.filter((_, i) => !(i % 2)).sort(porId)].map((c) => c.id);
+    const ordem = { coluna: "empresa", dir: "asc" } as const;
+    const p1 = await listarTabela(estado({}, { ordem, pagina: 1 }), AGORA);
+    const p2 = await listarTabela(estado({}, { ordem, pagina: 2 }), AGORA);
+    expect(p1).toMatchObject({ total: 55, paginas: 2 });
+    expect([...p1.linhas, ...p2.linhas].map((l) => l.id)).toEqual(esperado);
+    const csv = (await csvTexto(estado({}, { ordem }), 7)).slice(1).split("\r\n").filter(Boolean).slice(1);
+    expect(csv.map((l) => l.split(";")[0])).toEqual(esperado);
+    // Com busca + filtro: a busca pelo nome exibido continua valendo junto da ordem.
+    const filtrada = await listarTabela(estado({ q: "bravo" }, { ordem: { coluna: "empresa", dir: "desc" } }), AGORA);
+    expect(filtrada.linhas.map((l) => l.id)).toEqual(esperado.slice(0, 27));
+  });
+
+  it("ordem por nome: a página reaplica os filtros (card apagado entre a leitura dos ids e a da página some)", async () => {
+    const s = await semear();
+    const a = await card(s, "a", { empresaId: s.acme.id });
+    await card(s, "b", { empresaId: s.acme.id });
+    const original = dbApp.$queryRaw.bind(dbApp);
+    vi.spyOn(dbApp, "$queryRaw").mockImplementationOnce((async (...args: Parameters<typeof dbApp.$queryRaw>) => {
+      const r = await original(...args);
+      await db.oportunidade.update({ where: { id: a.id }, data: { deletadoEm: new Date() } });
+      return r;
+    }) as typeof dbApp.$queryRaw);
+    const r = await listarTabela(estado({}, { ordem: { coluna: "empresa", dir: "asc" } }), AGORA);
+    expect(r.linhas.map((l) => l.titulo)).toEqual(["b"]);
+  });
+
+  it("busca que casa mais de 32.767 ids (limite de bind do Postgres) pagina por nome e por título", { timeout: 60_000 }, async () => {
+    const s = await semear();
+    const N = 33_000;
+    await db.$executeRaw`
+      INSERT INTO oportunidade (id, titulo, pipeline_id, fase_id, responsavel_id, criado_via, empresa_id, fase_desde, criado_em, atualizado_em)
+      SELECT 'massa' || lpad(g::text, 6, '0'), 'massa ' || lpad(g::text, 6, '0'), ${s.vendas.id}, ${fase(s.vendas, "primeiro_contato")},
+             ${s.ana.id}, 'UI', CASE WHEN g % 2 = 0 THEN ${s.dup.id} ELSE NULL END, now(), now(), now()
+      FROM generate_series(1, ${N}) g`;
+    const porNome = await listarTabela(estado({ q: "massa" }, { ordem: { coluna: "empresa", dir: "asc" }, pagina: 2 }), AGORA);
+    expect(porNome.total).toBe(N);
+    expect(porNome.linhas.map((l) => l.id)).toEqual(Array.from({ length: POR_PAGINA }, (_, i) => `massa${String(2 * (POR_PAGINA + i + 1)).padStart(6, "0")}`));
+    expect(porNome.linhas[0].empresa?.nome).toBe("Acme Ltda");
+    const porTitulo = await listarTabela(estado({ q: "massa" }, { ordem: { coluna: "titulo", dir: "desc" } }), AGORA);
+    expect(porTitulo.total).toBe(N);
+    expect(porTitulo.linhas[0].titulo).toBe("massa 033000");
   });
 
   it("pagina de 50 em 50 com total; página além do fim cai na última", async () => {
