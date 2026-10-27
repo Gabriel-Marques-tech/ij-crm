@@ -2,40 +2,33 @@
  * Erro inesperado do servidor → linha de log rastreável + `ref` curta que o
  * usuário vê na tela e repassa. Para achar: `grep 'ref=<ref>'` nos logs.
  *
- * Nunca loga `e.message` de erro do Prisma (qualquer classe): ele ecoa
- * argumentos da query (emails, hashes, textos de card). Só a classe, `code`,
- * `meta.target`/`meta.modelName` e os NOMES das outras chaves de `meta`.
+ * Nunca loga `e.message` de erro do Prisma (ver `./prisma.ts`) nem de `Error`
+ * genérico; só das classes em `MENSAGEM_SEGURA`.
  */
-import { Prisma } from "@prisma/client";
 import { unstable_rethrow } from "next/navigation";
+import { descreverErroPrisma } from "./prisma";
 
 const FRAMES = 3;
 
+/**
+ * Classes do projeto cuja `message` é montada só com códigos/nomes de variável
+ * (nunca dado pessoal): a mensagem delas vai ao log. Qualquer outro `Error`
+ * loga só o nome + frames — a mensagem pode trazer email/telefone/texto.
+ */
+export const MENSAGEM_SEGURA = new Set(["ConfigAusente", "ConfigInvalida", "ConfigFraca", "ErroLlm"]);
+
 export function descreverErro(e: unknown): string {
-  if (e instanceof Prisma.PrismaClientKnownRequestError) {
-    const meta = (e.meta ?? {}) as { target?: unknown; modelName?: unknown };
-    const partes = [`Prisma ${e.code}`];
-    if (meta.modelName !== undefined) partes.push(`model=${String(meta.modelName)}`);
-    if (meta.target !== undefined) partes.push(`target=${Array.isArray(meta.target) ? meta.target.join(",") : String(meta.target)}`);
-    const outras = Object.keys(meta).filter((k) => k !== "target" && k !== "modelName");
-    if (outras.length > 0) partes.push(`meta=${outras.join(",")}`);
-    return partes.join(" ");
-  }
-  if (e instanceof Prisma.PrismaClientInitializationError) return [e.name, e.errorCode].filter(Boolean).join(" ");
-  if (
-    e instanceof Prisma.PrismaClientValidationError ||
-    e instanceof Prisma.PrismaClientUnknownRequestError ||
-    e instanceof Prisma.PrismaClientRustPanicError
-  ) {
-    return e.name;
-  }
+  const prisma = descreverErroPrisma(e);
+  if (prisma !== null) return prisma;
   if (e instanceof Error) {
     const frames = (e.stack ?? "")
       .split("\n")
       .filter((l) => /^\s+at\s/.test(l))
       .slice(0, FRAMES)
       .map((l) => l.trim());
-    return [`${e.name}: ${e.message}`, ...frames].join(" | ");
+    const cabeca = MENSAGEM_SEGURA.has(e.name) ? `${e.name}: ${e.message}` : e.name;
+    const causa = descreverErroPrisma(e.cause);
+    return [cabeca, ...(causa ? [`cause=${causa}`] : []), ...frames].join(" | ");
   }
   return `lançado valor não-Error (${typeof e})`;
 }
