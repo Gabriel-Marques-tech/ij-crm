@@ -153,12 +153,9 @@ export function chaveOpenAI(): string | undefined {
   return ler("OPENAI_API_KEY");
 }
 
-/** Abaixo disto o card nasce com `revisar = true`. `LLM_LIMIAR_CONFIANCA` fora de [0, 1] ou ilegível → 0.7. */
+/** Abaixo disto o card nasce com `revisar = true`. `LLM_LIMIAR_CONFIANCA` fora de [0, 1] ou ilegível → 0.7 (com aviso). */
 export function limiarConfianca(): number {
-  const bruto = ler("LLM_LIMIAR_CONFIANCA");
-  if (bruto === undefined) return LIMIAR_CONFIANCA_PADRAO;
-  const n = Number(bruto.replace(",", "."));
-  return Number.isFinite(n) && n >= 0 && n <= 1 ? n : LIMIAR_CONFIANCA_PADRAO;
+  return limiar("LLM_LIMIAR_CONFIANCA", LIMIAR_CONFIANCA_PADRAO);
 }
 
 // ------------------------------------------------- classificador sem #crm (GAB-39)
@@ -167,11 +164,29 @@ export function limiarConfianca(): number {
 export const LIMIAR_CLASSIFICADOR_PADRAO = 0.7;
 export const LIMIAR_SEM_TAG_PADRAO = 0.85;
 
+const gAvisos = globalThis as unknown as { __ijAvisosConfig?: Set<string> };
+
+/** Config errada vira `console.warn` uma vez por processo (por variável + valor), não a cada mensagem. */
+function avisarUmaVez(chave: string, texto: string) {
+  const vistos = (gAvisos.__ijAvisosConfig ??= new Set());
+  if (vistos.has(chave)) return;
+  vistos.add(chave);
+  console.warn(`[config] ${texto}`);
+}
+
+/** Só para testes. */
+export function reiniciarAvisosConfig() {
+  gAvisos.__ijAvisosConfig = undefined;
+}
+
+/** Limiar 0–1 (aceita vírgula). Ilegível ou fora da faixa → padrão + aviso. */
 function limiar(nome: string, padrao: number): number {
   const bruto = ler(nome);
   if (bruto === undefined) return padrao;
   const n = Number(bruto.replace(",", "."));
-  return Number.isFinite(n) && n >= 0 && n <= 1 ? n : padrao;
+  if (Number.isFinite(n) && n >= 0 && n <= 1) return n;
+  avisarUmaVez(`${nome}=${bruto}`, `${nome}=${bruto} inválido (precisa ser um número de 0 a 1); usando ${padrao}`);
+  return padrao;
 }
 
 /** Mensagem sem #crm com `confianca` do classificador abaixo disto (ou `relevante=false`) é descartada. */
@@ -184,7 +199,15 @@ export function limiarClassificador(): number {
  * for ≥ isto — mais exigente que `LLM_LIMIAR_CONFIANCA`. Abaixo → `PENDENTE_REVISAO`.
  */
 export function limiarSemTag(): number {
-  return limiar("LLM_LIMIAR_SEM_TAG", LIMIAR_SEM_TAG_PADRAO);
+  const semTag = limiar("LLM_LIMIAR_SEM_TAG", LIMIAR_SEM_TAG_PADRAO);
+  const comTag = limiarConfianca();
+  if (semTag >= comTag) return semTag;
+  // Sem tag nunca pode ser MAIS permissivo que com tag: vale o mais exigente.
+  avisarUmaVez(
+    `LLM_LIMIAR_SEM_TAG<${semTag}<${comTag}`,
+    `LLM_LIMIAR_SEM_TAG=${semTag} < LLM_LIMIAR_CONFIANCA=${comTag}; usando ${comTag} para mensagens sem #crm`,
+  );
+  return comTag;
 }
 
 /**
@@ -196,5 +219,28 @@ export function limiarSemTag(): number {
 export function modeloClassificacao(provedor: keyof typeof MODELOS_EXTRACAO_PADRAO): string {
   const v = ler("LLM_CLASSIFICACAO_MODELO");
   if (v && v.startsWith("claude-") === (provedor === "anthropic")) return v;
+  if (v) {
+    avisarUmaVez(
+      `LLM_CLASSIFICACAO_MODELO=${v}@${provedor}`,
+      `LLM_CLASSIFICACAO_MODELO=${v} ignorado: não é modelo do provedor ${provedor}; o classificador usa o modelo da extração`,
+    );
+  }
   return modeloExtracao(provedor);
+}
+
+/**
+ * Lê a config de LLM uma vez no boot (`src/instrumentation.ts`) para os
+ * avisos de `[config]` aparecerem logo ao subir, não só na 1ª mensagem.
+ * Nunca lança.
+ */
+export function validarConfigLlm() {
+  try {
+    limiarConfianca();
+    limiarClassificador();
+    limiarSemTag();
+    const p = provedorLlm();
+    if (p === "openai" || p === "anthropic") modeloClassificacao(p);
+  } catch {
+    // provedor inválido/mock em produção: o pipeline já registra como FALHA.
+  }
 }
