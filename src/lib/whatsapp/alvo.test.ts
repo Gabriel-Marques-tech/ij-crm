@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MOTIVO_FECHADO_COM_ABERTO, MOTIVO_REABERTO, MOTIVO_SEM_IDENTIDADE, resolverAlvo, type Candidata } from "./alvo";
+import { MOTIVO_FECHADO_COM_ABERTO, MOTIVO_SEM_IDENTIDADE, resolverAlvo, type Candidata } from "./alvo";
 
 const T = (min: number) => new Date(Date.UTC(2026, 9, 26, 12, min));
 
@@ -67,13 +67,24 @@ describe("resolverAlvo — escolha da LLM só vale dentro da lista", () => {
     ).toEqual({ tipo: "EXISTENTE", id: "b", motivos: [MOTIVO_SEM_IDENTIDADE] });
   });
 
-  it("GAB-49: card fechado no ledger também concorre (como um recente fechado); escolher o fechado nunca dispensa revisar", () => {
+  it("GAB-49: card fechado no ledger também concorre (como um recente fechado)", () => {
     expect(
       resolverAlvo({ alvoResposta: null, escolhaLlm: "b", candidatas: [c("x", { via: ["ledger"], terminal: true }), c("b", { via: ["recente"] })] }),
     ).toMatchObject({ id: "b", motivos: [MOTIVO_SEM_IDENTIDADE] });
-    expect(resolverAlvo({ alvoResposta: null, escolhaLlm: "x", candidatas: [c("x", { via: ["ledger"], terminal: true })] })).toMatchObject({
+  });
+
+  it("GAB-49: card FECHADO só pelo ledger nunca reabre → NENHUM com motivo (vai para revisão)", () => {
+    expect(resolverAlvo({ alvoResposta: null, escolhaLlm: "x", candidatas: [c("x", { via: ["ledger"], terminal: true })] })).toEqual({
+      tipo: "NENHUM",
+      motivo: "FECHADO_SEM_IDENTIDADE",
+    });
+    // Com identidade exata (ou reply), a reabertura do GAB-38 continua.
+    expect(resolverAlvo({ alvoResposta: null, escolhaLlm: "x", candidatas: [c("x", { via: ["ledger", "contato"], terminal: true })] })).toMatchObject({
       tipo: "REABRIR",
-      motivos: [MOTIVO_REABERTO, MOTIVO_SEM_IDENTIDADE],
+      deId: "x",
+    });
+    expect(resolverAlvo({ alvoResposta: "x", escolhaLlm: null, candidatas: [c("x", { via: ["ledger", "resposta"], terminal: true })] })).toMatchObject({
+      tipo: "REABRIR",
     });
   });
 

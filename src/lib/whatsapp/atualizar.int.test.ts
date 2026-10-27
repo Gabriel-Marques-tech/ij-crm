@@ -233,9 +233,8 @@ describe("mensagens picadas", () => {
     expect((await cardDe(id)).revisar).toBe(true);
   });
 
-  it("'recente' é só dos últimos 30 min e só do remetente", async () => {
-    // Ana veio na janela de 12 h anterior: nem 'recente' nem ledger (GAB-49).
-    const velho = await enviar("#crm falei com a Ana", () => saida({ contato: { nome: "Ana" } }), { recebidaEm: new Date(RECEBIDA_EM.getTime() - 12 * 60 * MIN) });
+  it("'recente' é só dos últimos 30 min e só do remetente; 31 min depois, na mesma janela, o card vem pelo ledger (revisar)", async () => {
+    const velho = await enviar("#crm falei com a Ana", () => saida({ contato: { nome: "Ana" } }));
     const idVelho = (velho.r as { oportunidadeId: string }).oportunidadeId;
     // todos os toques do card da Ana ficam 31 min antes da próxima mensagem
     await dbT.timeline.updateMany({ where: { oportunidadeId: idVelho }, data: { em: new Date(RECEBIDA_EM.getTime() - 31 * MIN) } });
@@ -243,12 +242,36 @@ describe("mensagens picadas", () => {
     const daMaria = await enviar("#crm falei com o Beto", () => saida({ contato: { nome: "Beto" } }), { remetenteUsuarioId: maria.id });
     const idMaria = (daMaria.r as { oportunidadeId: string }).oportunidadeId;
 
-    const r = await enviar("#crm mando proposta sexta", () => saida({ intencao: "ATUALIZAR", oportunidade_id: idVelho }));
-    expect(r.prompt).not.toContain(idVelho);
+    const r = await enviar("#crm mando proposta sexta", () => saida({ intencao: "ATUALIZAR", oportunidade_id: idVelho, campos: { proxima_acao: "mandar proposta" } }));
+    // GAB-49: não é 'recente' (31 min), mas a mensagem da Ana é do ledger da janela de 12 h.
+    expect(r.prompt).toMatch(new RegExp(`- id=${idVelho} .* via=ledger `));
     expect(r.prompt).not.toContain(idMaria);
-    // id fora da lista de candidatas: ignorado, nada muda, vai para revisão
+    expect(r.r).toMatchObject({ tipo: "PROCESSADA", oportunidadeId: idVelho });
+    const card = await cardDe(idVelho);
+    expect(card).toMatchObject({ proximaAcao: "mandar proposta", revisar: true }); // nunca ✅ só pelo ledger
+  });
+
+  it("borda dos 30 min: toque exatamente 30 min antes ainda é 'recente' (✅ sem revisar)", async () => {
+    const c = await enviar("#crm falei com a Ana", () => saida({ contato: { nome: "Ana" } }));
+    const id = (c.r as { oportunidadeId: string }).oportunidadeId;
+    await dbT.timeline.updateMany({ where: { oportunidadeId: id }, data: { em: new Date(RECEBIDA_EM.getTime() - 30 * MIN) } });
+    const r = await enviar("#crm mando proposta sexta", (p) => saida({ intencao: "ATUALIZAR", oportunidade_id: idCandidata(p, "recente"), campos: { proxima_acao: "mandar proposta" } }));
+    expect(r.prompt).toMatch(new RegExp(`- id=${id} .* via=recente,ledger `));
+    expect(await cardDe(id)).toMatchObject({ proximaAcao: "mandar proposta", revisar: false });
+  });
+
+  it("GAB-49: card FECHADO que só veio pelo ledger não reabre → pendente de revisão", async () => {
+    const c = await enviar("#crm falei com a Ana", () => saida({ contato: { nome: "Ana" } }));
+    const id = (c.r as { oportunidadeId: string }).oportunidadeId;
+    const perdido = await dbT.fase.findFirstOrThrow({ where: { chave: "perdido", pipeline: { chave: "vendas" } } });
+    await dbT.oportunidade.update({ where: { id }, data: { faseId: perdido.id } });
+    await dbT.timeline.updateMany({ where: { oportunidadeId: id }, data: { em: new Date(RECEBIDA_EM.getTime() - 60 * MIN) } });
+    const antes = await dbT.oportunidade.count();
+    const r = await enviar("#crm ela voltou a falar comigo", () => saida({ intencao: "ATUALIZAR", oportunidade_id: id }));
+    expect(r.prompt).toMatch(new RegExp(`- id=${id} .*\\(fechada\\) via=ledger `));
     expect(r.r).toMatchObject({ tipo: "PENDENTE_REVISAO" });
-    expect((await cardDe(idVelho)).proximaAcao).toBeNull();
+    expect((r.r as { confirmacao: string }).confirmacao).toContain("não reabri");
+    expect(await dbT.oportunidade.count()).toBe(antes);
   });
 });
 

@@ -152,7 +152,7 @@ export async function aplicarAtualizacao(tx: Tx, e: EntradaAplicacao, locks: { v
   const candidatas: Candidata[] = vivas.map((v) => ({ ...enviadas.get(v.id)!, terminal: v.fase.isTerminal }));
   candidatas.push(...(await abertasDaIdentidade(tx, locks.vendasId, vivas, enviadas)));
   const alvo = resolverAlvo({ alvoResposta, escolhaLlm: ex.oportunidade_id, candidatas });
-  if (alvo.tipo === "NENHUM") return pendente("ALVO_NAO_ENCONTRADO");
+  if (alvo.tipo === "NENHUM") return pendente(alvo.motivo === "FECHADO_SEM_IDENTIDADE" ? "ALVO_FECHADO_SEM_IDENTIDADE" : "ALVO_NAO_ENCONTRADO");
   motivos.push(...alvo.motivos);
   const reabrir = alvo.tipo === "REABRIR";
   const baseId = alvo.tipo === "EXISTENTE" ? alvo.id : alvo.deId;

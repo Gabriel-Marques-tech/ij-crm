@@ -12,7 +12,8 @@
  *    O ledger da janela de 12 h (GAB-49) entra nas duas pontas: um card que
  *    só aparece no ledger (mexido há mais de 30 min) pode ser escolhido, mas
  *    com revisar; e outro card no ledger desfaz o ✅ do único recente
- *    (ambíguo → revisar). Escolha de card fechado quando há um aberto por identidade →
+ *    (ambíguo → revisar). Card FECHADO que só veio pelo ledger nunca é
+ *    reaberto: `NENHUM` com motivo → PENDENTE_REVISAO. Escolha de card fechado quando há um aberto por identidade →
  *    o aberto + revisar (a LLM não decide reabrir).
  * 3. Regras sobre as candidatas por identidade exata (mesmo contato por
  *    telefone/email, mesma empresa por CNPJ):
@@ -28,7 +29,11 @@ export type ViaCandidata = "contato" | "empresa" | "dominio" | "recente" | "ledg
 
 export type Candidata = { id: string; terminal: boolean; tocadaEm: Date; via: ViaCandidata[] };
 
-export type Alvo = { tipo: "EXISTENTE"; id: string; motivos: string[] } | { tipo: "REABRIR"; deId: string; motivos: string[] } | { tipo: "NENHUM" };
+export type Alvo =
+  | { tipo: "EXISTENTE"; id: string; motivos: string[] }
+  | { tipo: "REABRIR"; deId: string; motivos: string[] }
+  /** `FECHADO_SEM_IDENTIDADE` (GAB-49): a LLM apontou um card fechado que só veio pelo ledger. */
+  | { tipo: "NENHUM"; motivo?: "FECHADO_SEM_IDENTIDADE" };
 
 export const MOTIVO_VARIOS_ABERTOS = "mais de um card aberto para esse contato/empresa";
 export const MOTIVO_REABERTO = "card anterior estava fechado (ganho/perdido); abri um novo";
@@ -68,6 +73,8 @@ export function resolverAlvo(e: { alvoResposta: string | null; escolhaLlm: strin
     if (c) {
       // Fechado com um aberto do mesmo contato/empresa: atualiza o aberto, nunca reabre outro.
       if (c.terminal && abertasIdentidade.length > 0) return { tipo: "EXISTENTE", id: abertasIdentidade[0].id, motivos: [MOTIVO_FECHADO_COM_ABERTO] };
+      // Fechado que só apareceu pelo ledger (sem telefone/email/CNPJ, reply ou toque recente): nunca reabre.
+      if (c.terminal && !porIdentidade(c) && c.via.every((v) => v === "ledger")) return { tipo: "NENHUM", motivo: "FECHADO_SEM_IDENTIDADE" };
       if (!porIdentidade(c)) return escolhido(c, unicoRecente(c, e.candidatas, abertasIdentidade) ? [] : [MOTIVO_SEM_IDENTIDADE]);
       const outrasAbertas = abertasIdentidade.some((x) => x.id !== c.id);
       return escolhido(c, outrasAbertas ? [MOTIVO_VARIOS_ABERTOS] : []);
