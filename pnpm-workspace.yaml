@@ -5,5 +5,8 @@ allowBuilds:
   "@prisma/client": true
   "@prisma/engines": true
   esbuild: true
+  # Desnecessários (conferido no PR #33): o `prepare` do @google/genai roda
+  # scripts/prepare.js, que nem vem no pacote publicado; o `postinstall` do
+  # protobufjs só imprime aviso de versão. Install limpo + build + smoke ok.
   "@google/genai": false
   protobufjs: false
