@@ -33,6 +33,7 @@
  */
 import { Prisma } from "@prisma/client";
 import { modeloDoProvedorConfigurado, limiarConfianca } from "@/lib/config/env";
+import { carregarConfigTecnica } from "@/lib/config/tecnica";
 import { encontrarContatoPorIdentificador, encontrarEmpresa } from "@/lib/contatos/match";
 import { db } from "@/lib/db";
 import { registrarErro } from "@/lib/erros/registrar";
@@ -218,6 +219,7 @@ async function falhar(
  */
 export async function processarMensagem(id: string, opts: { participantJid?: string | null } = {}): Promise<ResultadoProcessamento> {
   try {
+    await carregarConfigTecnica(); // GAB-42: config do Admin > env (cache; nunca lança)
     return await processar(id, opts);
   } catch (e) {
     const ref = registrarErro("processar", erroSeguro(e));

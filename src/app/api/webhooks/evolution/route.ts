@@ -19,6 +19,8 @@
 import { timingSafeEqual } from "node:crypto";
 import { after } from "next/server";
 import { chaveApiEvolution, diagnosticarSegredo, grupoJid, segredoWebhook } from "@/lib/config/env";
+import { carregarConfigTecnica } from "@/lib/config/tecnica";
+import { registrarLogWebhook } from "@/lib/logs/tecnicos";
 import { ingerirMensagem } from "@/lib/whatsapp/ingestao";
 import { mascararJid } from "@/lib/whatsapp/mascarar";
 import { interpretarPayload } from "@/lib/whatsapp/payload";
@@ -69,7 +71,50 @@ function descreverErro(e: unknown): string {
   return typeof codigo === "string" ? `${e.name} ${codigo}` : e.name;
 }
 
+/**
+ * GAB-42: carrega a config técnica (GRUPO_JID do Admin > env) e grava uma
+ * linha em `log_webhook` — tipo do evento, chat mascarado, resultado e
+ * duração; nunca corpo/texto. Requisição não autenticada não tem tipo/chat.
+ */
 export async function POST(req: Request): Promise<Response> {
+  const inicio = performance.now();
+  const copia = req.clone();
+  await carregarConfigTecnica();
+  const res = await tratar(req);
+  const ms = performance.now() - inicio;
+  const copiaRes = res.clone(); // o corpo original vai para a Evolution
+  // Depois da resposta (como o processamento): o log não atrasa a Evolution.
+  after(async () => {
+    let tipo: string | null = null;
+    let chat: string | null = null;
+    if (res.status !== 401) {
+      try {
+        const j = JSON.parse(await copia.text()) as { event?: unknown; data?: { key?: { remoteJid?: unknown } } } | null;
+        tipo = typeof j?.event === "string" ? j.event : null;
+        chat = typeof j?.data?.key?.remoteJid === "string" ? j.data.key.remoteJid : null;
+      } catch {
+        // corpo não-JSON: fica sem tipo/chat
+      }
+    }
+    await registrarLogWebhook({ tipo, chat, status: res.status, resultado: await resultadoDe(copiaRes), ms });
+  });
+  return res;
+}
+
+/** Resumo do corpo JSON da resposta (só chaves/códigos nossos). */
+async function resultadoDe(res: Response): Promise<string> {
+  try {
+    const j = (await res.json()) as Record<string, unknown>;
+    if (typeof j.erro === "string") return j.erro;
+    if (j.ignorado) return `ignorado:${typeof j.motivo === "string" ? j.motivo : "?"}`;
+    for (const k of ["duplicado", "remetenteDesconhecido", "descartada", "persistida"]) if (j[k]) return k;
+    return "ok";
+  } catch {
+    return `http_${res.status}`;
+  }
+}
+
+async function tratar(req: Request): Promise<Response> {
   // O corpo é lido antes da autenticação porque o fallback está nele — mas
   // nada dele é logado nem interpretado enquanto a autenticação não passar.
   const bruto = await req.text();
