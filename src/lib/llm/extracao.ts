@@ -1,14 +1,14 @@
 /**
  * Camada única de LLM (design doc §4.4):
  * - `extrairAtualizacao(texto, contexto)` → saída estruturada validada;
- * - `classificar(texto)` → `{ relevante, confianca }` (stub nesta fatia: só
- *   mensagens com `#crm` chegam aqui; o classificador real é GAB-39).
+ * - `classificar(texto, contexto)` → `{ relevante, confianca }` em
+ *   `classificacao.ts` (GAB-39), sobre o mesmo `provedorConfigurado`.
  *
  * Provedor por `LLM_PROVEDOR` (`openai` padrão | `anthropic` | `mock`). Cada
  * chamada loga provedor, modelo, versão do prompt, latência e tokens (incl.
  * raciocínio) — NUNCA o texto.
  */
-import { ConfigInvalida, chaveAnthropic, chaveOpenAI, modeloExtracao, provedorLlm } from "@/lib/config/env";
+import { ConfigInvalida, chaveAnthropic, chaveOpenAI, modeloClassificacao, modeloExtracao, provedorLlm } from "@/lib/config/env";
 import {
   JSON_SCHEMA_EXTRACAO,
   PROMPT_SISTEMA,
@@ -17,19 +17,23 @@ import {
   montarMensagemUsuario,
   type ContextoExtracao,
   type Extracao,
-} from "./prompts/extracao.v1";
+} from "./prompts/extracao.v2";
 import { criarProvedorAnthropic } from "./provedores/anthropic";
 import { criarProvedorMock } from "./provedores/mock";
 import { criarProvedorOpenAI } from "./provedores/openai";
 import { ErroLlm, type ProvedorLlm, type UsoLlm } from "./tipos";
 
 export { ErroLlm } from "./tipos";
-export type { ContextoExtracao, Extracao } from "./prompts/extracao.v1";
+export type { ContextoExtracao, Extracao } from "./prompts/extracao.v2";
 
 export type ResultadoExtracao = { extracao: Extracao; bruto: unknown; uso: UsoLlm; versao: string };
 
-/** Provedor configurado no ambiente. Lança `ErroLlm` (PROVEDOR_INVALIDO / SEM_CHAVE). */
-export function provedorConfigurado(): ProvedorLlm {
+/**
+ * Provedor configurado no ambiente. Lança `ErroLlm` (PROVEDOR_INVALIDO / SEM_CHAVE).
+ * `finalidade` só escolhe o modelo (`LLM_EXTRACAO_MODELO` / `LLM_CLASSIFICACAO_MODELO`).
+ */
+export function provedorConfigurado(finalidade: "extracao" | "classificacao" = "extracao"): ProvedorLlm {
+  const modeloPara = finalidade === "classificacao" ? modeloClassificacao : modeloExtracao;
   let nome: ReturnType<typeof provedorLlm>;
   try {
     nome = provedorLlm();
@@ -41,14 +45,14 @@ export function provedorConfigurado(): ProvedorLlm {
   if (nome === "openai") {
     const apiKey = chaveOpenAI();
     if (!apiKey) throw new ErroLlm("SEM_CHAVE", { detalhe: "OPENAI_API_KEY ausente" });
-    const modelo = modeloExtracao("openai");
+    const modelo = modeloPara("openai");
     if (modelo.startsWith("claude-")) throw modeloTrocado(modelo, "openai");
     return criarProvedorOpenAI({ apiKey, modelo });
   }
   if (nome === "anthropic") {
     const apiKey = chaveAnthropic();
     if (!apiKey) throw new ErroLlm("SEM_CHAVE", { detalhe: "ANTHROPIC_API_KEY ausente" });
-    const modelo = modeloExtracao("anthropic");
+    const modelo = modeloPara("anthropic");
     if (!modelo.startsWith("claude-")) throw modeloTrocado(modelo, "anthropic");
     return criarProvedorAnthropic({ apiKey, modelo });
   }
@@ -101,14 +105,4 @@ export async function extrairAtualizacao(
   }
   logUso(resposta.uso, ref, "ok");
   return { extracao: r.data, bruto: resposta.bruto, uso: resposta.uso, versao: VERSAO_EXTRACAO };
-}
-
-/**
- * Classificador barato (passo 4 do §4.3). Stub desta fatia: a ingestão só
- * persiste mensagens com `#crm`, então tudo que chega é relevante. GAB-39
- * pluga o modelo real atrás desta mesma assinatura.
- */
-export async function classificar(texto: string): Promise<{ relevante: boolean; confianca: number }> {
-  void texto;
-  return { relevante: true, confianca: 1 };
 }

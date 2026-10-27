@@ -13,7 +13,7 @@
  * 24/10/2025, 09:00 em São Paulo.
  */
 import type { Origem } from "@prisma/client";
-import type { Extracao } from "../prompts/extracao.v1";
+import type { Extracao } from "../prompts/extracao.v2";
 
 export const RECEBIDA_EM = new Date("2025-10-24T12:00:00Z");
 
@@ -207,12 +207,12 @@ export const FIXTURES_EXTRACAO: FixtureExtracao[] = [
     esperado: { status: "PENDENTE_REVISAO", confirmacao: "⚠️ não identifiquei o lead — responde esta mensagem com o nome" },
   },
   {
-    nome: "ATUALIZAR ainda não é aplicado → fila de revisão",
+    nome: "ATUALIZAR sem card candidato → não cria, fila de revisão",
     texto: "#crm o Gustavo respondeu, vai fechar semana que vem",
     saida: saida({ intencao: "ATUALIZAR", contato: { nome: "Gustavo" }, campos: { proxima_acao_em: "semana que vem" }, confianca: 0.7 }),
     esperado: {
       status: "PENDENTE_REVISAO",
-      confirmacao: "⚠️ atualizar card pelo WhatsApp ainda não está ativo; ficou na fila de revisão do CRM",
+      confirmacao: "⚠️ não achei o card para atualizar — responde a confirmação do card com a novidade; ficou na fila de revisão do CRM",
     },
   },
   {
