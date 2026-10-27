@@ -157,13 +157,16 @@ GAB-46. A recarga da API de LLM é manual (pré-pago). Quando uma chamada falha 
 - manda `⚠️ Sem crédito na API de LLM. Mensagens do grupo estão ficando em FALHA e serão reprocessadas
   depois da recarga. ref: …` para `ALERTA_OPS_JID` pelo `enviarWhatsApp` de sempre (timeout 60 s);
 - respeita cooldown guardado no banco (`alerta_operacional`, sobrevive a restart): 6 h depois de um aviso
-  entregue, 5 min se o envio falhou;
+  entregue, 5 min se o envio falhou (ou se o processo cair entre reivindicar e enviar). Entrega confirmada
+  pela Evolution conta como avisado mesmo se a gravação local falhar depois (`ErroPosEnvio` em `enviar.ts`);
 - com `NOTIFICATIONS_ENABLED`≠`true` ou `ALERTA_OPS_JID` vazio, só loga (`[alerta-credito] … ref=…`);
 - nunca lança e nunca leva texto de mensagem do grupo (só a ref; `grep 'ref=…'` acha a causa).
 
-Gestor/admin veem um banner no topo do app enquanto houver `SEM_CREDITO` nas últimas 24 h. A primeira
-chamada à LLM que der certo (`marcarCreditoOk`) apaga o banner e zera o cooldown: uma nova falta de
-crédito avisa na hora. Depois da recarga, as mensagens em `FALHA` voltam pelo reprocessamento (GAB-41).
+Gestor/admin veem um banner no topo do app ("desde …" e "Último erro de crédito: …") enquanto o incidente
+estiver aberto. Ele **não expira por tempo**: sem uma chamada bem-sucedida não dá para saber se o saldo voltou.
+A primeira chamada à LLM que der certo (`marcarCreditoOk`) fecha o incidente e apaga o banner, mas **não**
+zera o cooldown: o limite de 1 aviso a cada 6 h vale mesmo com falhas e sucessos alternados. Depois da
+recarga, as mensagens em `FALHA` voltam pelo reprocessamento (GAB-41).
 
 ## Kanban
 

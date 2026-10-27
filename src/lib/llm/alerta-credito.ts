@@ -11,9 +11,15 @@
  *   a restart e é atômico entre requests concorrentes. 6 h depois de um aviso
  *   entregue; 5 min se o envio falhou.
  * - Safe mode (`NOTIFICATIONS_ENABLED`≠true): só loga, sem consumir cooldown.
- * - Banner para gestor/admin enquanto houver ocorrência nas últimas 24 h;
- *   some quando uma chamada à LLM volta a dar certo (`marcarCreditoOk`), o
- *   que também zera o cooldown — nova falta de crédito é novo incidente.
+ * - Entrega confirmada pela Evolution conta como avisado mesmo se algo falhar
+ *   depois (`ErroPosEnvio`), e o UPDATE das 6 h é re-tentado uma vez: não
+ *   manda aviso duplicado em 5 min. Queda entre reivindicar e enviar segura
+ *   só os 5 min da reivindicação.
+ * - Banner para gestor/admin enquanto houver incidente aberto, sem expirar
+ *   por tempo (sem sucesso não sabemos se o saldo voltou). Some quando uma
+ *   chamada à LLM volta a dar certo (`marcarCreditoOk`), que fecha o
+ *   incidente mas NÃO mexe no cooldown: o limite de 1 aviso a cada 6 h vale
+ *   mesmo com falhas e sucessos alternados.
  * - Agnóstico de provedor: reage ao código `SEM_CREDITO` do `ErroLlm`.
  * - Nunca lança e nunca loga texto de mensagem do WhatsApp (só a ref).
  */
@@ -21,15 +27,13 @@ import type { PrismaClient } from "@prisma/client";
 import { notificacoesAtivas } from "@/lib/config/env";
 import { db as dbPadrao } from "@/lib/db";
 import { registrarErro } from "@/lib/erros/registrar";
-import { enviarWhatsApp } from "@/lib/whatsapp/enviar";
+import { enviarWhatsApp, ErroPosEnvio } from "@/lib/whatsapp/enviar";
 import { mascararJid } from "@/lib/whatsapp/mascarar";
 import { ErroLlm } from "./tipos";
 
 const CHAVE = "LLM_SEM_CREDITO";
 export const COOLDOWN_AVISO_MS = 6 * 60 * 60 * 1000;
 export const RETRY_AVISO_MS = 5 * 60 * 1000;
-/** Ocorrência mais velha que isto (sem novas) não mostra mais o banner. */
-export const JANELA_BANNER_MS = 24 * 60 * 60 * 1000;
 
 type Db = Pick<PrismaClient, "$queryRaw" | "$executeRaw">;
 type Deps = { db?: Db; enviar?: (envio: { para: string; texto: string }) => Promise<{ enviada: boolean }> };
@@ -58,7 +62,9 @@ export async function alertarSeSemCredito(e: unknown, ref: string, deps: Deps = 
   const db = deps.db ?? dbPadrao;
   const enviar = deps.enviar ?? enviarWhatsApp;
   try {
-    // Marca a ocorrência (liga o banner). `ativo_desde` guarda a 1ª.
+    // Marca a ocorrência (liga o banner). `ativo_desde` guarda a 1ª do
+    // incidente aberto; `marcarCreditoOk` o fecha (NULL), e a próxima falta
+    // de crédito abre um novo com `ativo_desde` novo.
     await db.$executeRaw`
       INSERT INTO alerta_operacional (chave, ativo_desde, ultima_ocorrencia_em)
       VALUES (${CHAVE}, now(), now())
@@ -86,15 +92,27 @@ export async function alertarSeSemCredito(e: unknown, ref: string, deps: Deps = 
       const r = await enviar({ para, texto: textoAlertaSemCredito(ref) });
       if (!r.enviada) throw new Error("envio não confirmado");
     } catch (erroEnvio) {
-      // Nome da classe + mensagem só do ErroEnvioWhatsApp (que não carrega texto); resto só o nome.
-      const desc = erroEnvio instanceof Error && erroEnvio.name === "ErroEnvioWhatsApp" ? `${erroEnvio.name}: ${erroEnvio.message}` : erroEnvio instanceof Error ? erroEnvio.name : typeof erroEnvio;
-      console.error(`[alerta-credito] aviso para ${mascararJid(para)} não entregue ref=${ref} (${desc}); nova tentativa em 5 min`);
-      return "FALHOU_ENVIO";
+      if (erroEnvio instanceof ErroPosEnvio) {
+        // A Evolution entregou; só a gravação local falhou. Conta como avisado.
+        console.warn(`[alerta-credito] aviso entregue mas não registrado ref=${ref} (${erroEnvio.name}: ${erroEnvio.message})`);
+      } else {
+        // Nome da classe + mensagem só do ErroEnvioWhatsApp (que não carrega texto); resto só o nome.
+        const desc =
+          erroEnvio instanceof Error && erroEnvio.name === "ErroEnvioWhatsApp"
+            ? `${erroEnvio.name}: ${erroEnvio.message}`
+            : erroEnvio instanceof Error
+              ? erroEnvio.name
+              : typeof erroEnvio;
+        console.error(`[alerta-credito] aviso para ${mascararJid(para)} não entregue ref=${ref} (${desc}); nova tentativa em 5 min`);
+        return "FALHOU_ENVIO";
+      }
     }
-    await db.$executeRaw`
-      UPDATE alerta_operacional
-         SET proximo_aviso_em = now() + make_interval(secs => ${COOLDOWN_AVISO_MS / 1000}), avisado_em = now()
-       WHERE chave = ${CHAVE}`;
+    // Entregue: janela de 6 h. Uma re-tentativa; se falhar de novo, fica a
+    // reivindicação de 5 min (pior caso: um aviso repetido, nunca perdido).
+    if (!(await gravarCooldown(db)) && !(await gravarCooldown(db))) {
+      console.error(`[alerta-credito] aviso entregue mas cooldown de 6 h não gravado ref=${ref}; pode repetir em 5 min`);
+      return "ENVIADO";
+    }
     console.warn(`[alerta-credito] LLM sem crédito ref=${ref}: aviso enviado para ${mascararJid(para)}; próximo em 6 h`);
     return "ENVIADO";
   } catch (erro) {
@@ -103,30 +121,47 @@ export async function alertarSeSemCredito(e: unknown, ref: string, deps: Deps = 
   }
 }
 
+async function gravarCooldown(db: Db): Promise<boolean> {
+  try {
+    await db.$executeRaw`
+      UPDATE alerta_operacional
+         SET proximo_aviso_em = now() + make_interval(secs => ${COOLDOWN_AVISO_MS / 1000}), avisado_em = now()
+       WHERE chave = ${CHAVE}`;
+    return true;
+  } catch (erro) {
+    registrarErro("alerta-credito", erro);
+    return false;
+  }
+}
+
 /**
- * Chamar depois de uma chamada à LLM que deu certo: desliga o banner e zera o
- * cooldown. Barato no caso comum (UPDATE que não casa linha). Nunca lança.
+ * Chamar depois de uma chamada à LLM que deu certo: fecha o incidente (some o
+ * banner). Mantém `proximo_aviso_em`: o cooldown de 6 h é limite real de
+ * avisos. Barato no caso comum (UPDATE que não casa linha). Nunca lança.
  */
 export async function marcarCreditoOk(deps: Pick<Deps, "db"> = {}): Promise<void> {
   const db = deps.db ?? dbPadrao;
   try {
     await db.$executeRaw`
-      UPDATE alerta_operacional SET ativo_desde = NULL, proximo_aviso_em = NULL
+      UPDATE alerta_operacional SET ativo_desde = NULL
        WHERE chave = ${CHAVE} AND ativo_desde IS NOT NULL`;
   } catch (erro) {
     registrarErro("alerta-credito", erro);
   }
 }
 
-/** Para o banner: `{ desde }` se há falta de crédito recente e não resolvida; senão `null`. Nunca lança. */
-export async function estadoSemCredito(deps: Pick<Deps, "db"> = {}): Promise<{ desde: Date } | null> {
+/**
+ * Para o banner: incidente aberto (`desde` = 1ª ocorrência, `ultimoErro` = a
+ * mais recente) ou `null`. Sem expiração por tempo. Nunca lança.
+ */
+export async function estadoSemCredito(deps: Pick<Deps, "db"> = {}): Promise<{ desde: Date; ultimoErro: Date } | null> {
   const db = deps.db ?? dbPadrao;
   try {
-    const linhas = await db.$queryRaw<{ ativo_desde: Date }[]>`
-      SELECT ativo_desde FROM alerta_operacional
-       WHERE chave = ${CHAVE} AND ativo_desde IS NOT NULL
-         AND ultima_ocorrencia_em > now() - make_interval(secs => ${JANELA_BANNER_MS / 1000})`;
-    return linhas[0] ? { desde: linhas[0].ativo_desde } : null;
+    const linhas = await db.$queryRaw<{ ativo_desde: Date; ultima_ocorrencia_em: Date }[]>`
+      SELECT ativo_desde, ultima_ocorrencia_em FROM alerta_operacional
+       WHERE chave = ${CHAVE} AND ativo_desde IS NOT NULL`;
+    const l = linhas[0];
+    return l ? { desde: l.ativo_desde, ultimoErro: l.ultima_ocorrencia_em ?? l.ativo_desde } : null;
   } catch (erro) {
     registrarErro("alerta-credito", erro);
     return null;

@@ -11,7 +11,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   const semCredito = temPapelMinimo(usuario.papel, "GESTOR") ? await estadoSemCredito() : null;
   return (
     <AppShell usuario={usuario}>
-      {semCredito && <AvisoSemCredito desde={semCredito.desde} />}
+      {semCredito && <AvisoSemCredito desde={semCredito.desde} ultimoErro={semCredito.ultimoErro} />}
       {children}
     </AppShell>
   );
