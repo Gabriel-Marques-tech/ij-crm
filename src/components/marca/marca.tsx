@@ -17,7 +17,7 @@ export function LogoIJ({ altura, className, prioridade = false }: { altura: numb
   );
 }
 
-/** Só o símbolo (rail lateral estreito, barra do celular). */
+/** Só o símbolo (rail lateral estreito, barra do celular). Pequeno: carrega lazy, sem priority. */
 export function SimboloIJ({ tamanho, className }: { tamanho: number; className?: string }) {
   return (
     <Image
@@ -25,7 +25,6 @@ export function SimboloIJ({ tamanho, className }: { tamanho: number; className?:
       width={tamanho}
       height={tamanho}
       alt="Inteli Júnior"
-      priority
       draggable={false}
       className={cn("select-none", className)}
     />
@@ -67,8 +66,9 @@ export function Mascote({
 /** Mascote segurando a placa, com um texto curto (ex.: "403") escrito nela por cima da imagem. */
 export function MascotePlaca({ texto, altura = 200, alt }: { texto: string; altura?: number; alt: string }) {
   return (
+    // brightness: a placa branca não pode ser a coisa mais clara da tela escura (o arquivo segue intacto).
     <div className="relative inline-block">
-      <Mascote nome="placa" altura={altura} alt={alt} prioridade />
+      <Mascote nome="placa" altura={altura} alt={alt} prioridade className="brightness-[.85]" />
       <span
         aria-hidden
         // Área branca da placa no arquivo (434×552): x 142–430, y 240–535; a mão cobre o topo.

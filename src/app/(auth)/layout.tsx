@@ -6,7 +6,7 @@ export default function AuthLayout({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-screen items-center justify-center px-4 py-10">
       <div className="flex w-full max-w-3xl items-center justify-center gap-16">
-        <Mascote nome="emPe" altura={280} alt="Mascote da Inteli Júnior, um bode laranja de camisa polo" prioridade className="hidden shrink-0 lg:block" />
+        <Mascote nome="emPe" altura={280} className="hidden shrink-0 lg:block" />
         <div className="w-full max-w-sm">
           <div className="mb-8">
             <LogoIJ altura={72} prioridade />
