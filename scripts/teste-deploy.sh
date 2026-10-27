@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Teste do scripts/deploy.sh sem Docker: docker/git/curl são stubs que guardam a
 # tag "rodando" num arquivo. Cobre: deploy A, B, rollback → A, deploy C falha →
-# rollback automático volta para A (não B); rollback latest recusado; lock.
+# rollback automático volta para A (não B); rollback latest recusado; lock;
+# HEALTH_TENTATIVAS inválido; health esgotado (curl falha) → auto-rollback;
+# health falha na própria tag boa (sem rollback).
+# Stub do curl: CURL_FAIL_TAG=<tag> faz o health falhar enquanto essa tag roda.
 #
 #   bash scripts/teste-deploy.sh     (sai ≠ 0 se algo falhar)
 set -uo pipefail
@@ -32,7 +35,12 @@ case "$a" in
 esac
 exit 0
 D
-printf '#!/usr/bin/env bash\nexit 0\n' > "$T/bin/curl"
+cat > "$T/bin/curl" <<'C'
+#!/usr/bin/env bash
+[[ -n "${CURL_FAIL_TAG:-}" && "$(cat "$STUB_STATE/running" 2>/dev/null)" == "$CURL_FAIL_TAG" ]] && exit 22
+exit 0
+C
+printf '#!/usr/bin/env bash\nexit 0\n' > "$T/bin/sleep"
 printf '#!/usr/bin/env bash\n[[ "$*" == *"status --porcelain"* ]] && exit 0\n[[ "$*" == *rev-parse* ]] && echo abc && exit 0\nexit 0\n' > "$T/bin/git"
 chmod +x "$T/bin/"*
 export PATH="$T/bin:$PATH" STUB_STATE="$T/state" CURL_MAX_TIME=1
@@ -62,4 +70,23 @@ exec 7>&-
 ok "$(r)" sha-aaaaaaa "nada mudou com o lock ocupado"
 # git pull + exec não trava em si mesmo
 bash "$D" sha-bbbbbbb >/dev/null 2>&1; ok "$(r)" sha-bbbbbbb "deploy com git pull (re-exec mantém o lock)"
+# HEALTH_TENTATIVAS inválido: recusa antes de chamar o docker
+antes="$(wc -l < "$T/state/log")"
+out="$(HEALTH_TENTATIVAS=abc bash "$D" sha-ddddddd --no-pull 2>&1)"; rc=$?
+ok "$rc" 1 "HEALTH_TENTATIVAS inválido recusado"; contem "$out" "HEALTH_TENTATIVAS inválido" "mensagem do HEALTH_TENTATIVAS"
+ok "$(wc -l < "$T/state/log")" "$antes" "nenhuma chamada ao docker com HEALTH_TENTATIVAS inválido"
+ok "$(r)" sha-bbbbbbb "nada mudou com HEALTH_TENTATIVAS inválido"
+# Health esgota as tentativas na tag nova → auto-rollback para o bom atual
+CURL_FAIL_TAG=sha-ddddddd HEALTH_TENTATIVAS=2 bash "$D" sha-ddddddd --no-pull >"$T/d.log" 2>&1; rc=$?
+ok "$rc" 1 "deploy D com health esgotado falha"
+ok "$(r)" sha-bbbbbbb "auto-rollback por health volta para B"
+contem "$(cat "$T/d.log")" "depois de 2 tentativas" "log do health esgotado"
+contem "$(cat "$T/d.log")" "rollback automático ok: app em sha-bbbbbbb" "log do auto-rollback por health"
+ok "$(cat "$T/repo/.deploy/atual")" sha-bbbbbbb ".deploy/atual segue B"
+# Health falha na própria tag boa (anterior == APP_TAG): sem rollback
+CURL_FAIL_TAG=sha-bbbbbbb HEALTH_TENTATIVAS=1 bash "$D" sha-bbbbbbb --no-pull >"$T/b.log" 2>&1; rc=$?
+ok "$rc" 1 "redeploy de B com health falhando sai com erro"
+ok "$(r)" sha-bbbbbbb "app segue em B"
+contem "$(cat "$T/b.log")" "sem rollback automático: esta já é a última tag boa" "mensagem de anterior == APP_TAG"
+ok "$(cat "$T/repo/.deploy/atual")" sha-bbbbbbb ".deploy/atual segue B depois do redeploy falho"
 exit $FALHAS

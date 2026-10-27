@@ -35,6 +35,14 @@ HISTORICO="$RAIZ/.deploy/historico"
 ATUAL="$RAIZ/.deploy/atual"
 IMAGENS_MANTER="${IMAGENS_MANTER:-5}"
 [[ "$IMAGENS_MANTER" =~ ^[1-9][0-9]*$ ]] || falhar "IMAGENS_MANTER inválido: $IMAGENS_MANTER"
+# Health pelo Caddy: até HEALTH_TENTATIVAS tentativas (padrão 20), cada uma com
+# timeout de HEALTH_TIMEOUT s (padrão 3) e 3 s de intervalo: ~60–120 s no total.
+# No 1º deploy o Caddy ainda está emitindo o certificado quando o `up --wait` termina.
+# Lidas do ambiente do shell (não do .env), como IMAGENS_MANTER.
+HEALTH_TENTATIVAS="${HEALTH_TENTATIVAS:-20}"
+HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-3}"
+[[ "$HEALTH_TENTATIVAS" =~ ^[1-9][0-9]*$ ]] || falhar "HEALTH_TENTATIVAS inválido: $HEALTH_TENTATIVAS"
+[[ "$HEALTH_TIMEOUT" =~ ^[1-9][0-9]*$ ]] || falhar "HEALTH_TIMEOUT inválido: $HEALTH_TIMEOUT"
 APP_IMAGE_PADRAO=ghcr.io/gabriel-marques-tech/ij-crm-app
 OPS_IMAGE_PADRAO=ghcr.io/gabriel-marques-tech/ij-crm-ops
 # Label que o docker/metadata-action grava nas imagens do CI.
@@ -92,20 +100,17 @@ checar_arvore() {
   fi
 }
 
-# Até HEALTH_TENTATIVAS × 3 s (padrão 20 = 60 s): no 1º deploy o Caddy ainda
-# está emitindo o certificado do Let's Encrypt quando o `up --wait` termina.
 verificar_health() {
-  local i tentativas="${HEALTH_TENTATIVAS:-20}"
-  [[ "$tentativas" =~ ^[1-9][0-9]*$ ]] || falhar "HEALTH_TENTATIVAS inválido: $tentativas"
-  log "health pelo Caddy: /api/health"
-  for ((i = 1; i <= tentativas; i++)); do
-    if curl_app /api/health -f -o /dev/null; then
+  local i inicio=$SECONDS
+  log "health pelo Caddy: /api/health (até $HEALTH_TENTATIVAS tentativas)"
+  for ((i = 1; i <= HEALTH_TENTATIVAS; i++)); do
+    if CURL_MAX_TIME="$HEALTH_TIMEOUT" curl_app /api/health -f -o /dev/null; then
       log "health 200"
       return 0
     fi
-    sleep 3
+    if ((i < HEALTH_TENTATIVAS)); then sleep 3; fi
   done
-  log "health sem 200 em $((tentativas * 3))s. Se for TLS: DNS de APP_DOMAIN aponta para este host e as portas 80/443 estão abertas? (dc logs caddy)" >&2
+  log "health sem 200 depois de $HEALTH_TENTATIVAS tentativas ($((SECONDS - inicio)) s). Se for TLS: DNS de APP_DOMAIN aponta para este host e as portas 80/443 estão abertas? (dc logs caddy)" >&2
   return 1
 }
 
@@ -162,7 +167,7 @@ tem_imagem() { docker image inspect "$1" >/dev/null 2>&1; }
 baixar() {
   log "docker pull $1"
   docker pull -q "$1" >/dev/null \
-    || falhar "não consegui baixar $1 (a tag existe no GHCR? docker login ghcr.io feito? runbook §1)"
+    || falhar "não consegui baixar $1 (a tag existe no GHCR? docker login ghcr.io feito? runbook §0)"
 }
 
 # Garante as imagens app e ops de TAG neste host (baixa do GHCR se faltar).
@@ -303,7 +308,7 @@ deploy() {
       log "ERRO: rollback automático para $anterior também falhou — intervenção manual (runbook §2)" >&2
     fi
   elif [[ "$anterior" == "$APP_TAG" ]]; then
-    log "o bom atual já é $APP_TAG: nada para voltar (o problema é config/infra, não a imagem)" >&2
+    log "app segue em $APP_TAG com o health falhando; sem rollback automático: esta já é a última tag boa. Veja: docker compose -f compose.prod.yml logs app" >&2
   else
     log "sem deploy bom anterior para voltar automaticamente" >&2
   fi

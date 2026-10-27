@@ -34,17 +34,20 @@ Do zero ao ar, em ordem. Cada passo aponta para a seção com os comandos
    em **Gestão → Admin → "Mostrar QR"** (ou `scripts/evolution.sh qr`, [§5](#5-ler-o-qr-da-evolution-criarreconectar-a-instância)).
    Estado "conectado" na mesma tela.
 9. **Grupo**: com o número já no grupo de vendas, **Gestão → Admin → "Listar grupos"**,
-   escolher e salvar (dispensa `GRUPO_JID` no `.env`).
-10. **Webhook da Evolution**: `scripts/evolution.sh webhook` ([§5](#5-ler-o-qr-da-evolution-criarreconectar-a-instância)).
+   escolher e salvar. O valor do Admin vence o `GRUPO_JID` do `.env` (só fallback).
+10. **Aviso de privacidade** da IJ publicado, mencionando o envio do texto das
+    mensagens do grupo ao provedor de LLM nos EUA ([§10](#10-provedor-de-llm-e-crédito-da-openai), "LGPD").
+    **Antes do webhook**: a partir dele, o classificador (com ou sem `#crm`) manda
+    texto do grupo para a LLM mesmo com `NOTIFICATIONS_ENABLED=false` — o safe mode
+    só cala o bot, não a LLM.
+11. **Webhook da Evolution**: `scripts/evolution.sh webhook` ([§5](#5-ler-o-qr-da-evolution-criarreconectar-a-instância)).
     Teste: mensagem `#crm` no grupo → aparece em Gestão → Admin → Logs (bot ainda calado).
-11. **Crontab**: `crontab deploy/crontab.example` e `crontab -l` ([§7](#7-cron-do-host)).
+12. **Crontab**: `crontab deploy/crontab.example` e `crontab -l` ([§7](#7-cron-do-host)).
     Em até 10 min, `/var/log/ij-crm/cron.log` mostra `reprocessar HTTP 200`.
-12. **Backup off-site testado**: rclone configurado, `BACKUP_REMOTE` no `.env`,
+13. **Backup off-site testado**: rclone configurado, `BACKUP_REMOTE` no `.env`,
     `scripts/backup.sh` mostrando `off-site: rclone copy` e o arquivo listado no
     remote ([§3, "Backup off-site"](#backup-off-site-rclone)). Restore testado uma vez ([§3](#3-restaurar-backup)).
     **Não entrar em produção sem isso.**
-13. **Antes de ligar**: aviso de privacidade da IJ menciona o envio do texto das
-    mensagens `#crm` ao provedor de LLM nos EUA ([§10](#10-provedor-de-llm-e-crédito-da-openai), "LGPD").
 14. **Por último**: `NOTIFICATIONS_ENABLED=true` no `.env` e `scripts/deploy.sh`.
     Mandar um `#crm` de teste e conferir a confirmação no grupo.
 
@@ -82,16 +85,29 @@ mínima e swap: §11.
 
 ### Docker na VPS
 
-Ubuntu 24.04 (recomendado; o pacote `docker.io` da distro pode vir sem o plugin
-compose, então use o repositório oficial da Docker):
+Ubuntu 24.04 (recomendado), pelo repositório apt oficial da Docker (o
+`docker.io` da distro pode vir sem o plugin compose ou com versão antiga):
 
 ```bash
-curl -fsSL https://get.docker.com | sudo sh        # Docker Engine + plugin compose
-sudo usermod -aG docker "$USER"                    # depois saia e entre de novo na sessão SSH
-sudo apt-get install -y git curl util-linux qrencode jq
-curl -fsSL https://rclone.org/install.sh | sudo bash   # rclone atual (o da distro é velho)
-docker compose version                             # o get.docker.com instala a versão atual
+sudo apt-get update && sudo apt-get install -y ca-certificates curl
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
+  https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
+  | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
+sudo apt-get update
+sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+sudo usermod -aG docker "$USER"      # depois saia e entre de novo na sessão SSH
+sudo apt-get install -y git util-linux qrencode jq rclone
+docker compose version
 ```
+
+O `rclone` da distro basta para o `backup.sh` (`copy` e `delete --min-age`). Se o
+provedor do off-site exigir versão mais nova: baixe o `.zip` em
+<https://rclone.org/downloads/> junto com o `SHA256SUMS`, confira
+(`sha256sum -c --ignore-missing SHA256SUMS`) e só então instale o binário em
+`/usr/local/bin/rclone`.
 
 Amazon Linux 2023: `dnf install docker` **não** traz o plugin compose; instale o
 binário `docker-compose-linux-x86_64` do GitHub em `/usr/local/lib/docker/cli-plugins/docker-compose`.
@@ -178,8 +194,12 @@ O script, na ordem:
 6. `prisma migrate deploy` no container one-shot `migrate`. Se falhar, para aqui:
    o app antigo segue no ar e o script mostra o dump do passo 5 (§2, "Migration falhou");
 7. `up -d --wait` com a imagem nova (espera todos os healthchecks) e
-   `GET https://APP_DOMAIN/api/health` pelo Caddy (TLS de verdade) = 200, por até
-   60 s (`HEALTH_TENTATIVAS` × 3 s; no 1º deploy o certificado ainda está sendo emitido);
+   `GET https://APP_DOMAIN/api/health` pelo Caddy (TLS de verdade) = 200, em até
+   `HEALTH_TENTATIVAS` tentativas (padrão 20) com timeout de `HEALTH_TIMEOUT` s
+   (padrão 3) e 3 s entre elas, ~1–2 min no pior caso (no 1º deploy o certificado
+   ainda está sendo emitido). Como `IMAGENS_MANTER`, são lidas **do ambiente do
+   shell, não do `.env`**: `HEALTH_TENTATIVAS=40 scripts/deploy.sh`. Valor
+   inválido é recusado antes de mexer em algo;
 8. sucesso: registra a tag em `.deploy/historico` e em `.deploy/atual`, marca `:latest` local e apaga
    as imagens `app`/`ops` fora das últimas `IMAGENS_MANTER` (padrão 5) tags do
    histórico, mais as camadas órfãs.
@@ -293,7 +313,7 @@ no log; com `BACKUP_REMOTE` e sem `rclone` instalado, falha.
 Eles guardam a sessão do WhatsApp (credenciais e chaves Signal do Baileys) e
 config da instância, nada do CRM. Num desastre (VPS nova, volumes perdidos), o
 caminho é parear de novo: §5 inteiro (criar instância → QR → webhook → conferir
-`GRUPO_JID`). Restaurar só o banco do CRM numa VPS que ainda tem os volumes da
+o grupo em Gestão → Admin). Restaurar só o banco do CRM numa VPS que ainda tem os volumes da
 Evolution não mexe no WhatsApp.
 
 Teste de restore (rodar a cada poucos meses; foi executado no GAB-30): restaurar
@@ -303,19 +323,22 @@ o dump mais recente, conferir contagens (`dc exec db psql -U ijcrm -d ijcrm -c
 ## 4. Trocar o número do bot
 
 O número é só a sessão do WhatsApp na instância da Evolution. O CRM guarda o
-JID do **grupo** (`GRUPO_JID`), não o número do bot.
+JID do **grupo** (salvo em Gestão → Admin; `GRUPO_JID` do `.env` é só fallback),
+não o número do bot.
 
 ```bash
 scripts/evolution.sh logout   # desconecta o número antigo
 scripts/evolution.sh qr       # parear com o celular do número NOVO (§5)
 scripts/evolution.sh estado   # "open" = conectado
 # no WhatsApp: adicionar o número novo ao grupo de vendas (e remover o antigo)
-scripts/evolution.sh grupos   # conferir que o JID do grupo é o mesmo de GRUPO_JID
 ```
 
-O webhook é da instância e continua configurado. Se o grupo mudou (grupo novo),
-atualize `GRUPO_JID` no `.env` e rode `scripts/deploy.sh`. Teste mandando uma
-mensagem `#crm` no grupo e conferindo a confirmação.
+Depois, em **Gestão → Admin**, confira o grupo: "Listar grupos" deve mostrar o
+mesmo grupo salvo. O webhook é da instância e continua configurado. Se o grupo
+mudou (grupo novo), escolha-o em **Gestão → Admin → "Listar grupos"** e salve:
+vale na hora, sem deploy. `GRUPO_JID` no `.env` é só o fallback de quando o Admin
+não tem grupo salvo — o valor do Admin vence, então mudar só o `.env` não troca
+o grupo. Teste mandando uma mensagem `#crm` no grupo e conferindo a confirmação.
 
 ## 5. Ler o QR da Evolution (criar/reconectar a instância)
 
@@ -330,13 +353,15 @@ scripts/evolution.sh criar     # 1ª vez: cria a instância EVOLUTION_INSTANCE
 scripts/evolution.sh qr        # QR no terminal (com qrencode) — escaneie: WhatsApp → Dispositivos conectados
 scripts/evolution.sh estado    # "open" = conectado (o QR expira em segundos; rode `qr` de novo se precisar)
 scripts/evolution.sh webhook   # 1ª vez: webhook → http://app:3000/api/webhooks/evolution, header x-webhook-secret
-scripts/evolution.sh grupos    # JID do grupo de vendas → GRUPO_JID no .env, depois scripts/deploy.sh
+scripts/evolution.sh grupos    # lista JID + nome dos grupos (só consulta)
 ```
 
 Pelo CRM (depois do `criar`): **Gestão → Admin** mostra o estado da Evolution e o
-botão "Mostrar QR" (só ADMIN), e "Listar grupos" grava o grupo na configuração
-técnica — vale na hora, sem `.env` nem deploy (README "Admin: configuração técnica e logs").
-O webhook continua sendo pelo `scripts/evolution.sh webhook`.
+botão "Mostrar QR" (só ADMIN). **O grupo se escolhe lá**: "Listar grupos" grava o
+grupo na configuração técnica e vale na hora, sem deploy (README "Admin:
+configuração técnica e logs"). `GRUPO_JID` no `.env` é só fallback para quando o
+Admin não tem grupo salvo; o valor do Admin vence. O webhook continua sendo pelo
+`scripts/evolution.sh webhook`.
 
 Sem `qrencode`, o `qr` grava o PNG num diretório `~/.ij-crm.XXXX` com permissão
 só do dono e **apaga ao apertar Enter**. Se precisar copiar para ver,
@@ -530,9 +555,10 @@ Cada mensagem `#crm` vai para `FALHA` com "sem crédito na API da OpenAI" + ref
 (sem re-tentar, sem gastar), e o grupo recebe "❌ ... (ref: ...)". Recarregue e as
 mensagens voltam pelo reprocessamento (GAB-41, mantendo `erro`).
 
-**LGPD — transferência internacional.** O texto das mensagens `#crm` vai para a
+**LGPD — transferência internacional.** O texto das mensagens do grupo vai para a
 API do provedor de LLM, nos EUA (OpenAI; antes, igualmente, Anthropic). Só vai o
-que chega à LLM: mensagens do grupo configurado marcadas com `#crm`, com o
+que chega à LLM: mensagens do grupo configurado — as marcadas com `#crm` e, desde
+o GAB-39, também as sem `#crm` que passam pelo classificador —, com o
 contexto mínimo (nomes/ids de candidatos e fases). A chamada usa `store: false`
 (a OpenAI não guarda a resposta para consulta) e nenhum log do CRM grava o texto
 da mensagem nem o texto devolvido pela API. O aviso de privacidade da IJ deve
