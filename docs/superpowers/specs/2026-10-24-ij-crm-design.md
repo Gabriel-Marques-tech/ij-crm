@@ -190,6 +190,14 @@ responde. Cron fica só para reprocessar `FALHA` e para backup.
 - Classificador local (Laya, sidecar Python) **descartado**: não compensa o
   esforço (mais um serviço e RAM na VPS para ≤ 15 usuários e poucas mensagens
   por dia). `classificar` continua só com o provedor LLM.
+- **Contexto de 12 h (GAB-49):** janelas fixas de 12 h em SP (00–12, 12–24).
+  A extração recebe o **ledger** do remetente na janela atual (as mensagens
+  de venda dele já gravadas em `mensagem_bruta`, com o card que cada uma
+  mexeu; orçamento de caracteres, as mais recentes primeiro) e o **resumo da
+  janela anterior** (gerado pela LLM na 1ª mensagem da janela seguinte, uma
+  vez por vendedor e janela; falha → segue sem resumo). Cards do ledger
+  viram candidatas (`via: ledger`): podem ser escolhidos com `revisar`, e um
+  2º card na janela tira o ✅ do "único card recente".
 
 ### 4.5 App web
 - **Kanban** por pipeline: drag-and-drop entre qualquer fase; card mostra
@@ -288,6 +296,16 @@ Matriz de papéis:
   provedor de LLM nos EUA — OpenAI em produção, como antes ia à Anthropic —
   com `store: false` e sem texto em log. O aviso de privacidade da IJ deve
   citar essa transferência internacional (runbook §10).
+- LGPD do contexto de 12 h (GAB-49): o ledger **não copia texto** — é lido
+  de `mensagem_bruta` (só o que já é guardado: `#crm` e sem tag que o
+  classificador achou relevante; conversa descartada nunca entra) e segue a
+  retenção de 90 dias dela. O resumo por vendedor (`resumo_janela`) guarda só
+  o texto curto da LLM (nomes de pessoas/empresas, cards, próximos passos),
+  **sem telefone, email nem CPF/CNPJ** (pedido no prompt e removido por
+  código antes de gravar); só o da janela anterior à atual existe — os mais
+  antigos são apagados ao gerar o próximo e pelo cron. Os textos do ledger
+  vão ao mesmo provedor de LLM (mesma transferência acima). Log só com
+  ids, versão, tokens e ms.
 - Google OAuth depois, sem quebrar o modelo (Usuario ganha `google_sub`).
 
 ### 4.7 Importação Pipefy

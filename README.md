@@ -269,6 +269,31 @@ contexto). Só o pipeline **Vendas**; `projetos` é UI.
 - **Confirmação** cita o card: `✅ Gustavo — Economia Sensata: Primeiro Contato → Reunião Diagnóstica.
   Próx.: reunião (30/10)`; sem movimento `✅ Título (Fase): atualizado.`; `⚠️` + motivo quando `revisar`.
 
+## Contexto de 12 h da LLM (ledger + resumo, GAB-49)
+
+Mensagens picadas ("falei com o Gustavo" … 2 h depois … "mando proposta sexta") ganham contexto real.
+Janelas **fixas de 12 h** em America/Sao_Paulo: 00:00–12:00 e 12:00–24:00 (`src/lib/contexto/janela.ts`).
+
+- **Ledger** (`contexto/ledger.ts`): as mensagens de venda do remetente na janela atual, antes desta —
+  derivado de `mensagem_bruta` (remetente + `recebida_em`), **sem tabela nova**. Só entra o que já é gravado
+  (`#crm` e sem tag que o classificador achou relevante); `CLASSIFICADA_IRRELEVANTE` fica fora. Cada linha
+  leva o card que ela mexeu (Timeline). No prompt (`extracao.v2.1`, seção `<historico>`): orçamento de
+  3000 caracteres (400 por mensagem), as mais recentes primeiro, exibidas em ordem cronológica.
+- **Candidatas**: os cards do ledger (até 5) entram com `via: ledger`. Escolhido só pelo ledger (mexido há
+  mais de 30 min) → aplica com `revisar`; o ✅ do "único card recente" (GAB-38) continua valendo só se o
+  remetente não mexeu em **outro** card na janela.
+- **Resumo da janela anterior** (`contexto/resumo.ts`, prompt `resumo.v1`, seção `<resumo_anterior>`, até
+  1200 caracteres): gerado sob demanda na 1ª mensagem do vendedor na janela seguinte, **uma vez** por
+  vendedor e janela (chave única `resumo_janela(usuario_id, janela_inicio)` + reivindicação; quem perde a
+  corrida segue sem resumo). Falha → `FALHA` com código + ref, a extração segue só com o ledger; até 3
+  tentativas por janela. Sem telefone/email (o prompt pede e o código remove). Mensagem reprocessada de
+  outra janela não gera resumo.
+- **Retenção**: só o resumo da janela anterior à atual fica; os mais antigos são apagados ao gerar um novo.
+- **Para o cron (GAB-41)**: `gerarResumosPendentes()` adianta os resumos de todos os vendedores da janela
+  anterior e aplica a retenção; `aplicarRetencaoResumos()` só a retenção. Ambos nunca lançam.
+- Log por chamada, sem texto: `[llm] resumo ref=<id do resumo> provedor=… modelo=… versao=resumo.v1 ms=…
+  tokens_in=… tokens_out=… ok chars=…`.
+
 ## Alerta de sem crédito na LLM
 
 GAB-46. A recarga da API de LLM é manual (pré-pago). Quando uma chamada falha com `SEM_CREDITO`
