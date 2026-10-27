@@ -324,6 +324,26 @@ describe("PERDIDO sem motivo", () => {
   });
 });
 
+describe("PERDIDO sem motivo em Projetos", () => {
+  it("projeto em fase PERDIDO sem motivo: pulado sem escolha; com motivo padrão, o projeto recebe o motivo", async () => {
+    const { admin } = await preparar();
+    const projetos = await db.pipeline.findUniqueOrThrow({ where: { chave: "projetos" } });
+    await db.fase.create({ data: { pipelineId: projetos.id, chave: "cancelado", nome: "Cancelado", ordem: 99, cor: "#888888", tipoTerminal: "PERDIDO", isTerminal: true } });
+    invalidarCachePipelines();
+    const arq = mini("1;Projeto cancelado;Cancelado;10/01/2026 10:00;;;;;;;;");
+    const sem = await importarConteudo(arq, undefined, admin, AGORA);
+    if (!sem.ok) throw new Error(sem.erro);
+    expect(sem.relatorio.erros).toEqual([{ linha: 2, pipefyId: "1", mensagem: "PERDIDO sem motivo no export." }]);
+    expect(await db.oportunidade.count()).toBe(0);
+    const com = await importarConteudo(arq, undefined, admin, AGORA, { opcoes: { motivoPerdaPadrao: "timing" } });
+    if (!com.ok) throw new Error(com.erro);
+    const venda = await card("1");
+    expect(venda.projeto?.fase.chave).toBe("cancelado");
+    const proj = await db.oportunidade.findUniqueOrThrow({ where: { id: venda.projeto!.id } });
+    expect(proj.motivoPerda).toBe("Timing: Motivo definido na importação por Admin Import");
+  });
+});
+
 describe("transições do import", () => {
   it("histórico corrigido no arquivo: troca só as transições IMPORT divergentes, nunca as de outra origem", async () => {
     const { admin } = await preparar();
