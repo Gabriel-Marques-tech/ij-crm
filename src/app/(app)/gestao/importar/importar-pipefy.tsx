@@ -56,7 +56,10 @@ async function enviarArquivo(arquivo: File): Promise<RespostaPrevia> {
     return { ok: false, erro: "Sem conexão com o servidor. Verifique a rede e tente de novo." };
   }
   try {
-    return (await res.json()) as RespostaPrevia;
+    const corpo = (await res.json()) as Partial<RespostaPrevia> & { erro?: string };
+    // 401 do proxy (sem cookie) ou da rota (sessão inválida): `{ erro }` sem `ok`.
+    if (res.status === 401) return { ok: false, erro: corpo.erro ?? "Sessão expirada. Entre de novo." };
+    return corpo as RespostaPrevia;
   } catch {
     return { ok: false, erro: `Resposta inesperada do servidor (HTTP ${res.status}). Tente de novo.` };
   }

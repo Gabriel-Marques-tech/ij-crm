@@ -174,4 +174,10 @@ describe("ImportarPipefy", () => {
     expect(alerta).toHaveTextContent("ref: ffff0000");
     expect(alerta).toHaveTextContent("reimportar não duplica");
   });
+
+  it("sessão expirada (401 do proxy): mostra a mensagem do servidor", async () => {
+    fetchMock.mockImplementationOnce(async () => new Response(JSON.stringify({ erro: "Sessão expirada. Entre de novo." }), { status: 401, headers: { "content-type": "application/json" } }));
+    await enviarArquivo();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Sessão expirada. Entre de novo.");
+  });
 });
