@@ -19,6 +19,7 @@
  * `valores.ts`/`datas.ts`, de forma determinística e testada.
  */
 import { z } from "zod";
+import { escaparDelimitadores } from "./escapar";
 
 export const VERSAO_EXTRACAO = "extracao.v1";
 
@@ -152,11 +153,6 @@ const DATA_SP = new Intl.DateTimeFormat("pt-BR", {
   minute: "2-digit",
 });
 
-/** Neutraliza as tags de delimitação dentro do texto do usuário. */
-function escapar(s: string): string {
-  return s.replace(/<\/?(mensagem|respondendo_a)>/gi, (t) => t.replace("<", "‹").replace(">", "›"));
-}
-
 /** Mensagem do usuário: contexto em lista simples + a mensagem delimitada. */
 export function montarMensagemUsuario(textoMensagem: string, ctx: ContextoExtracao): string {
   const linhas: string[] = [];
@@ -176,12 +172,12 @@ export function montarMensagemUsuario(textoMensagem: string, ctx: ContextoExtrac
   linhas.push("");
   if (ctx.respondendoA) {
     linhas.push("<respondendo_a>");
-    linhas.push(escapar(ctx.respondendoA));
+    linhas.push(escaparDelimitadores(ctx.respondendoA));
     linhas.push("</respondendo_a>");
     linhas.push("");
   }
   linhas.push("<mensagem>");
-  linhas.push(escapar(textoMensagem));
+  linhas.push(escaparDelimitadores(textoMensagem));
   linhas.push("</mensagem>");
   return linhas.join("\n");
 }
