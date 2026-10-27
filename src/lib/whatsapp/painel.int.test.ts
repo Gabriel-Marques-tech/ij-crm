@@ -1,6 +1,6 @@
 // @vitest-environment node
 // GAB-41: painel de mensagens (Gestão → WhatsApp): fila, recentes, desconhecidos, resolver e vincular.
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { StatusMensagem } from "@prisma/client";
 import { dbTeste, limparBanco } from "@/test/db";
 import { semear } from "../../../prisma/seed";
@@ -116,11 +116,14 @@ describe("resolverManualmente", () => {
     const op = await dbT.oportunidade.create({ data: { titulo: "Morto", pipelineId: faseInicial.pipelineId, faseId: faseInicial.id, responsavelId: joao.id, criadoVia: "UI", deletadoEm: new Date() } });
     const m = await bruta("PENDENTE_REVISAO");
     expect(await resolverManualmente(m.id, { tipo: "VINCULAR", oportunidadeId: op.id }, gestor)).toEqual({ ok: false, erro: "CARD_NAO_ENCONTRADO" });
+    const projeto = await dbT.fase.findFirstOrThrow({ where: { pipeline: { chave: "projetos" }, arquivadaEm: null } });
+    const deProjeto = await dbT.oportunidade.create({ data: { titulo: "Projeto", pipelineId: projeto.pipelineId, faseId: projeto.id, responsavelId: joao.id, criadoVia: "UI" } });
+    expect(await resolverManualmente(m.id, { tipo: "VINCULAR", oportunidadeId: deProjeto.id }, gestor)).toEqual({ ok: false, erro: "CARD_NAO_ENCONTRADO" });
     const feita = await bruta("PROCESSADA");
     expect(await resolverManualmente(feita.id, { tipo: "CRIAR", titulo: "x", faseId: faseInicial.id }, gestor)).toEqual({ ok: false, erro: "MENSAGEM_JA_RESOLVIDA" });
     const andando = await bruta("PROCESSANDO");
     expect(await resolverManualmente(andando.id, { tipo: "CRIAR", titulo: "x", faseId: faseInicial.id }, gestor)).toEqual({ ok: false, erro: "MENSAGEM_EM_PROCESSAMENTO" });
-    expect(await dbT.oportunidade.count()).toBe(1);
+    expect(await dbT.oportunidade.count()).toBe(2);
     expect(await dbT.timeline.count()).toBe(0);
   });
 
@@ -144,8 +147,10 @@ describe("buscarCardsParaVincular", () => {
   it("por título, só cards vivos", async () => {
     await dbT.oportunidade.create({ data: { titulo: "Gustavo — ACME", pipelineId: faseInicial.pipelineId, faseId: faseInicial.id, responsavelId: joao.id, criadoVia: "UI" } });
     await dbT.oportunidade.create({ data: { titulo: "Gustavo morto", pipelineId: faseInicial.pipelineId, faseId: faseInicial.id, responsavelId: joao.id, criadoVia: "UI", deletadoEm: new Date() } });
+    const projeto = await dbT.fase.findFirstOrThrow({ where: { pipeline: { chave: "projetos" }, arquivadaEm: null } });
+    await dbT.oportunidade.create({ data: { titulo: "Gustavo projeto", pipelineId: projeto.pipelineId, faseId: projeto.id, responsavelId: joao.id, criadoVia: "UI" } });
     const r = await buscarCardsParaVincular("gustavo");
-    expect(r.map((o) => o.nome)).toEqual(["Gustavo — ACME"]);
+    expect(r.map((o) => o.nome)).toEqual(["Gustavo — ACME"]); // só Vendas, como o criar
     expect(await buscarCardsParaVincular(" ")).toEqual([]);
   });
 });
@@ -163,6 +168,37 @@ describe("vincularRemetente", () => {
     const d = await dbT.remetenteDesconhecido.create({ data: { lid: "999@lid" } });
     expect(await vincularRemetente(d.id, joao.id, gestor)).toEqual({ ok: true });
     expect((await dbT.usuario.findUniqueOrThrow({ where: { id: joao.id } })).whatsappLid).toBe("999@lid");
+  });
+
+  it("atômico: dois vínculos concorrentes para o mesmo usuário → um vence, o outro recebe conflito", async () => {
+    const maria = await dbT.usuario.create({ data: { nome: "Maria", email: "m@ij.test" } });
+    const a = await dbT.remetenteDesconhecido.create({ data: { telefone: "+5511912345678" } });
+    const b = await dbT.remetenteDesconhecido.create({ data: { telefone: "+5511912340000" } });
+    const rs = await Promise.all([vincularRemetente(a.id, maria.id, gestor), vincularRemetente(b.id, maria.id, gestor)]);
+    expect(rs.filter((r) => r.ok)).toHaveLength(1);
+    expect(rs.find((r) => !r.ok)).toEqual({ ok: false, erro: "CONFLITO_CONCORRENTE" });
+    const tel = (await dbT.usuario.findUniqueOrThrow({ where: { id: maria.id } })).telefoneWhatsapp;
+    expect(["+5511912345678", "+5511912340000"]).toContain(tel);
+    expect(await dbT.remetenteDesconhecido.count()).toBe(1);
+  });
+
+  it("usuário desativado entre a leitura e a escrita → conflito, nada gravado", async () => {
+    const maria = await dbT.usuario.create({ data: { nome: "Maria", email: "m@ij.test" } });
+    const d = await dbT.remetenteDesconhecido.create({ data: { lid: "777@lid" } });
+    const { db } = await import("@/lib/db");
+    const ler = db.usuario.findUnique.bind(db.usuario);
+    const spy = vi.spyOn(db.usuario, "findUnique").mockImplementation((async (args: Parameters<typeof ler>[0]) => {
+      const u = await ler(args);
+      await dbT.usuario.update({ where: { id: maria.id }, data: { ativo: false } });
+      return u;
+    }) as never);
+    try {
+      expect(await vincularRemetente(d.id, maria.id, gestor)).toEqual({ ok: false, erro: "CONFLITO_CONCORRENTE" });
+    } finally {
+      spy.mockRestore();
+    }
+    expect((await dbT.usuario.findUniqueOrThrow({ where: { id: maria.id } })).whatsappLid).toBeNull();
+    expect(await dbT.remetenteDesconhecido.count()).toBe(1);
   });
 
   it("recusa: usuário já tem outro telefone, telefone em uso, gestor mexendo em admin, inativo", async () => {

@@ -158,12 +158,13 @@ export async function opcoesDoPainel(): Promise<{ fases: { id: string; nome: str
   return { fases, usuarios };
 }
 
-/** Autocomplete do "vincular a card existente": cards vivos por título. */
+/** Autocomplete do "vincular a card existente": cards vivos de Vendas por título. */
 export async function buscarCardsParaVincular(q: string): Promise<{ id: string; nome: string; detalhe: string }[]> {
   const termo = q.trim().slice(0, 100);
   if (!termo) return [];
   const ops = await db.oportunidade.findMany({
-    where: { deletadoEm: null, titulo: { contains: termo, mode: "insensitive" } },
+    // Só Vendas, como o "criar card" do mesmo diálogo.
+    where: { deletadoEm: null, pipeline: { chave: PIPELINE_VENDAS }, titulo: { contains: termo, mode: "insensitive" } },
     orderBy: { atualizadoEm: "desc" },
     take: 10,
     select: { id: true, titulo: true, fase: { select: { nome: true } }, pipeline: { select: { nome: true } } },
@@ -218,7 +219,7 @@ export async function resolverManualmente(
           por,
         );
       } else {
-        const op = await tx.oportunidade.findFirst({ where: { id: alvo.oportunidadeId, deletadoEm: null }, select: { id: true } });
+        const op = await tx.oportunidade.findFirst({ where: { id: alvo.oportunidadeId, deletadoEm: null, pipeline: { chave: PIPELINE_VENDAS } }, select: { id: true } });
         if (!op) throw new ErroDeRegra("CARD_NAO_ENCONTRADO");
         id = op.id;
       }
@@ -252,9 +253,11 @@ export type ErroVincular =
   | "PAPEL_NAO_PERMITIDO"
   | "USUARIO_JA_TEM_TELEFONE"
   | "USUARIO_JA_TEM_LID"
-  | "IDENTIFICADOR_EM_USO";
+  | "IDENTIFICADOR_EM_USO"
+  /** O usuário (telefone, LID, papel ou ativo) mudou entre a leitura e a escrita. */
+  | "CONFLITO_CONCORRENTE";
 
-class PapelMudou extends Error {}
+class UsuarioMudou extends Error {}
 
 /**
  * Grava o telefone (`telefone_whatsapp`) ou o LID (`whatsapp_lid`) do
@@ -277,16 +280,19 @@ export async function vincularRemetente(
   if (d.lid && u.whatsappLid && u.whatsappLid !== d.lid) return { ok: false, erro: "USUARIO_JA_TEM_LID" };
   try {
     await db.$transaction(async (tx) => {
+      // Atômico: o where confere tudo o que foi checado acima (papel, ativo, telefone e
+      // LID lidos). Mudou no meio (outro vínculo, desativado, promovido) → conflito.
       const r = await tx.usuario.updateMany({
-        // `papel` no where: promovido a admin entre a leitura e a escrita → não grava.
-        where: { id: u.id, papel: u.papel },
+        where: { id: u.id, papel: u.papel, ativo: true, telefoneWhatsapp: u.telefoneWhatsapp, whatsappLid: u.whatsappLid },
         data: { ...(d.telefone ? { telefoneWhatsapp: d.telefone } : {}), ...(d.lid ? { whatsappLid: d.lid } : {}) },
       });
-      if (r.count === 0) throw new PapelMudou();
-      await tx.remetenteDesconhecido.deleteMany({ where: { id: d.id } });
+      if (r.count === 0) throw new UsuarioMudou();
+      const apagado = await tx.remetenteDesconhecido.deleteMany({ where: { id: d.id } });
+      if (apagado.count === 0) throw new UsuarioMudou(); // outro gestor vinculou este remetente agora
+
     });
   } catch (e) {
-    if (e instanceof PapelMudou) return { ok: false, erro: "PAPEL_NAO_PERMITIDO" };
+    if (e instanceof UsuarioMudou) return { ok: false, erro: "CONFLITO_CONCORRENTE" };
     if ((e as { code?: string })?.code === "P2002") return { ok: false, erro: "IDENTIFICADOR_EM_USO" };
     throw e;
   }

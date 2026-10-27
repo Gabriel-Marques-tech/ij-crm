@@ -26,7 +26,7 @@ const MENSAGEM_RESOLVER: Partial<Record<ErroResolver, string>> = {
   MENSAGEM_NAO_ENCONTRADA: "Mensagem não encontrada. Recarregue a página.",
   MENSAGEM_JA_RESOLVIDA: "Essa mensagem já foi resolvida. Recarregue a página.",
   MENSAGEM_EM_PROCESSAMENTO: "Essa mensagem está sendo processada agora. Espere um pouco e recarregue.",
-  CARD_NAO_ENCONTRADO: "Card não encontrado (pode ter sido excluído).",
+  CARD_NAO_ENCONTRADO: "Card não encontrado no quadro de Vendas (pode ter sido excluído).",
   TITULO_INVALIDO: "Informe um título (até 200 caracteres).",
   FASE_NAO_ENCONTRADA: "Fase não encontrada. Recarregue a página.",
   FASE_ARQUIVADA: "Essa fase foi arquivada. Escolha outra.",
@@ -42,6 +42,7 @@ const MENSAGEM_VINCULAR: Record<ErroVincular, string> = {
   USUARIO_JA_TEM_TELEFONE: "Esse usuário já tem outro telefone do WhatsApp. Troque em Usuários se for o caso.",
   USUARIO_JA_TEM_LID: "Esse usuário já tem outro LID do WhatsApp vinculado.",
   IDENTIFICADOR_EM_USO: "Esse telefone/LID já está em outro usuário.",
+  CONFLITO_CONCORRENTE: "O cadastro desse usuário mudou enquanto você vinculava (outro vínculo, papel ou desativação). Recarregue a página e tente de novo.",
 };
 
 function revalidar() {
