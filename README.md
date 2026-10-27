@@ -140,13 +140,39 @@ lança (roda no `after()`): erro de banco vira log com ref e a linha fica para o
   ou dois workers pagam a LLM (a cerca impede só a gravação dupla);
 - `FALHA` (inclusive "sem crédito na API da Anthropic", depois da recarga), **mantendo `erro`**.
 
-Env: `LLM_PROVEDOR=anthropic|mock` (dev sem chave: `mock`, que responde com as fixtures de
-`src/lib/llm/fixtures/extracao.ts`), `ANTHROPIC_API_KEY` (vazia → `FALHA` com motivo
-"SEM_CHAVE", nada quebra), `LLM_EXTRACAO_MODELO` (padrão `claude-haiku-5-5`, Claude Haiku 5.5;
-`claude-sonnet-5-5` é a alternativa por env se o benchmark GAB-40 mostrar erros),
-`LLM_LIMIAR_CONFIANCA`. Saldo da Anthropic esgotado (`billing_error`) → `FALHA` com "sem crédito na
-API da Anthropic" + ref, reprocessável (GAB-41) depois da recarga. Cada chamada loga provedor, modelo, versão, ms e tokens — nunca o texto:
-`[llm] extracao ref=<id> provedor=anthropic modelo=claude-haiku-5-5 versao=extracao.v1 ms=… tokens_in=… tokens_out=… ok`.
+Env: `LLM_PROVEDOR=openai|anthropic|mock` (padrão `openai`; ver "Provedor de LLM" abaixo; dev sem chave: `mock`, que responde com as fixtures de
+`src/lib/llm/fixtures/extracao.ts`), `OPENAI_API_KEY`/`ANTHROPIC_API_KEY` (a do provedor escolhido;
+vazia → `FALHA` com motivo "SEM_CHAVE", nada quebra), `LLM_EXTRACAO_MODELO` (vazio = padrão do
+provedor: `gpt-6.1-sol`, GPT-6.1 Sol com raciocínio low; `claude-haiku-5-5` na Anthropic),
+`LLM_LIMIAR_CONFIANCA`. Saldo esgotado → `FALHA` com "sem crédito na API da OpenAI" (ou "da
+Anthropic") + ref, reprocessável (GAB-41) depois da recarga. Cada chamada loga provedor, modelo, versão, ms e tokens — nunca o texto:
+`[llm] extracao ref=<id> provedor=openai modelo=gpt-6.1-sol versao=extracao.v1 ms=… tokens_in=… tokens_out=… tokens_reasoning=… ok`.
+
+## Provedor de LLM (OpenAI padrão, Anthropic alternativa)
+
+`src/lib/llm/provedores/`: `openai.ts` (padrão de produção, GAB-45), `anthropic.ts` e `mock.ts`,
+todos atrás de `ProvedorLlm` (`tipos.ts`); `comum.ts` tem a política comum (timeout 30 s, SDK
+com `maxRetries: 0`, 2ª tentativa só em 5xx/timeout/rede).
+
+- **OpenAI**: SDK oficial `openai`, Responses API, modelo `gpt-6.1-sol` (GPT-6.1 Sol, id conferido
+  no `ChatModel` do SDK) com `reasoning: { effort: "low" }` explícito, `store: false`, saída em
+  `text.format` `json_schema` `strict: true` com o mesmo `JSON_SCHEMA_EXTRACAO` (o zod valida
+  depois). Não manda `temperature`/`top_p`. `status: incomplete` (`max_output_tokens`) →
+  `TRUNCADA`; recusa/`content_filter` → `RECUSA`; texto não-JSON → `SEM_JSON`; todos `FALHA` com ref.
+- **Sem crédito**: códigos de saldo/limite de gasto documentados (`insufficient_quota`,
+  `credit_balance_exhausted`, `*_spend_limit_exceeded`, `*usage_limit_exceeded`, `billing_not_active`)
+  no `code`/`type` do erro (nunca na mensagem) → `SEM_CREDITO`, "sem crédito na API da OpenAI". A
+  mensagem da API não é logada. `status: failed` → `FALHA_PROVEDOR` com o código (`server_error` e
+  `rate_limit_exceeded` re-tentam uma vez).
+- **Deploy**: `scripts/deploy.sh` recusa o deploy se o provedor selecionado não tem chave
+  (`scripts/_llm.sh`).
+- Trocar: `LLM_PROVEDOR=openai|anthropic` + a chave (`OPENAI_API_KEY`/`ANTHROPIC_API_KEY`);
+  `LLM_EXTRACAO_MODELO` vazio = padrão do provedor (`gpt-6.1-sol`/`claude-haiku-5-5`); modelo do
+  outro provedor → `FALHA` "PROVEDOR_INVALIDO". `mock` é recusado em produção.
+- Log por chamada: `[llm] extracao ref=<id> provedor=openai modelo=gpt-6.1-sol versao=extracao.v1
+  ms=… tokens_in=… tokens_out=… tokens_reasoning=… ok` (`tokens_out` já inclui os de raciocínio).
+- Crédito pré-pago com recarga manual (auto-reload desligado, mínimo US$ 5, expira em 1 ano,
+  sugestão US$ 50 a cada ~3 meses): `docs/runbook.md` §10.
 
 ## #crm → atualizar card existente (LLM ATUALIZAR)
 

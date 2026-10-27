@@ -347,6 +347,8 @@ describe("falhas → FALHA com ref, nunca quebra, nunca loga o texto", () => {
     expect(d.status).toBe("FALHA");
     expect(d.erro).toContain("SEM_CHAVE");
     expect(d.erro).toContain("ANTHROPIC_API_KEY ausente");
+    // Falha antes da chamada: registra o modelo do provedor configurado, não o padrão da OpenAI.
+    expect(d.resultadoLlm).toMatchObject({ modelo: "claude-haiku-5-5" });
     expect(d.erro).toContain(`ref=${r.ref}`);
     expect(logs(console.error)).toContain(`ref=${r.ref}`);
     expect(logs(console.error) + logs(console.info)).not.toContain("segredo");
