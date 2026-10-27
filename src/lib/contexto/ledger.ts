@@ -10,7 +10,8 @@
  *   `CLASSIFICADA_IRRELEVANTE` ficam fora; conversa que o classificador
  *   descartou nunca vira linha, e sem tag que a extração disse IGNORAR é
  *   apagada — linha apagada não existe para o ledger.
- * - o texto segue a retenção de 90 dias da `mensagem_bruta` (GAB-41) — nada é
+ * - o texto segue a retenção da `mensagem_bruta` (GAB-41: o texto `#crm` fica,
+ *   o JSON da LLM some em 90 dias, sem tag não confirmada some em 30) — nada é
  *   duplicado;
  * - o card de cada mensagem vem da Timeline `MENSAGEM_WHATSAPP` que ela gerou
  *   (só card vivo em vendas).

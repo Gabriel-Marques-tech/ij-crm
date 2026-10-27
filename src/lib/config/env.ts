@@ -6,7 +6,7 @@
  * Segredos (`EVOLUTION_WEBHOOK_SECRET`, `EVOLUTION_API_KEY`) só valem se forem
  * FORTES: ≥ 32 caracteres e sem o prefixo de placeholder `troque-me`. Um
  * segredo fraco conta como ausente — o webhook recusa tudo (401) e o envio
- * falha com `ConfigFraca`. (GAB-41 deve aplicar a mesma regra a CRON_SECRET.)
+ * falha com `ConfigFraca`. `CRON_SECRET` segue a mesma regra (GAB-41).
  */
 
 import { sobrescrita } from "./sobrescritas";
@@ -88,6 +88,12 @@ export function segredoWebhook(): string | undefined {
 /** Chave global da Evolution, aceita como fallback no campo `apikey` do corpo do webhook. */
 export function chaveApiEvolution(): string | undefined {
   const d = diagnosticarSegredo("EVOLUTION_API_KEY");
+  return d.ok ? d.valor : undefined;
+}
+
+/** Segredo do header `x-cron-secret` de `/api/cron/*` (GAB-41). `undefined` (ausente OU fraco) ⇒ 401 para tudo. */
+export function segredoCron(): string | undefined {
+  const d = diagnosticarSegredo("CRON_SECRET");
   return d.ok ? d.valor : undefined;
 }
 

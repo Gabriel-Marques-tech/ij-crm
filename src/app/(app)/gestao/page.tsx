@@ -7,7 +7,7 @@ const AREAS = [
   { href: "/gestao/usuarios", icon: Users, titulo: "Usuários", desc: "Convites, papéis, telefone do WhatsApp." },
   { href: "/gestao/fases", icon: Layers, titulo: "Fases", desc: "Quadros e fases do funil: ordem, cor, limite de dias, terminais." },
   { href: "/gestao/lixeira", icon: Trash2, titulo: "Lixeira", desc: "Restaurar cards, contatos e empresas excluídos; apagar de vez (admin)." },
-  { href: "/gestao/whatsapp", icon: MessageSquare, titulo: "WhatsApp", desc: "Mensagens falhas e pendentes. (GAB-41)", futuro: true },
+  { href: "/gestao/whatsapp", icon: MessageSquare, titulo: "WhatsApp", desc: "Falhas e pendentes, reprocessar, remetentes desconhecidos e descartadas por dia." },
   { href: "/gestao/importar", icon: Upload, titulo: "Importar", desc: "Pipefy → CRM: CSV com prévia, idempotente." },
   { href: "/gestao/ranking", icon: Trophy, titulo: "Ranking", desc: "Pesos da pontuação e se os vendedores veem o ranking." },
   { href: "/gestao/admin", icon: Settings, titulo: "Admin", desc: "Grupo, LLM, limiares, conexão do WhatsApp e logs técnicos.", soAdmin: true },
@@ -32,7 +32,7 @@ export default async function GestaoPage() {
             </>
           );
           const classe = "block rounded-xl border border-border bg-surface p-5 transition-colors";
-          return a.futuro ? (
+          return "futuro" in a && a.futuro ? (
             <div key={a.href} className={`${classe} opacity-60`} aria-disabled>
               {conteudo}
             </div>

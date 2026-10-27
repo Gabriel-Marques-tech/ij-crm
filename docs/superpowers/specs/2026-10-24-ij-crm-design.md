@@ -300,10 +300,22 @@ Matriz de papéis:
   provedor de LLM nos EUA — OpenAI em produção, como antes ia à Anthropic —
   com `store: false` e sem texto em log. O aviso de privacidade da IJ deve
   citar essa transferência internacional (runbook §10).
+- **Retenção (GAB-41, decisão do usuário): 90 dias** para o JSON que a LLM
+  devolveu — `mensagem_bruta.resultado_llm` e a chave `saida` do payload das
+  entradas `MENSAGEM_WHATSAPP` da Timeline são apagados pelo cron
+  (`src/lib/whatsapp/retencao.ts`, em lotes, idempotente). O **texto original**
+  da mensagem fica (é o registro da venda). Prévias de import vencidas e sessões
+  expiradas também são apagadas pelo mesmo cron.
+- **Sem #crm não confirmada (GAB-41, decisão do usuário): 30 dias.** Mensagem
+  `sem_tag` que nunca virou venda (`FALHA` ou `PENDENTE_REVISAO`) é apagada
+  inteira — linha e texto — depois de 30 dias. As `#crm` mantêm o texto.
+- `/api/cron/*`: segredo `CRON_SECRET` forte (mesma regra dos outros segredos,
+  tempo constante, falha fechado), uma execução por vez (trava por aluguel de linha, `trava_cron`) e
+  resposta só com contagens.
 - LGPD do contexto de 12 h (GAB-49): o ledger **não copia texto** — é lido
   de `mensagem_bruta` (só o que já é guardado: `#crm` e sem tag que o
   classificador achou relevante; conversa descartada nunca entra) e segue a
-  retenção de 90 dias dela. O resumo por vendedor (`resumo_janela`) guarda só
+  retenção dela (GAB-41, acima). O resumo por vendedor (`resumo_janela`) guarda só
   o texto curto da LLM (nomes de pessoas/empresas, cards, próximos passos),
   **sem telefone, email, endereço, dados bancários nem documentos** (proibido
   no prompt; formatos de telefone/CPF/CNPJ/email removidos por código antes

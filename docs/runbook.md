@@ -323,16 +323,32 @@ real, se a Evolution local estiver logada num número real).
 `cron-reprocessar.sh` chama `POST https://APP_DOMAIN/api/cron/reprocessar` pelo
 Caddy, com `--resolve` para 127.0.0.1 e o header `x-cron-secret: $CRON_SECRET`
 (passado pelo stdin do curl, não aparece em `ps`). O log tem **só horário e
-status HTTP**: o corpo da resposta é descartado. **A rota é do GAB-41 e ainda
-não existe**: até lá cada execução registra `HTTP 404`, o que é esperado e sem efeito.
+status HTTP**: o corpo da resposta é descartado.
 
-Contrato para o GAB-41:
+A rota (GAB-41, `src/app/api/cron/reprocessar/route.ts`):
 
-- **o header `x-cron-secret` é o único controle de acesso** de `/api/cron/*`. O
-  app deve validá-lo com a regra de `src/lib/config/env.ts` (≥ 32 chars, sem
-  `troque-me`, comparação em tempo constante) e falhar fechado;
-- a resposta deve trazer só contagens (ex.: `{"reprocessadas":3,"falhas":0}`),
-  nunca conteúdo de mensagem nem dado pessoal.
+- **o header `x-cron-secret` é o único controle de acesso** de `/api/cron/*`,
+  validado com a regra de `src/lib/config/env.ts` (≥ 32 chars, sem `troque-me`,
+  comparação em tempo constante). `CRON_SECRET` ausente/fraco ⇒ 401 para tudo e
+  `[cron] CRON_SECRET inutilizável (…)` no log do app;
+- uma execução por vez (trava por aluguel de linha em `trava_cron`, 9 min, sem
+  segurar conexão do banco): se a anterior ainda roda, `200 {"ok":true,"emAndamento":true}`
+  sem fazer nada. Se o app morrer no meio, a trava vence sozinha em 9 min;
+- passos extras: resumos do contexto de 12 h (GAB-49: gera os da janela fechada,
+  teto de 60 s, e apaga os antigos); mensagens **sem #crm** não confirmadas (`FALHA`/`PENDENTE_REVISAO`)
+  com mais de 30 dias são apagadas; travadas que já gastaram 3 tentativas viram
+  `FALHA` `TENTATIVAS_ESGOTADAS` (aparecem em Gestão → WhatsApp);
+- passos: retenção de 90 dias do JSON da LLM, prévias de import vencidas,
+  sessões expiradas e, por último, o reprocessamento (no máximo 20 mensagens,
+  para no primeiro "sem crédito" de novo e não começa nada depois de 4 min);
+- a resposta traz só contagens (`reprocessamento.tentadas`, `processadas`,
+  `falhas`…) e, se algum passo falhou, `erros: [ref…]` com **HTTP 500** — o log
+  do cron mostra `reprocessar HTTP 500`; `grep 'ref=<ref>'` no log do app acha a
+  causa. Nunca conteúdo de mensagem nem dado pessoal.
+
+Rodar na mão (mesmo efeito do cron): `scripts/cron-reprocessar.sh`. Mensagens que
+esgotaram as 3 tentativas ficam em Gestão → WhatsApp para reprocessar ou
+resolver manualmente.
 
 O Caddy responde 404 para `/api/cron/*` vindo de IP público. Isso é **defesa em
 profundidade, não controle**: corta ruído óbvio, mas não é confiável (com o

@@ -99,6 +99,7 @@ model Usuario {
   transicoes        TransicaoFase[]
   timeline          Timeline[]
   mensagensBrutas   MensagemBruta[]
+  mensagensResolvidas MensagemBruta[] @relation("resolvidaPor")
   sessoes           Sessao[]
   importPrevias     ImportPrevia[]
   foto              UsuarioFoto?
@@ -369,16 +370,21 @@ model MensagemBruta {
   erro                String?
   /// GAB-39: chegou sem #crm e o classificador achou relevante — limiar de extração mais alto e confirmação "↪️".
   semTag              Boolean        @default(false) @map("sem_tag")
+  /// GAB-41: "Resolver manualmente" no painel (PROCESSADA sem LLM): quem e quando.
+  resolvidaPorId      String?        @map("resolvida_por_id")
+  resolvidaEm         DateTime?      @map("resolvida_em")
   criadoEm            DateTime       @default(now()) @map("criado_em")
   atualizadoEm        DateTime       @updatedAt @map("atualizado_em")
 
   remetenteUsuario    Usuario?       @relation(fields: [remetenteUsuarioId], references: [id])
+  resolvidaPor        Usuario?       @relation("resolvidaPor", fields: [resolvidaPorId], references: [id], onDelete: SetNull)
   timeline            Timeline[]
 
   @@index([status])
   @@index([remetenteUsuarioId, recebidaEm])
   @@index([recebidaEm]) // GAB-49: remetentes de uma janela (gerarResumosPendentes)
   @@index([respondendoEventoId])
+  // + índice parcial (recebida_em) WHERE resultado_llm IS NOT NULL, só na migration 20261027170100 (retenção).
   @@map("mensagem_bruta")
 }
 
@@ -404,6 +410,15 @@ model ContadorDescartadas {
   naoClassificadas Int      @default(0) @map("nao_classificadas")
 
   @@map("contador_descartadas")
+}
+
+// Trava do cron (GAB-41): aluguel de linha com prazo; ver src/lib/cron/trava.ts.
+model TravaCron {
+  nome     String    @id
+  dono     String?
+  expiraEm DateTime? @map("expira_em")
+
+  @@map("trava_cron")
 }
 
 model RemetenteDesconhecido {

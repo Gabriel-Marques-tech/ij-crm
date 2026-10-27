@@ -236,7 +236,9 @@ async function falhar(
   });
   if (count === 0) return { tipo: "IGNORADA" };
   const confirmacao = textoFalha(ref);
-  await responder(m, confirmacao, null, participantJid);
+  // GAB-41: ❌ só para #crm (sem tag é silencioso no grupo, inclusive no reprocessamento)
+  // e só na 1ª falha (reprocessamento que falhou de novo não repete).
+  if (m.erro === null && !m.semTag) await responder(m, confirmacao, null, participantJid);
   await alertarSeSemCredito(e, ref); // GAB-46: avisa ops se for SEM_CREDITO; nunca lança
   return { tipo: "FALHA", ref, codigo, confirmacao };
 }

@@ -331,6 +331,53 @@ A primeira chamada à LLM que der certo (`marcarCreditoOk`) fecha o incidente e 
 zera o cooldown: o limite de 1 aviso a cada 6 h vale mesmo com falhas e sucessos alternados. Depois da
 recarga, as mensagens em `FALHA` voltam pelo reprocessamento (GAB-41).
 
+## Painel de mensagens e cron (GAB-41)
+
+**Gestão → WhatsApp** (`/gestao/whatsapp`, gestor/admin; vendedor → 403). Serviço em
+`src/lib/whatsapp/painel.ts`; 5 consultas por página, fila paginada (20), sem N+1.
+
+- **Fila**: `FALHA` e `PENDENTE_REVISAO` com texto, remetente, motivo (`erro` com ref, ou
+  `resultado_llm.aplicacao.motivo`) e o JSON da LLM recolhido. Detalhe técnico (tokens, webhook):
+  Admin → Logs (GAB-42); a ref do motivo é a mesma do log do servidor.
+- **Reprocessar**: `reprocessarMensagem` (`reprocessar.ts`) — devolve a `RECEBIDA` **mantendo `erro`** e
+  chama `processarMensagem` (mesma reivindicação com cerca). É a mesma função do cron: dois cliques,
+  clique + cron, nunca dois cards. `PROCESSADA` nunca volta.
+- **Resolver manualmente**: cria card (título sugerido do texto, fase aberta de Vendas, responsável =
+  quem mandou) ou liga a um card existente de Vendas (busca por título); Timeline `MENSAGEM_WHATSAPP` com o texto e
+  autor = quem resolveu; mensagem `PROCESSADA` com `resolvida_por_id`/`resolvida_em`. Trava a linha da
+  mensagem antes (`FOR UPDATE`). Nada vai para o grupo.
+- **Remetentes desconhecidos**: telefone/LID **mascarado**, total e última vez, nunca conteúdo.
+  "Vincular a usuário" grava `telefone_whatsapp` (telefone) ou `whatsapp_lid` (LID) e apaga a linha;
+  recusa se o usuário já tem outro valor (troca é em Usuários) ou se for gestor mexendo em admin. Atômico:
+  o UPDATE confere no `where` o telefone/LID/papel/ativo lidos; mudou no meio → "mudou enquanto você vinculava".
+- **Descartadas por dia** (14 dias): `contador_descartadas.total` e `nao_classificadas` (GAB-39).
+- **Últimas 50 processadas**, cada uma com link para o card (via Timeline).
+
+Reprocessar uma `FALHA` que falha de novo **não** manda outro ❌ no grupo (já mandou na 1ª). Mensagem
+**sem #crm** nunca recebe ❌ (nem na 1ª falha, nem reprocessada pelo painel ou pelo cron).
+
+**Cron** — `POST /api/cron/reprocessar` (`src/app/api/cron/reprocessar/route.ts`), a cada 10 min por
+`scripts/cron-reprocessar.sh` (runbook §7). `x-cron-secret` = `CRON_SECRET` (≥ 32 chars, sem
+`troque-me`, tempo constante; fraco/ausente ⇒ 401 para tudo). Uma execução por vez
+(trava por aluguel de linha em `trava_cron`, 9 min, sem segurar conexão; ocupada ⇒ `200 {emAndamento:true}`;
+processo que morre libera quando o aluguel vence). Resposta só com contagens.
+Passos (`src/lib/cron/manutencao.ts`, cada um isolado, erro ⇒ ref + HTTP 500):
+
+1. **Retenção LGPD, 90 dias** (`retencao.ts`): apaga `mensagem_bruta.resultado_llm` e a chave `saida`
+   das Timeline `MENSAGEM_WHATSAPP`; o texto original fica. Lotes de 500, idempotente (índice parcial
+   em `recebida_em` das linhas com JSON).
+   **Sem #crm não confirmada, 30 dias**: `sem_tag` em `FALHA`/`PENDENTE_REVISAO` com mais de 30 dias é
+   apagada inteira (linha e texto) — conversa do grupo que ninguém validou como venda.
+2. Prévias de import vencidas (`purgarVencidas`, GAB-37) e sessões expiradas.
+3. Contexto de 12 h (GAB-49): `aplicarRetencaoResumos()` (apaga resumos de janelas antigas) e
+   `gerarResumosPendentes(agora, { prazoMs: 60 s })` (resumo da janela fechada de cada vendedor), cada um
+   isolado, só contagens (`resumosApagados`, `resumos.gerados`). Rodam antes do reprocessamento.
+4. **Reprocessamento** (`retomarPendentes`), no máximo 20 por execução, mais antigas primeiro, nada novo
+   depois de 4 min contados do início da execução: `RECEBIDA` parada > 2 min (órfã); `PROCESSANDO` > 5 min volta a `RECEBIDA` (nunca
+   antes); travada/órfã que já tem 3+ tentativas vai para `FALHA` `TENTATIVAS_ESGOTADAS ref=…` (sem laço); `FALHA` com < 3 tentativas; `FALHA` por sem crédito (`aplicacao.codigo = LLM_SEM_CREDITO`)
+   sempre — mas a execução **para no 1º sem crédito de novo** (1 chamada por execução enquanto não
+   recarregar). Banco/config fora (`ERRO`) também interrompe e a ref entra em `erros` (HTTP 500).
+
 ## Kanban
 
 `/kanban` (Vendas; `?quadro=projetos` para Projetos) e detalhe em `/kanban/[id]`. Serviço em
