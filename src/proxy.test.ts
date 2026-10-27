@@ -53,5 +53,9 @@ describe("proxy: matcher", () => {
     expect(casa("/apple-icon.png")).toBe(false);
     expect(casa("/images/marca/mascote-em-pe.webp")).toBe(false);
     expect(casa("/kanban")).toBe(true);
+    // Ponto é literal: nomes parecidos continuam privados.
+    expect(casa("/icon-png")).toBe(true);
+    expect(casa("/apple-icon-png")).toBe(true);
+    expect(casa("/iconXpng")).toBe(true);
   });
 });
