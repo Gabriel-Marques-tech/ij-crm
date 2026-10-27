@@ -1,7 +1,8 @@
 /**
  * Aplica a extração da LLM no CRM (design doc §4.3 passo 8) — tudo numa
- * transação que o chamador abre (`processar.ts`). Só `CRIAR` é aplicado
- * nesta fatia; `ATUALIZAR`/`IGNORAR` vão para `PENDENTE_REVISAO`.
+ * transação que o chamador abre (`processar.ts`). Este arquivo faz o `CRIAR`;
+ * `ATUALIZAR` (ou reply a uma confirmação do bot) vai para `atualizar.ts`
+ * (GAB-38); `IGNORAR` vai para `PENDENTE_REVISAO`.
  *
  * Duas fases: PLANO (só leitura; decide e pode desistir com PENDENTE sem ter
  * gravado nada) e ESCRITA. Regras de identidade (contrato de GAB-31):
@@ -26,92 +27,49 @@
  * - Motivos de revisão vão para o grupo: nunca ecoam texto livre da LLM
  *   (fase/responsável viram frase fixa).
  */
-import type { Origem, Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { encontrarContatoPorIdentificador, encontrarEmpresa, resolverEmpresas } from "@/lib/contatos/match";
 import { validarNome } from "@/lib/entidades/campos";
 import { travarPipelines } from "@/lib/fases/fases";
-import { resolverDataRelativa } from "@/lib/llm/datas";
-import type { Extracao } from "@/lib/llm/prompts/extracao.v1";
-import { lerValorInformal } from "@/lib/llm/valores";
-import { ehDominioPublico, normalizarDominio, normalizarPonto, type PontoNormalizado } from "@/lib/normalizacao";
-import { inicioDoDia, interpretarCampo } from "@/lib/oportunidades/campos";
+import { ehDominioPublico, normalizarDominio } from "@/lib/normalizacao";
 import { ErroDeRegra } from "@/lib/oportunidades/erros";
-import { criarCardTravado, type NovoCard } from "@/lib/oportunidades/oportunidades";
+import { criarCardTravado } from "@/lib/oportunidades/oportunidades";
 import { PIPELINE_VENDAS } from "@/lib/oportunidades/terminal-regras";
-import type { MotivoPendente, ResumoCriado } from "./confirmacao";
+import { aplicarAtualizacao, pipelinesParaTravar } from "./atualizar";
+import {
+  FASE_PADRAO_CRIAR,
+  VIVO,
+  interpretarCamposExtracao,
+  nomeComparavel,
+  pendente,
+  pontosCitados,
+  remetenteEResponsavel,
+  type Desfecho,
+  type EntradaAplicacao,
+  type Sugestao,
+  type Tx,
+} from "./comum";
 import { extrairIdentificadores } from "./identificadores";
 
-type Tx = Prisma.TransactionClient;
-
-export const FASE_PADRAO_CRIAR = "primeiro_contato";
-
-export type Sugestao =
-  | { tipo: "EMPRESA_POR_DOMINIO"; empresaId: string; nome: string }
-  | { tipo: "EMPRESA_MESMO_NOME"; empresaId: string; nome: string }
-  | { tipo: "CONTATO_MESMO_NOME"; contatoId: string; nome: string };
-
-export type Desfecho =
-  | ({
-      tipo: "CRIADO";
-      oportunidadeId: string;
-      contato: { id: string; criado: boolean } | null;
-      empresa: { id: string; criada: boolean } | null;
-      sugestoes: Sugestao[];
-    } & ResumoCriado)
-  | { tipo: "PENDENTE"; motivo: MotivoPendente };
-
-export type EntradaAplicacao = {
-  mensagem: { id: string; texto: string; recebidaEm: Date; remetenteUsuarioId: string };
-  extracao: Extracao;
-  limiar: number;
-  /** Vai na Timeline MENSAGEM_WHATSAPP (JSON da LLM, versão, modelo). */
-  registroLlm: Record<string, unknown>;
-};
-
-const VIVO = { deletadoEm: null, mergedIntoId: null } as const;
-
-/** Nome comparável: sem acento, minúsculo, espaços colapsados. */
-export function nomeComparavel(s: string): string {
-  return s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().replace(/\s+/g, " ").trim();
-}
-
-function pendente(motivo: MotivoPendente): Desfecho {
-  return { tipo: "PENDENTE", motivo };
-}
-
-type PontoNovo = PontoNormalizado & { valorOriginal: string };
-
-/**
- * Pontos a gravar: os identificadores citados no texto. O valor original é o
- * que a LLM devolveu quando ele normaliza para o mesmo valor; senão o próprio
- * valor normalizado.
- */
-function pontosCitados(ex: Extracao, ids: { telefones: string[]; emails: string[] }): PontoNovo[] {
-  const original = new Map<string, string>();
-  for (const [bruto, tipo] of [
-    [ex.contato.telefone, "TELEFONE"],
-    [ex.contato.email, "EMAIL"],
-  ] as const) {
-    const p = bruto ? normalizarPonto(bruto, tipo) : null;
-    if (p) original.set(p.valorNormalizado, bruto!.trim());
-  }
-  return [
-    ...ids.telefones.map((v) => ({ tipo: "TELEFONE" as const, valorNormalizado: v, valorOriginal: original.get(v) ?? v })),
-    ...ids.emails.map((v) => ({ tipo: "EMAIL" as const, valorNormalizado: v, valorOriginal: original.get(v) ?? v })),
-  ];
-}
+export type { Desfecho, EntradaAplicacao, Sugestao } from "./comum";
+export { FASE_PADRAO_CRIAR, nomeComparavel } from "./comum";
 
 export async function aplicarExtracao(tx: Tx, e: EntradaAplicacao): Promise<Desfecho> {
   const ex = e.extracao;
-  if (ex.intencao === "ATUALIZAR") return pendente("ATUALIZAR");
   if (ex.intencao === "IGNORAR") return pendente("IGNORAR");
+  // Reply a uma confirmação do bot fixa o card: é atualização mesmo que a LLM diga CRIAR.
+  const atualizar = ex.intencao === "ATUALIZAR" || !!e.alvoResposta;
 
   const motivos: string[] = [];
   const sugestoes: Sugestao[] = [];
 
-  // ---- lock primeiro (ordem global de locks: só o pipeline de vendas)
-  const vendas = await tx.pipeline.findUnique({ where: { chave: PIPELINE_VENDAS }, select: { id: true } });
-  if (!vendas || !(await travarPipelines(tx, [vendas.id]))) throw new ErroDeRegra("PIPELINE_NAO_ENCONTRADO");
+  // ---- lock primeiro, tudo de uma vez (ordem global por id): vendas e, se
+  // a atualização pode ganhar o card, projetos (o gancho de ganho cria lá).
+  const travar = atualizar ? await pipelinesParaTravar(tx, ex.fase_chave) : [PIPELINE_VENDAS];
+  const pipes = await tx.pipeline.findMany({ where: { chave: { in: travar } }, select: { id: true, chave: true } });
+  const vendas = pipes.find((p) => p.chave === PIPELINE_VENDAS);
+  if (!vendas || pipes.length !== travar.length || !(await travarPipelines(tx, pipes.map((p) => p.id)))) throw new ErroDeRegra("PIPELINE_NAO_ENCONTRADO");
+  if (atualizar) return aplicarAtualizacao(tx, e, { vendasId: vendas.id, travados: travar });
 
   // ---- PLANO: contato
   const ids = extrairIdentificadores(e.mensagem.texto);
@@ -205,43 +163,12 @@ export async function aplicarExtracao(tx: Tx, e: EntradaAplicacao): Promise<Desf
   if (!fase) throw new ErroDeRegra("FASE_NAO_ENCONTRADA");
 
   // ---- PLANO: responsável
-  const remetente = await tx.usuario.findFirst({ where: { id: e.mensagem.remetenteUsuarioId, ativo: true }, select: { id: true, nome: true } });
-  if (!remetente) throw new ErroDeRegra("RESPONSAVEL_INVALIDO");
-  let responsavel = remetente;
-  if (ex.responsavel_nome) {
-    const alvo = nomeComparavel(ex.responsavel_nome);
-    const ativos = await tx.usuario.findMany({ where: { ativo: true }, select: { id: true, nome: true } });
-    const iguais = ativos.filter((u) => nomeComparavel(u.nome) === alvo);
-    if (iguais.length === 1) responsavel = iguais[0];
-    else motivos.push("responsável indicado não encontrado");
-  }
+  const quem = await remetenteEResponsavel(tx, ex, e.mensagem.remetenteUsuarioId, motivos);
+  const remetente = quem.remetente;
+  const responsavel = quem.responsavel ?? remetente;
 
   // ---- PLANO: campos
-  const campos: NonNullable<NovoCard["campos"]> = {};
-  const c = ex.campos;
-  for (const [nome, campo, rotulo] of [
-    [c.dor, "dor", "dor"],
-    [c.cidade, "cidade", "cidade"],
-    [c.estado, "estado", "estado"],
-    [c.proxima_acao, "proximaAcao", "próxima ação"],
-  ] as const) {
-    if (!nome) continue;
-    const r = interpretarCampo(campo, nome);
-    if (r.ok) (campos as Record<string, unknown>)[campo] = r.valor;
-    else motivos.push(`valor de ${rotulo} inválido`);
-  }
-  if (c.origem) campos.origem = c.origem as Origem;
-  if (c.orcamento_previsto) {
-    const v = lerValorInformal(c.orcamento_previsto);
-    if (v) campos.orcamentoPrevisto = v;
-    else motivos.push("orçamento não entendido");
-  }
-  let proximaAcaoEm: string | null = null;
-  if (c.proxima_acao_em) {
-    proximaAcaoEm = resolverDataRelativa(c.proxima_acao_em, e.mensagem.recebidaEm);
-    if (proximaAcaoEm) campos.proximaAcaoEm = inicioDoDia(proximaAcaoEm);
-    else motivos.push("data da próxima ação não entendida");
-  }
+  const { campos, proximaAcaoEm } = interpretarCamposExtracao(ex, e.mensagem.recebidaEm, motivos);
   if (ex.confianca < e.limiar) motivos.push("confiança baixa da leitura");
   const revisar = motivos.length > 0;
 
