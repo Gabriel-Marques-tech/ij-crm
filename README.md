@@ -180,23 +180,29 @@ com `maxRetries: 0`, 2ª tentativa só em 5xx/timeout/rede).
   `rate_limit_exceeded` re-tentam uma vez).
 - **Gemini** (`LLM_PROVEDOR=gemini`): SDK oficial `@google/genai` (Gemini Developer API, chave do
   Google AI Studio em `GEMINI_API_KEY`), modelo `gemini-3.8-flash` (Gemini 3.8 Flash; id conferido no
-  union `Model` do SDK e na lista oficial de modelos), `thinkingConfig.thinkingLevel: LOW` (modelos
-  `gemini-2.*` usam `thinkingBudget: 1024`), `responseMimeType: application/json` +
-  `responseJsonSchema` com o mesmo schema dos outros, convertido por `paraSchemaGemini` (anulável simples
-  vira `type: [T, "null"]`, palavras-chave fora do subconjunto do Gemini caem; snapshot no teste). SDK sem
-  `retryOptions` (não re-tenta sozinho). `promptFeedback.blockReason` e finish de segurança (`SAFETY`,
-  `RECITATION`, `SPII`...) → `RECUSA`; `MAX_TOKENS` → `TRUNCADA`; outro finish → `FALHA_PROVEDOR`.
-  **Sem crédito**: HTTP 402 (pré-pago esgotado), `ErrorInfo.reason` de billing (`BILLING_DISABLED`...) ou
-  429 `RESOURCE_EXHAUSTED` com `QuotaFailure` de quota diária → `SEM_CREDITO`, "sem crédito na API do
-  Gemini"; 429 de quota por minuto é rate limit comum (`HTTP 429`). Só `status`/`details` do corpo, nunca
-  a `message`. `tokens_out` = `candidatesTokenCount + thoughtsTokenCount`.
+  union `Model` do SDK e na lista oficial de modelos). `thinkingConfig` só para quem pensa:
+  `gemini-3*` → `thinkingLevel: LOW`, `gemini-2.5-*` → `thinkingBudget: 1024`, `gemini-2.0-*`/aliases →
+  nenhum. `responseMimeType: application/json` + `responseJsonSchema` com o mesmo schema dos outros,
+  filtrado por `paraSchemaGemini` (anulável continua `anyOf: [T, null]`; palavras-chave fora do subconjunto
+  caem; snapshot no teste). Retentativa do SDK desligada explicitamente (`retryOptions: { attempts: 1 }`).
+  `promptFeedback.blockReason` e finish de segurança (`SAFETY`, `RECITATION`, `SPII`...) → `RECUSA`;
+  `MAX_TOKENS` → `TRUNCADA`; outro finish → `FALHA_PROVEDOR`. **Sem crédito**: HTTP 402 (pré-pago
+  esgotado) ou `ErrorInfo.reason` de billing (`BILLING_DISABLED`...) → `SEM_CREDITO`, "sem crédito na API
+  do Gemini". **Cota diária**: 429 `RESOURCE_EXHAUSTED` com `QuotaFailure` de `quotaId` diário →
+  `COTA_DIARIA` (reprocessada sempre, como sem crédito, e com alerta de ops próprio); 429 por minuto é
+  rate limit comum (`HTTP 429`). Só `status`/`details` do corpo, nunca a `message`. `tokens_out` =
+  `candidatesTokenCount + thoughtsTokenCount`.
+- **Smoke** (`pnpm llm:smoke`, `scripts/smoke-llm.ts`): uma chamada real por schema (extração,
+  classificação, resumo) ao provedor do env, com mensagem sintética; imprime só status/tokens/ms e sai ≠ 0
+  se falhar. Em produção: `dc --profile ops run --rm llm-smoke` (runbook §10).
 - **Deploy**: `scripts/deploy.sh` recusa o deploy se o provedor selecionado não tem chave
   (`scripts/_llm.sh`).
 - Trocar: `LLM_PROVEDOR=openai|anthropic|gemini` + a chave (`OPENAI_API_KEY`/`ANTHROPIC_API_KEY`/
   `GEMINI_API_KEY`), no `.env` ou em Admin → Configuração (provedor/modelo; a chave fica só no env, e o
   Admin mostra "configurada/ausente"). `LLM_EXTRACAO_MODELO` vazio = padrão do provedor
-  (`gpt-6.1-sol`/`claude-haiku-5-5`/`gemini-3.8-flash`); modelo de outro provedor (prefixo `claude-` /
-  `gemini-`; OpenAI é o resto) → `FALHA` "PROVEDOR_INVALIDO". `mock` é recusado em produção. Passo a
+  (`gpt-6.1-sol`/`claude-haiku-5-5`/`gemini-3.8-flash`); modelo de outro provedor (prefixo, sem
+  `models/` e em minúsculas: `claude-`, `gemini-`, OpenAI `gpt-`/`o<n>`/`chatgpt-`/`codex-`/`ft:`;
+  prefixo desconhecido como `gemma-*` não é de ninguém) → `FALHA` "PROVEDOR_INVALIDO". `mock` é recusado em produção. Passo a
   passo: `docs/runbook.md` §10.
 - Log por chamada: `[llm] extracao ref=<id> provedor=openai modelo=gpt-6.1-sol versao=extracao.v1
   ms=… tokens_in=… tokens_out=… tokens_reasoning=… ok` (`tokens_out` já inclui os de raciocínio).

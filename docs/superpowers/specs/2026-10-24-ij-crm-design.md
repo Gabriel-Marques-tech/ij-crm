@@ -188,8 +188,10 @@ responde. Cron fica só para reprocessar `FALHA` e para backup.
   `LLM_PROVEDOR=gemini`), por env ou Admin → Configuração. Os três seguem o
   mesmo contrato (`ProvedorLlm`): timeout 30 s, 2ª tentativa só em
   5xx/timeout/rede, recusa → `RECUSA`, teto → `TRUNCADA`, saldo/billing →
-  `SEM_CREDITO` (só por código/status, nunca pelo texto). O guard de modelo
-  usa o prefixo (`claude-`, `gemini-`; OpenAI é o resto).
+  `SEM_CREDITO` (só por código/status, nunca pelo texto); no Gemini, cota
+  diária esgotada → `COTA_DIARIA` (reprocessável, com alerta de ops). O guard
+  de modelo usa o prefixo (`claude-`, `gemini-`, famílias da OpenAI; prefixo
+  desconhecido é recusado).
 - **Benchmark** (parte do plano): ~50 mensagens reais do grupo rotuladas;
   script roda Sonnet 5.5, Haiku 5.5, GPT-5 mini, GPT-5 nano no mesmo
   prompt/schema; mede campos corretos, fase, intenção, latência, custo.
@@ -310,9 +312,11 @@ Matriz de papéis:
 - LGPD com `LLM_PROVEDOR=gemini`: as mesmas mensagens (e o contexto/resumo de
   12 h) vão ao **Google** (Gemini API), processadas onde o Google opera. Só
   com projeto de **billing ativo** (serviço pago: o Google não usa prompts
-  para treinar e só guarda log por tempo limitado contra abuso); no free tier
-  o Google pode usar o conteúdo e fazer revisão humana — proibido para este
-  CRM. O aviso de privacidade deve citar o Google como destinatário.
+  para treinar e guarda prompts/respostas por **55 dias** só contra abuso;
+  sem equivalente a `store: false` no `generateContent`); no free tier o
+  Google usa o conteúdo para melhorar produtos e pode fazer revisão humana —
+  proibido para este CRM. Fontes e detalhes: runbook §10. O aviso de
+  privacidade deve citar o Google como destinatário.
 - **Retenção (GAB-41, decisão do usuário): 90 dias** para o JSON que a LLM
   devolveu — `mensagem_bruta.resultado_llm` e a chave `saida` do payload das
   entradas `MENSAGEM_WHATSAPP` da Timeline são apagados pelo cron

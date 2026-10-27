@@ -20,7 +20,7 @@ Do zero ao ar, em ordem. Cada passo aponta para a seção com os comandos
    ([§0](#0-primeira-instalação-vps-limpa)).
 4. **`.env`**: `cp .env.prod.example .env && chmod 600 .env`; `APP_DOMAIN`,
    `ACME_EMAIL`, um `openssl rand -hex 32` para cada segredo, `OPENAI_API_KEY`
-   (conta com crédito pré-pago e auto-reload desligado, [§10](#10-provedor-de-llm-e-crédito-da-openai)).
+   (conta com crédito pré-pago e auto-reload desligado, [§10](#10-provedor-de-llm-e-crédito-da-openai--gemini)).
    `NOTIFICATIONS_ENABLED=false` por enquanto. Cópia offline do `.env` no
    gerenciador de senhas da IJ (sem ela um backup não sobe numa VPS nova).
 5. **DNS**: registro `A` (e `AAAA`, se usar IPv6) de `APP_DOMAIN` para o IP
@@ -29,6 +29,9 @@ Do zero ao ar, em ordem. Cada passo aponta para a seção com os comandos
 6. **Primeiro deploy** + seed: `scripts/deploy.sh --no-pull` e
    `dc --profile ops run --rm migrate prisma db seed` ([§0](#0-primeira-instalação-vps-limpa)).
    Conferir `dc ps` (tudo `healthy`) e `https://<domínio>/login` no navegador.
+   **Smoke da LLM** (com a chave do provedor já no `.env`): rodar `pnpm llm:smoke`,
+   na VPS `dc --profile ops run --rm llm-smoke` ([§10](#10-provedor-de-llm-e-crédito-da-openai--gemini)).
+   Tem que terminar com `[llm-smoke] ok` (extração, classificação e resumo).
 7. **Criar o admin** (`scripts/criar-admin.ts`, [§0](#0-primeira-instalação-vps-limpa)) e entrar no CRM.
 8. **WhatsApp**: `scripts/evolution.sh criar` (uma vez) e parear o número dedicado
    em **Gestão → Admin → "Mostrar QR"** (ou `scripts/evolution.sh qr`, [§5](#5-ler-o-qr-da-evolution-criarreconectar-a-instância)).
@@ -36,7 +39,7 @@ Do zero ao ar, em ordem. Cada passo aponta para a seção com os comandos
 9. **Grupo**: com o número já no grupo de vendas, **Gestão → Admin → "Listar grupos"**,
    escolher e salvar. O valor do Admin vence o `GRUPO_JID` do `.env` (só fallback).
 10. **Aviso de privacidade** da IJ publicado, mencionando o envio do texto das
-    mensagens do grupo ao provedor de LLM nos EUA ([§10](#10-provedor-de-llm-e-crédito-da-openai), "LGPD").
+    mensagens do grupo ao provedor de LLM nos EUA ([§10](#10-provedor-de-llm-e-crédito-da-openai--gemini), "LGPD").
     **Antes do webhook**: a partir dele, o classificador (com ou sem `#crm`) manda
     texto do grupo para a LLM mesmo com `NOTIFICATIONS_ENABLED=false` — o safe mode
     só cala o bot, não a LLM.
@@ -548,6 +551,24 @@ para o Gemini é o `.env` (`LLM_PROVEDOR=gemini` + `GEMINI_API_KEY`, depois
 do provedor dele (ex.: OpenAI) **e** a `GEMINI_API_KEY`. Voltar para a OpenAI:
 `LLM_PROVEDOR=openai` no `.env` (com `OPENAI_API_KEY`) ou `openai` no Admin.
 
+**Smoke depois de configurar a chave** (obrigatório antes de ligar o grupo, e
+depois de trocar provedor/modelo): `pnpm llm:smoke` (`scripts/smoke-llm.ts`).
+Faz UMA chamada real por schema (extração, classificação e resumo) com uma
+mensagem sintética, sem dado pessoal, e imprime só status, tokens e ms; sai ≠ 0
+se algo falhar. A imagem do `app` não tem `tsx` nem o código-fonte, então em
+produção ele roda na imagem `ops`, com o mesmo env do app e só a rede `edge`
+(saída para a API):
+
+```bash
+dc --profile ops run --rm llm-smoke
+# testar o Gemini antes de trocar o .env:  dc --profile ops run --rm -e LLM_PROVEDOR=gemini llm-smoke
+```
+
+Lê só o `.env` (não a config salva no Admin). Saída esperada: três linhas
+`[llm-smoke] <operacao> ok provedor=... modelo=... ms=... tokens_in=...` e
+`[llm-smoke] ok`. `FALHA codigo=HTTP status=400` costuma ser chave/modelo/schema;
+`SEM_CREDITO`/`COTA_DIARIA`, ver abaixo.
+
 Troque ou esvazie `LLM_EXTRACAO_MODELO` junto: modelo de um provedor com o outro
 selecionado faz toda mensagem ir para `FALHA` com "PROVEDOR_INVALIDO" (ref no
 grupo e motivo em Gestão → mensagens). Depois da troca, reprocesse as `FALHA` do
@@ -575,18 +596,31 @@ mensagens voltam pelo reprocessamento (GAB-41, mantendo `erro`).
 
 1. Em **Get API key** (https://aistudio.google.com/apikey), crie a chave num
    projeto do Google Cloud **com billing ativo** (é o projeto onde estão os
-   créditos). Sem billing é o free tier: o Google pode usar o conteúdo para
-   treinar e fazer revisão humana — não use com mensagens reais (LGPD).
+   créditos). Sem billing é o free tier ("Unpaid Services"): pelos termos
+   (https://ai.google.dev/gemini-api/terms), o Google usa prompts e respostas
+   para melhorar produtos e modelos, e revisores humanos podem ler e anotar o
+   conteúdo — não use com mensagens reais (LGPD).
 2. Guarde a chave no `.env` da VPS (`GEMINI_API_KEY`) e uma cópia offline.
+   Rode o smoke (`dc --profile ops run --rm llm-smoke`, acima).
 3. Acompanhe gasto e créditos no AI Studio (Usage/Billing) e o custo real nos
    logs (`[llm] ... provedor=gemini ... tokens_in= tokens_out= tokens_reasoning=`;
    `tokens_out` já inclui o raciocínio, que o Google cobra como saída).
-4. **Saldo/quota acabou:** 402 (crédito pré-pago), billing desativado
-   (`BILLING_DISABLED`) ou 429 `RESOURCE_EXHAUSTED` de quota **diária** → cada
-   mensagem vai para `FALHA` com "sem crédito na API do Gemini" + ref, sem
-   re-tentar, e dispara o alerta de ops (GAB-46). 429 de quota por minuto é
-   rate limit: `FALHA` "HTTP 429", reprocessada depois pelo cron. Recarregue e
-   as mensagens voltam pelo reprocessamento (GAB-41).
+4. **Saldo acabou:** HTTP 402 — crédito pré-pago esgotado, documentado em
+   https://ai.google.dev/gemini-api/docs/api-errors (`payment_required`) e
+   https://ai.google.dev/gemini-api/docs/troubleshooting — ou billing desativado
+   (`ErrorInfo.reason` `BILLING_DISABLED`) → cada mensagem vai para `FALHA` com
+   "sem crédito na API do Gemini" + ref, sem re-tentar, e dispara o alerta de ops
+   (GAB-46). Recarregue e as mensagens voltam pelo reprocessamento (GAB-41).
+5. **Cota diária acabou:** 429 `RESOURCE_EXHAUSTED` com `QuotaFailure` de
+   `quotaId` diário (`...PerDay...`) → `FALHA` com "cota diária do Gemini
+   esgotada; volta no próximo dia ou aumente o limite no AI Studio" + ref, sem
+   re-tentar. Também dispara o alerta de ops (texto próprio, mesmo cooldown de
+   6 h e mesmo banner do sem crédito). Não é saldo: no dia seguinte a cota
+   volta e o cron reprocessa (como no sem crédito, essas `FALHA` voltam sempre
+   e a execução para na primeira que ainda falhar). Para não esperar: aumente
+   o limite/tier em AI Studio → Usage/Rate limits.
+6. 429 de quota **por minuto** é rate limit: `FALHA` "HTTP 429", reprocessada
+   depois pelo cron (até 3 tentativas).
 
 **LGPD — transferência internacional.** O texto das mensagens do grupo vai para a
 API do provedor de LLM, nos EUA (OpenAI; antes, igualmente, Anthropic). Só vai o
@@ -596,9 +630,26 @@ contexto mínimo (nomes/ids de candidatos e fases). A chamada usa `store: false`
 (a OpenAI não guarda a resposta para consulta) e nenhum log do CRM grava o texto
 da mensagem nem o texto devolvido pela API. O aviso de privacidade da IJ deve
 mencionar essa transferência ao provedor de LLM — decisão jurídica do usuário.
-Com `LLM_PROVEDOR=gemini`, o destinatário é o **Google** (Gemini API, serviço
-pago: sem uso para treino, log limitado contra abuso, processamento onde o
-Google opera); o aviso deve citá-lo.
+Com `LLM_PROVEDOR=gemini`, o destinatário é o **Google** (Gemini API); o aviso
+deve citá-lo. O que o Google faz com o texto (conferido em 2026-10-27):
+
+- **Retenção para abuso: 55 dias.** "Google retains the following data for
+  fifty-five (55) days" — prompts, contexto enviado e respostas — só para
+  detectar e prevenir violação de política; acesso humano só por funcionários
+  autorizados quando há sinalização, e o dado "is not used to train or
+  fine-tune any AI/ML models besides those used specifically for policy
+  enforcement" (https://ai.google.dev/gemini-api/docs/usage-policies). A página
+  não oferece opção de retenção zero.
+- **Serviço pago** (projeto com billing ativo): o Google não usa prompts nem
+  respostas para melhorar produtos; processamento sob o Data Processing
+  Addendum, podendo armazenar/cachear em qualquer país onde opera
+  (https://ai.google.dev/gemini-api/terms).
+- **Free tier**: uso para melhorar produtos e revisão humana (mesmos termos) —
+  proibido para este CRM.
+- **Sem `store: false`:** a chamada `generateContent` que o CRM usa não guarda
+  a conversa para consulta posterior e não tem parâmetro equivalente ao
+  `store: false` da OpenAI (no SDK, `store` só existe na Interactions API, que
+  não usamos). A única retenção é a dos 55 dias acima.
 
 ## 11. Recursos: limites, medição e instância mínima
 
