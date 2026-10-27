@@ -184,17 +184,23 @@ contexto). Só o pipeline **Vendas**; `projetos` é UI.
   tocou** (Timeline com o usuário dele) nos 30 min antes da mensagem — cobre mensagens picadas
   ("falei com o Gustavo" / "é da Economia Sensata" / "mando proposta sexta").
 - **Alvo** (`alvo.ts`, puro): reply a uma confirmação do bot → o card dela (`MensagemEnviada.oportunidade_id`,
-  gravada a cada confirmação), **sem a LLM decidir** (vale mesmo se ela disser CRIAR). Senão o
-  `oportunidade_id` da LLM, **só se estiver na lista enviada**. Senão, entre as candidatas por identidade:
+  gravada a cada confirmação), **sem a LLM decidir** (vale mesmo se ela disser CRIAR) — só se a confirmação
+  tem até 30 dias e o card está vivo em Vendas; senão `PENDENTE_REVISAO` (nunca vira CRIAR). Senão o
+  `oportunidade_id` da LLM, **só se estiver na lista enviada**; escolha só pela conversa recente (sem
+  identificador exato) vale com `revisar`; card fechado com um aberto da mesma identidade → o aberto. Senão, entre as candidatas por identidade:
   1 aberta → ela; >1 → a tocada mais recentemente + `revisar`; só fechadas → card **novo** com
   `reaberta_de_id` + `revisar`. Nenhum → `PENDENTE_REVISAO` ("não achei o card para atualizar").
 - **Aplicação** (`atualizar.ts`, mesma transação/cerca do CRIAR): aplica só campos presentes (nunca
   apaga; origem só se vazia), pontos de contato citados no texto acumulam no contato do card (de outro
-  contato → `revisar`, nunca rouba), empresa por CNPJ ou nome (card com empresa de outro nome só troca numa
-  **correção por reply**; fora disso `revisar`), título automático acompanha os vínculos. Fase pela chave
+  contato → `revisar`, nunca rouba; sem contato onde guardar → `revisar`), empresa por CNPJ só em card sem
+  empresa, nome comparado **exato** (nunca por trecho); card com empresa de outro nome só troca numa
+  **correção por reply**, sempre com `revisar`; contato que já tem empresa nunca é reescrito; dono do card
+  nunca muda pelo WhatsApp ("responsável sugerido" + `revisar`); título automático acompanha os vínculos. Fase pela chave
   via `registrarMovimento` (TransicaoFase `WHATSAPP`, Timeline, locks por `travarPipelines` — ganho trava
-  também `projetos`). **Terminal** só com o dado na mensagem: ganho precisa do valor ("18 mil"), perda do
-  motivo (da lista ou "Outro: …"); sem ele não move e marca `revisar`.
+  também `projetos`; os campos entram antes do movimento, então o card de projeto já nasce com eles).
+  **Terminal** só com o dado **ancorado no texto**: ganho precisa de um valor escrito na mensagem igual ao
+  que a LLM leu ("18 mil"), perda de um sinal de perda ("perdemos", "desistiu", "não fechou"… ou o
+  motivo escrito); sem isso não move e marca `revisar`.
 - **Confirmação** cita o card: `✅ Gustavo — Economia Sensata: Primeiro Contato → Reunião Diagnóstica.
   Próx.: reunião (30/10)`; sem movimento `✅ Título (Fase): atualizado.`; `⚠️` + motivo quando `revisar`.
 
