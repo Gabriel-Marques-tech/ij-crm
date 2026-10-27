@@ -81,11 +81,13 @@ export async function semear(prisma: PrismaClient, opts: { log?: (msg: string) =
 const executadoDiretamente = !!process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 
 if (executadoDiretamente) {
-  const prisma = new PrismaClient();
-  semear(prisma)
-    .catch((e) => {
-      console.error(e);
-      process.exit(1);
-    })
-    .finally(() => prisma.$disconnect());
+  // `db` compartilhado: erros do Prisma já saem sem os argumentos da query (LGPD).
+  void Promise.all([import("../src/lib/db"), import("../src/lib/erros/registrar")]).then(([{ db }, { mensagemSegura }]) =>
+    semear(db)
+      .catch((e) => {
+        console.error(`seed falhou: ${mensagemSegura(e)}`);
+        process.exitCode = 1;
+      })
+      .finally(() => db.$disconnect()),
+  );
 }
