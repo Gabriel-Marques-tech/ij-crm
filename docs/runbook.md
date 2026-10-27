@@ -13,7 +13,8 @@ alias dc='docker compose -f compose.prod.yml'
 
 | Arquivo | Para quê |
 |---|---|
-| `scripts/deploy.sh` | deploy (`checa → pull → build → backup → migrate → up → health`) e `rollback` |
+| `scripts/deploy.sh` | deploy (`checa → git pull → docker pull da imagem → backup → migrate → up → health`) e `rollback` por tag |
+| `.github/workflows/imagens.yml` | CI: builda as imagens `app` e `ops` a cada push na `main` e publica no GHCR |
 | `scripts/backup.sh` | `pg_dump` do banco do CRM, retenção de 14 dias, cópia off-site (`BACKUP_REMOTE`) |
 | `scripts/restore.sh` | restaura um dump do CRM (destrutivo, pede confirmação) |
 | `scripts/evolution.sh` | instância do WhatsApp: criar, QR, estado, webhook, grupos, logout |
@@ -45,7 +46,21 @@ alcança `db` e `evolution`; a Evolution alcança `evolution-db`,
 
 Pré-requisitos: Linux com Docker Engine + plugin compose v2, `git`, `curl`,
 `flock` (util-linux), `rclone` (off-site) e de preferência `qrencode` e `jq`;
-usuário de deploy no grupo `docker`.
+usuário de deploy no grupo `docker`. Instância mínima e swap: §10.
+
+As imagens vêm prontas do GHCR (`ghcr.io/gabriel-marques-tech/ij-crm-app` e
+`…-ops`, buildadas pelo CI): a VPS **não builda**. Se os pacotes forem privados
+(padrão do GHCR para pacote novo), faça login uma vez com um PAT clássico só de
+leitura. No GitHub: Settings → Developer settings → Personal access tokens →
+Tokens (classic) → escopo **apenas** `read:packages`. Na VPS:
+
+```bash
+read -rs -p "PAT read:packages: " GHCR_PAT && echo
+printf '%s' "$GHCR_PAT" | docker login ghcr.io -u <usuario-github> --password-stdin
+unset GHCR_PAT    # credencial fica em ~/.docker/config.json (chmod 600)
+```
+
+Pacotes públicos (Package settings → Change visibility → Public) dispensam o login.
 
 ```bash
 sudo git clone <url-do-repo> /opt/ij-crm && sudo chown -R "$USER" /opt/ij-crm
@@ -53,7 +68,7 @@ cd /opt/ij-crm
 cp .env.prod.example .env && chmod 600 .env
 # preencher: APP_DOMAIN, ACME_EMAIL e um `openssl rand -hex 32` para cada segredo
 sudo mkdir -p /var/backups/ij-crm /var/log/ij-crm && sudo chown "$USER" /var/backups/ij-crm /var/log/ij-crm
-scripts/deploy.sh --no-pull                       # 1º deploy (banco vazio: sem backup)
+scripts/deploy.sh --no-pull                       # 1º deploy: baixa :latest do GHCR (banco vazio: sem backup)
 dc --profile ops run --rm migrate prisma db seed  # pipelines/fases do Pipefy (só na 1ª vez)
 
 # Primeiro admin — a senha nunca vai na linha de comando (fica fora do `ps` e do histórico):
@@ -73,26 +88,42 @@ Depois: parear o WhatsApp (§5) e fechar o checklist acima.
 
 ## 1. Deploy
 
+Fluxo: merge na `main` → o workflow **imagens** (GitHub Actions) builda e publica
+`ij-crm-app` e `ij-crm-ops` com as tags `sha-<commit curto>` e `latest` (≈ 5–10
+min; acompanhe na aba Actions) → deploy na VPS:
+
 ```bash
-cd /opt/ij-crm && scripts/deploy.sh
+cd /opt/ij-crm && scripts/deploy.sh                 # a imagem :latest (resolvida para o sha-… dela)
+scripts/deploy.sh sha-1a2b3c4                       # uma tag específica (ver Actions ou o GHCR)
+scripts/deploy.sh --build-local                     # escape: sem CI/registry, builda NESTA máquina
 ```
+
+`--build-local` gera `local-<commit>` com `docker compose build` na própria VPS:
+precisa de ~2 GB de RAM livres e alguns GB de disco de cache. Numa instância de
+2 GB, pare o app ou use swap. Só para emergência (GitHub fora, CI quebrado).
 
 O script, na ordem:
 
 1. recusa se `git status --porcelain` mostrar qualquer coisa (mudança ou arquivo
-   não rastreado). `--force` aceita, avisando que a imagem leva o que está no disco;
-2. `git pull --ff-only` e re-executa a versão nova do próprio script;
+   não rastreado). `--force` aceita;
+2. `git pull --ff-only` (traz `compose.prod.yml`, `Caddyfile` e scripts) e
+   re-executa a versão nova do próprio script;
 3. confere o ambiente **como o compose resolve** (`docker compose config
    --environment`: `.env` + variáveis do shell): segredos com ≥ 32 caracteres e
    sem `troque-me`, senhas de banco/Redis seguras para URL, domínio e email
    preenchidos. Erro aborta antes de mexer em algo. Avisa se `NOTIFICATIONS_ENABLED` ≠ `true`;
-4. build de `ij-crm/app:<commit>` (runtime) e `ij-crm/ops:<commit>`;
+4. `docker pull` das imagens `app` e `ops` da tag. `latest` é resolvida para a
+   tag imutável `sha-<commit>` (label `org.opencontainers.image.revision` que o CI
+   grava), então histórico e rollback nunca dependem de `latest`. Falha no pull
+   (tag não existe, sem `docker login`) aborta antes de mexer em algo;
 5. **backup sempre que o banco já tem dados** (existe `_prisma_migrations`);
 6. `prisma migrate deploy` no container one-shot `migrate`. Se falhar, para aqui:
    o app antigo segue no ar e o script mostra o dump do passo 5 (§2, "Migration falhou");
 7. `up -d --wait` com a imagem nova (espera todos os healthchecks) e
    `GET https://APP_DOMAIN/api/health` pelo Caddy (TLS de verdade) = 200;
-8. sucesso: registra a tag em `.deploy/historico` e marca `:latest`.
+8. sucesso: registra a tag em `.deploy/historico`, marca `:latest` local e apaga
+   as imagens `app`/`ops` fora das últimas `IMAGENS_MANTER` (padrão 5) tags do
+   histórico, mais as camadas órfãs.
    **Falha no passo 7: rollback automático** do app para o último deploy bom
    do histórico e saída com erro (o schema não volta; ver §2).
 
@@ -107,15 +138,15 @@ problema. Veja `dc logs <serviço>`.
 
 ```bash
 scripts/deploy.sh rollback          # um passo para trás no histórico, a partir do que está rodando
-scripts/deploy.sh rollback <tag>    # tag específica (ver .deploy/historico ou docker image ls ij-crm/app)
+scripts/deploy.sh rollback sha-1a2b3c4   # tag específica (ver .deploy/historico ou as tags no GHCR)
 ```
 
 Sem tag: lê a tag do container `app` que está rodando e volta para o deploy bom
 **anterior a ela** no histórico. Rollbacks seguidos vão andando para trás. Se o
 que roda não está no histórico (deploy que falhou), volta para o último bom.
-Recusa quando já está no mais antigo, quando o alvo é o que já roda e quando a
-imagem do alvo não existe mais no host. Troca só o `app` (sem build) e confere
-o health. O rollback não reescreve o histórico; `:latest` passa a apontar para o
+Recusa quando já está no mais antigo e quando o alvo é o que já roda. Se a
+imagem do alvo não está mais no host (limpeza do deploy), baixa do GHCR; tags
+`local-*` não existem no registry. Troca só o `app` (sem build) e confere o health. O rollback não reescreve o histórico; `:latest` passa a apontar para o
 que ficou rodando.
 
 **O schema do banco não volta.** Migrations deste projeto devem ser aditivas (o
@@ -140,8 +171,9 @@ dc logs --tail 100 migrate 2>/dev/null; dc exec db psql -U ijcrm -d ijcrm \
 - Aplicou parte e o banco ficou inconsistente: restaure o dump mostrado pelo
   deploy (§3) e só então corrija e faça deploy de novo.
 
-Limpeza de imagens antigas (manter as últimas ~5 tags para rollback):
-`docker image ls ij-crm/app` → `docker image rm ij-crm/app:<tag> ij-crm/ops:<tag>`.
+Limpeza de imagens antigas: automática no fim de cada deploy bom (últimas
+`IMAGENS_MANTER` tags do histórico + a que roda). À mão:
+`docker image ls ghcr.io/gabriel-marques-tech/ij-crm-app` → `docker image rm <imagem>:<tag>`.
 
 ## 3. Restaurar backup
 
@@ -314,7 +346,9 @@ NOTIFICATIONS_ENABLED=false
 EOF
 export COMPOSE_PROJECT_NAME=ijcrm-prodtest COMPOSE_ENV_FILES=/tmp/env.prodtest \
        APP_IMAGE=ijcrm-prodtest/app OPS_IMAGE=ijcrm-prodtest/ops BACKUP_DIR=/tmp/ijcrm-backups
-CURL_INSECURE=1 scripts/deploy.sh --no-pull     # 1ª vez: a CA interna ainda não existe no host
+# 1ª vez: a CA interna ainda não existe no host. --build-local builda o commit do disco;
+# para testar as imagens do CI, tire APP_IMAGE/OPS_IMAGE e passe a tag (sha-…).
+CURL_INSECURE=1 scripts/deploy.sh --no-pull --build-local
 docker compose -f compose.prod.yml --env-file /tmp/env.prodtest exec -T caddy \
   cat /data/caddy/pki/authorities/local/root.crt > /tmp/caddy-root.crt
 export CURL_CACERT=/tmp/caddy-root.crt
@@ -326,8 +360,8 @@ docker compose -f compose.prod.yml --env-file /tmp/env.prodtest --profile ops do
 rm -rf .deploy   # histórico de deploy do teste
 ```
 
-Cada build gera imagens `ops` de ~1,9 GB (camadas compartilhadas) e cache de
-build: no fim, `docker image rm` das tags `ijcrm-prodtest/*`.
+Cada build gera imagens `ops` de ~2 GB (camadas compartilhadas) e cache de
+build: no fim, `docker image rm` das tags `ijcrm-prodtest/*` e `docker builder prune`.
 
 ## 9. IP do cliente e limitadores (login / "esqueci a senha")
 
@@ -345,3 +379,93 @@ cliente e pode ser forjado.
   chave. Antes disso: configure `trusted_proxies` no Caddy e revise `ipDoCliente`.
 - Os contadores ficam em memória, com teto de 10 mil chaves por limitador.
   Reiniciar o container zera todos.
+
+## 10. Recursos: limites, medição e instância mínima
+
+Alvo: ≤ 15 usuários, numa instância pequena que também roda o site da IJ. Todo
+serviço do `compose.prod.yml` tem `mem_limit`, e o processo dentro dele é
+dimensionado para caber (heap do Node, buffers do Postgres, `maxmemory` do
+Redis, `GOMEMLIMIT` do Caddy). Os valores são variáveis com padrão para uma
+VPS de ~2 GB (lista comentada no `.env.prod.example`).
+
+| Serviço | Limite | Ajustes |
+|---|---|---|
+| `app` | 512m | `--max-old-space-size=256`, pool Prisma 5 conexões |
+| `db` | 256m | `shared_buffers=64MB`, `max_connections=20`, `work_mem=4MB`, `effective_cache_size=256MB`, sem workers paralelos |
+| `evolution` | 512m | heap 256 MB, pool Prisma 5, integrações e telemetria desligadas, log `ERROR,WARN` |
+| `evolution-db` | 192m | `shared_buffers=32MB`, `max_connections=20`, `work_mem=2MB` |
+| `evolution-redis` | 96m | `maxmemory 64mb`, `noeviction` (despejar apagaria chaves Signal da sessão) |
+| `caddy` | 128m | `GOMEMLIMIT=96MiB` |
+| `migrate` (one-shot) | 512m | herda o ambiente do app |
+
+Soma dos limites: ~1,7 GB (teto, não consumo). Consumo real abaixo.
+
+### Medição (2026-10-26)
+
+Stack de produção local (§8, projeto `ijcrm-medicao`), seed + 15 usuários e 300
+oportunidades, sessão válida. Carga: 15 clientes em paralelo, 4 voltas por
+`/login`, `/kanban`, `/tabela`, `/semana`, `/perfil` (300 requests pelo Caddy,
+TLS). `docker stats --no-stream`; "pico" = maior amostra durante a carga. Máquina
+de medição: notebook com 16 GB, então CPU/latência são só indicativas; memória é
+o que importa.
+
+| Serviço | Antes: ocioso | Antes: pico | Antes: 60 s depois | Depois: ocioso | Depois: pico | Depois: 60 s depois |
+|---|---|---|---|---|---|---|
+| `app` | 57 MiB | **1124 MiB** | 984 MiB | 57 MiB | **302 MiB** | 265 MiB |
+| `db` | 29 MiB | 86 MiB | 84 MiB | 20 MiB | 35 MiB | 34 MiB |
+| `evolution` | 488 MiB¹ | 488 MiB¹ | 184 MiB | 150 MiB | 149 MiB | 140 MiB |
+| `evolution-db` | 30 MiB | 30 MiB | 28 MiB | 22 MiB | 23 MiB | 21 MiB |
+| `evolution-redis` | 5 MiB | 5 MiB | 3 MiB | 8 MiB | 8 MiB | 8 MiB |
+| `caddy` | 50 MiB | 32 MiB | 25 MiB | 40 MiB | 52 MiB | 49 MiB |
+| **Total** | ~660 MiB | ~1,72 GiB | **~1,28 GiB** | ~300 MiB | ~570 MiB | **~520 MiB** |
+
+¹ Boot da Evolution (`prisma migrate` + `prisma generate` + API) sem limite de
+heap. Com o limite, o pico do boot medido foi 162 MiB, sem OOM.
+
+- **App sem limite não devolve memória**: o V8 dimensiona o heap pela RAM do host
+  e só coleta tarde. Mais 375 requests levaram o app a 1,3 GiB. Com o limite,
+  mais 450 requests deixaram o app estável em ~295 MiB (sem OOM, sem restart).
+  Com heap de 128 MB o RSS ficou igual (~295 MiB, quase todo fora do heap) e
+  encostou num limite de 320m: por isso 256/512m.
+- Latência na carga (15 paralelos): antes p50 0,36 s / p95 1,28 s; depois p50
+  0,27 s / p95 1,13 s. Os limites não pioraram a resposta.
+- Healthchecks de todos os serviços passaram com os limites; `OOMKilled=false`
+  e 0 restarts em tudo.
+- Não medido: Evolution com um número **pareado** (sessão real, metadados de
+  grupo). Por isso o limite dela ficou em 512m, folgado. Confira `docker stats`
+  na primeira semana.
+
+Imagens (disco):
+
+| Imagem | Tamanho |
+|---|---|
+| `ij-crm-app` (runtime) | 400 MB (~340 MB são a base `node:22-bookworm-slim`; o app em si ~48 MB) |
+| `ij-crm-ops` (migrate/seed) | 1,97 GB (1,29 GB de `node_modules` completo; muda só quando o lockfile muda) |
+| `evoapicloud/evolution-api:v2.3.7` | 1,81 GB |
+| `postgres:16-alpine` (os dois bancos) | 420 MB |
+| `caddy:2.10-alpine` | 85 MB |
+| `redis:7-alpine` | 59 MB |
+
+### Instância mínima recomendada
+
+- **RAM: 2 GiB** (ex.: `t3.small`; `t4g.small` se as imagens forem buildadas para
+  arm64, ver `IMAGE_PLATFORMS` no workflow) **+ 2 GiB de swap** em arquivo. A stack
+  usa ~0,5 GiB em regime, o resto fica para o SO, o site e o page cache do Postgres.
+  Se o site for pesado (Node/SSR com tráfego), vá de 4 GiB (`t3.medium`).
+- **Disco: 20 GiB gp3** (mínimo; 30 GiB confortável): ~5 GB de imagens, até 5
+  tags guardadas para rollback, 14 dias de backup e logs (rotação 10 MB × 5 por
+  serviço).
+- Não builde na VPS (`--build-local` só em emergência): `pnpm install` + `next build`
+  pedem bem mais RAM que a stack rodando e deixam GBs de cache de build.
+
+Swap (uma vez, na VPS):
+
+```bash
+sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+```
+
+Sinais de que um limite está curto: `docker stats` encostando no teto, ou
+`docker inspect -f '{{.State.OOMKilled}} {{.RestartCount}}' <container>`
+mostrando `true`/restarts. Suba a variável correspondente no `.env` e rode
+`scripts/deploy.sh`.
