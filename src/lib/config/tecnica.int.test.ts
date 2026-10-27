@@ -45,6 +45,31 @@ describe("config técnica com cache", () => {
     expect(timeoutEnvioMs()).toBe(20000);
   });
 
+  it("sem nada salvo, env com combinação inválida ainda é avisado no boot", async () => {
+    process.env.LLM_PROVEDOR = "foo";
+    const erro = vi.spyOn(console, "error").mockImplementation(() => {});
+    await carregarConfigTecnica();
+    const linhas = erro.mock.calls.map((c) => String(c[0])).filter((l) => l.includes("config.tecnica.carregar"));
+    expect(linhas).toHaveLength(1);
+    expect(linhas[0]).toContain("nada salvo no Admin");
+  });
+
+  it("config salva sem grupo e env sem GRUPO_JID continua acusada", async () => {
+    delete process.env.GRUPO_JID;
+    await dbT.configuracao.create({ data: { chave: "tecnica", valor: { limiarConfianca: 0.5 } } });
+    const erro = vi.spyOn(console, "error").mockImplementation(() => {});
+    await carregarConfigTecnica();
+    expect(erro.mock.calls.some((c) => String(c[0]).includes('configuração salva "tecnica"'))).toBe(true);
+  });
+
+  it("sem nada salvo e sem GRUPO_JID no env (dev) não acusa config salva inválida", async () => {
+    delete process.env.GRUPO_JID;
+    const erro = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(await carregarConfigTecnica()).toEqual({ ok: true });
+    expect(erro.mock.calls.some((c) => String(c[0]).includes("config.tecnica.carregar"))).toBe(false);
+    expect(grupoJid()).toBeFalsy();
+  });
+
   it("carrega do banco uma vez e reusa até invalidar", async () => {
     await dbT.configuracao.create({ data: { chave: "tecnica", valor: { grupoJid: "333333@g.us" } } });
     await carregarConfigTecnica();
