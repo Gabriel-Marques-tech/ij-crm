@@ -30,9 +30,12 @@ function log(uso: UsoLlm | undefined, ref: string, resultado: string) {
   const base = `[llm] classificacao ref=${ref}`;
   if (!uso) return console.info(`${base} versao=${VERSAO_CLASSIFICACAO} ${resultado}`);
   console.info(
-    `${base} provedor=${uso.provedor} modelo=${uso.modelo} versao=${VERSAO_CLASSIFICACAO} ms=${uso.ms} tokens_in=${uso.tokensEntrada} tokens_out=${uso.tokensSaida}${uso.tokensRaciocinio === undefined ? "" : ` tokens_reasoning=${uso.tokensRaciocinio}`} ${resultado}`,
+    `${base} provedor=${uso.provedor} modelo=${uso.modelo} versao=${VERSAO_CLASSIFICACAO} ms=${uso.ms} tokens_in=${uso.tokensEntrada} tokens_out=${uso.tokensSaida}${uso.tokensRaciocinio === undefined ? "" : ` tokens_reasoning=${uso.tokensRaciocinio}`} max_out=${MAX_TOKENS_CLASSIFICACAO} ${resultado}`,
   );
 }
+
+/** TRUNCADA ganha uma nova tentativa (5xx/timeout/rede já re-tentam no provedor). */
+const TENTATIVAS_TRUNCADA = 2;
 
 const codigo = (e: unknown) => (e instanceof ErroLlm ? e.codigo : "INESPERADO");
 
@@ -49,18 +52,24 @@ export async function classificar(
     log(undefined, ref, `erro=${codigo(e)}`);
     throw e;
   }
+  const pedido = {
+    nome: "classificacao",
+    sistema: PROMPT_SISTEMA_CLASSIFICACAO,
+    usuario: montarMensagemClassificacao(texto, contexto),
+    schema: JSON_SCHEMA_CLASSIFICACAO,
+    maxTokens: MAX_TOKENS_CLASSIFICACAO,
+  };
   let resposta;
-  try {
-    resposta = await provedor.extrair({
-      nome: "classificacao",
-      sistema: PROMPT_SISTEMA_CLASSIFICACAO,
-      usuario: montarMensagemClassificacao(texto, contexto),
-      schema: JSON_SCHEMA_CLASSIFICACAO,
-      maxTokens: MAX_TOKENS_CLASSIFICACAO,
-    });
-  } catch (e) {
-    log(e instanceof ErroLlm ? e.uso : undefined, ref, `erro=${codigo(e)}`);
-    throw e;
+  for (let tentativa = 1; ; tentativa++) {
+    try {
+      resposta = await provedor.extrair(pedido);
+      break;
+    } catch (e) {
+      log(e instanceof ErroLlm ? e.uso : undefined, ref, `erro=${codigo(e)}`);
+      // Raciocínio variável pode estourar o teto uma vez; a 2ª costuma caber.
+      if (e instanceof ErroLlm && e.codigo === "TRUNCADA" && tentativa < TENTATIVAS_TRUNCADA) continue;
+      throw e;
+    }
   }
   const r = esquemaClassificacao.safeParse(resposta.bruto);
   if (!r.success) {

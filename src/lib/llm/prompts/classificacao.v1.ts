@@ -14,8 +14,12 @@ import { escaparDelimitadores } from "./escapar";
 
 export const VERSAO_CLASSIFICACAO = "classificacao.v1";
 
-/** Teto de saída: o JSON tem 2 campos; o resto é folga para o raciocínio `low`. */
-export const MAX_TOKENS_CLASSIFICACAO = 1_000;
+/**
+ * Teto de saída. O JSON tem 2 campos, mas na OpenAI os tokens de raciocínio
+ * contam contra `max_output_tokens`; o log mostra `tokens_reasoning` e
+ * `max_out` para conferir a folga.
+ */
+export const MAX_TOKENS_CLASSIFICACAO = 2_000;
 
 /** Contexto curto: só a mensagem respondida (reply), cortada. */
 export const MAX_CONTEXTO_CLASSIFICACAO = 300;

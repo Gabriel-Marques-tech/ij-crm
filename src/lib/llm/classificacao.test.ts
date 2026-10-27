@@ -84,6 +84,34 @@ describe("classificar", () => {
     await expect(classificar("texto qualquer aqui", { respondendoA: null })).rejects.toMatchObject({ codigo: "SAIDA_INVALIDA" });
   });
 
+  it("TRUNCADA (raciocínio comeu o teto) → 1 nova tentativa; 2ª TRUNCADA sobe", async () => {
+    expect(MAX_TOKENS_CLASSIFICACAO).toBe(2000);
+    let n = 0;
+    definirClassificacaoMock(() => {
+      if (++n === 1) throw new ErroLlm("TRUNCADA");
+      return { relevante: true, confianca: 0.9 };
+    });
+    await expect(classificar("texto qualquer aqui", { respondendoA: null })).resolves.toMatchObject({ relevante: true });
+    expect(n).toBe(2);
+    n = 0;
+    definirClassificacaoMock(() => {
+      n++;
+      throw new ErroLlm("TRUNCADA");
+    });
+    await expect(classificar("texto qualquer aqui", { respondendoA: null })).rejects.toMatchObject({ codigo: "TRUNCADA" });
+    expect(n).toBe(2);
+  });
+
+  it("outros erros não re-tentam aqui (a política de 5xx/rede é do provedor)", async () => {
+    let n = 0;
+    definirClassificacaoMock(() => {
+      n++;
+      throw new ErroLlm("RECUSA");
+    });
+    await expect(classificar("texto qualquer aqui", { respondendoA: null })).rejects.toMatchObject({ codigo: "RECUSA" });
+    expect(n).toBe(1);
+  });
+
   it("falha do provedor sobe como ErroLlm (o chamador decide)", async () => {
     definirClassificacaoMock(() => {
       throw new ErroLlm("SEM_CREDITO");
@@ -111,6 +139,7 @@ describe("classificar", () => {
     const provedor = criarProvedorOpenAI({ apiKey: "sk-teste", modelo: "gpt-6.1-sol", fetch: fetch as unknown as typeof globalThis.fetch });
     const r = await classificar("fechei com a Alfa", { respondendoA: null }, { provedor });
     expect(r).toMatchObject({ relevante: true, confianca: 0.91 });
+    expect(logs(console.info)).toMatch(/tokens_reasoning=16 max_out=2000 relevante=true/);
     const corpo = JSON.parse((fetch.mock.calls[0] as [string, RequestInit])[1].body as string);
     expect(corpo).toMatchObject({
       model: "gpt-6.1-sol",
