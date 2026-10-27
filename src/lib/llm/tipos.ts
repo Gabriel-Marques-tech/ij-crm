@@ -39,6 +39,8 @@ export type CodigoErroLlm =
   | "SEM_CHAVE"
   | "HTTP"
   | "SEM_CREDITO"
+  /** Cota diária do provedor esgotada (Gemini): volta sozinha no dia seguinte. Reprocessável como SEM_CREDITO. */
+  | "COTA_DIARIA"
   | "TIMEOUT"
   | "REDE"
   | "RECUSA"
@@ -58,6 +60,7 @@ export type DetalheFixo =
   | "sem crédito na API da OpenAI"
   | "sem crédito na API da Anthropic"
   | "sem crédito na API do Gemini"
+  | "cota diária do Gemini esgotada; volta no próximo dia ou aumente o limite no AI Studio"
   | "sem crédito na API de LLM"
   | "OPENAI_API_KEY ausente"
   | "ANTHROPIC_API_KEY ausente"

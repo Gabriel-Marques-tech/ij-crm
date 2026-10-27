@@ -29,39 +29,59 @@ exports[`paraSchemaGemini (subconjunto de JSON Schema do responseJsonSchema) > t
       "additionalProperties": false,
       "properties": {
         "cidade": {
-          "description": "cidade do cliente, se citada.",
-          "type": [
-            "string",
-            "null",
+          "anyOf": [
+            {
+              "type": "string",
+            },
+            {
+              "type": "null",
+            },
           ],
+          "description": "cidade do cliente, se citada.",
         },
         "dor": {
-          "description": "problema/necessidade do cliente, curto, em português.",
-          "type": [
-            "string",
-            "null",
+          "anyOf": [
+            {
+              "type": "string",
+            },
+            {
+              "type": "null",
+            },
           ],
+          "description": "problema/necessidade do cliente, curto, em português.",
         },
         "estado": {
-          "description": "UF do cliente com 2 letras (ex.: SP), se citada ou óbvia pela cidade.",
-          "type": [
-            "string",
-            "null",
+          "anyOf": [
+            {
+              "type": "string",
+            },
+            {
+              "type": "null",
+            },
           ],
+          "description": "UF do cliente com 2 letras (ex.: SP), se citada ou óbvia pela cidade.",
         },
         "motivo_perda": {
-          "description": "motivo, se a mensagem diz que a venda foi perdida.",
-          "type": [
-            "string",
-            "null",
+          "anyOf": [
+            {
+              "type": "string",
+            },
+            {
+              "type": "null",
+            },
           ],
+          "description": "motivo, se a mensagem diz que a venda foi perdida.",
         },
         "orcamento_previsto": {
-          "description": "valor do orçamento COMO ESCRITO na mensagem (ex.: '15k', 'uns 15 mil', 'R$ 15.000'); null se não citado.",
-          "type": [
-            "string",
-            "null",
+          "anyOf": [
+            {
+              "type": "string",
+            },
+            {
+              "type": "null",
+            },
           ],
+          "description": "valor do orçamento COMO ESCRITO na mensagem (ex.: '15k', 'uns 15 mil', 'R$ 15.000'); null se não citado.",
         },
         "origem": {
           "anyOf": [
@@ -82,25 +102,37 @@ exports[`paraSchemaGemini (subconjunto de JSON Schema do responseJsonSchema) > t
           "description": "Como o lead chegou: COLD_CALL (prospecção ativa), RD (RD Station/inbound), INDICACAO, EVENTO, OUTRO. null se não dá para inferir.",
         },
         "proxima_acao": {
-          "description": "próximo passo do vendedor, curto e no infinitivo (ex.: 'mandar proposta').",
-          "type": [
-            "string",
-            "null",
+          "anyOf": [
+            {
+              "type": "string",
+            },
+            {
+              "type": "null",
+            },
           ],
+          "description": "próximo passo do vendedor, curto e no infinitivo (ex.: 'mandar proposta').",
         },
         "proxima_acao_em": {
-          "description": "quando, COMO ESCRITO na mensagem (ex.: 'sexta', 'semana que vem', '31/10', 'amanhã'); null se não citado.",
-          "type": [
-            "string",
-            "null",
+          "anyOf": [
+            {
+              "type": "string",
+            },
+            {
+              "type": "null",
+            },
           ],
+          "description": "quando, COMO ESCRITO na mensagem (ex.: 'sexta', 'semana que vem', '31/10', 'amanhã'); null se não citado.",
         },
         "valor_fechado": {
-          "description": "valor COMO ESCRITO, se a mensagem diz que a venda foi fechada.",
-          "type": [
-            "string",
-            "null",
+          "anyOf": [
+            {
+              "type": "string",
+            },
+            {
+              "type": "null",
+            },
           ],
+          "description": "valor COMO ESCRITO, se a mensagem diz que a venda foi fechada.",
         },
       },
       "required": [
@@ -124,32 +156,48 @@ exports[`paraSchemaGemini (subconjunto de JSON Schema do responseJsonSchema) > t
       "additionalProperties": false,
       "properties": {
         "email": {
-          "description": "email do contato exatamente como aparece na mensagem; null se não aparece.",
-          "type": [
-            "string",
-            "null",
+          "anyOf": [
+            {
+              "type": "string",
+            },
+            {
+              "type": "null",
+            },
           ],
+          "description": "email do contato exatamente como aparece na mensagem; null se não aparece.",
         },
         "id": {
-          "description": "id de um CONTATO CANDIDATO do contexto se for a mesma pessoa; senão null. Nunca invente ids.",
-          "type": [
-            "string",
-            "null",
+          "anyOf": [
+            {
+              "type": "string",
+            },
+            {
+              "type": "null",
+            },
           ],
+          "description": "id de um CONTATO CANDIDATO do contexto se for a mesma pessoa; senão null. Nunca invente ids.",
         },
         "nome": {
-          "description": "nome da pessoa com quem o vendedor falou, como escrito; null se não citado.",
-          "type": [
-            "string",
-            "null",
+          "anyOf": [
+            {
+              "type": "string",
+            },
+            {
+              "type": "null",
+            },
           ],
+          "description": "nome da pessoa com quem o vendedor falou, como escrito; null se não citado.",
         },
         "telefone": {
-          "description": "telefone do contato exatamente como aparece na mensagem; null se não aparece.",
-          "type": [
-            "string",
-            "null",
+          "anyOf": [
+            {
+              "type": "string",
+            },
+            {
+              "type": "null",
+            },
           ],
+          "description": "telefone do contato exatamente como aparece na mensagem; null se não aparece.",
         },
       },
       "required": [
@@ -164,18 +212,26 @@ exports[`paraSchemaGemini (subconjunto de JSON Schema do responseJsonSchema) > t
       "additionalProperties": false,
       "properties": {
         "id": {
-          "description": "id de uma EMPRESA CANDIDATA do contexto se for a mesma; senão null. Nunca invente ids.",
-          "type": [
-            "string",
-            "null",
+          "anyOf": [
+            {
+              "type": "string",
+            },
+            {
+              "type": "null",
+            },
           ],
+          "description": "id de uma EMPRESA CANDIDATA do contexto se for a mesma; senão null. Nunca invente ids.",
         },
         "nome": {
-          "description": "nome da empresa do lead, como escrito; null se não citado.",
-          "type": [
-            "string",
-            "null",
+          "anyOf": [
+            {
+              "type": "string",
+            },
+            {
+              "type": "null",
+            },
           ],
+          "description": "nome da empresa do lead, como escrito; null se não citado.",
         },
       },
       "required": [
@@ -185,11 +241,15 @@ exports[`paraSchemaGemini (subconjunto de JSON Schema do responseJsonSchema) > t
       "type": "object",
     },
     "fase_chave": {
-      "description": "chave de uma das fases listadas no contexto, se a mensagem indicar a etapa; senão null.",
-      "type": [
-        "string",
-        "null",
+      "anyOf": [
+        {
+          "type": "string",
+        },
+        {
+          "type": "null",
+        },
       ],
+      "description": "chave de uma das fases listadas no contexto, se a mensagem indicar a etapa; senão null.",
     },
     "intencao": {
       "description": "CRIAR = lead/oportunidade nova; ATUALIZAR = novidade sobre um card que já existe (uma das OPORTUNIDADES CANDIDATAS); IGNORAR = não é sobre venda.",
@@ -201,18 +261,26 @@ exports[`paraSchemaGemini (subconjunto de JSON Schema do responseJsonSchema) > t
       "type": "string",
     },
     "oportunidade_id": {
-      "description": "Em ATUALIZAR: id de uma das OPORTUNIDADES CANDIDATAS do contexto (copie exatamente). Em CRIAR/IGNORAR: null. Nunca invente ids.",
-      "type": [
-        "string",
-        "null",
+      "anyOf": [
+        {
+          "type": "string",
+        },
+        {
+          "type": "null",
+        },
       ],
+      "description": "Em ATUALIZAR: id de uma das OPORTUNIDADES CANDIDATAS do contexto (copie exatamente). Em CRIAR/IGNORAR: null. Nunca invente ids.",
     },
     "responsavel_nome": {
-      "description": "nome do vendedor responsável SÓ se a mensagem atribui o lead a outra pessoa do time; senão null.",
-      "type": [
-        "string",
-        "null",
+      "anyOf": [
+        {
+          "type": "string",
+        },
+        {
+          "type": "null",
+        },
       ],
+      "description": "nome do vendedor responsável SÓ se a mensagem atribui o lead a outra pessoa do time; senão null.",
     },
     "resumo": {
       "description": "uma frase em português resumindo a mensagem.",

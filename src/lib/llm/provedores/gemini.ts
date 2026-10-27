@@ -6,15 +6,21 @@
  * - Structured output: `responseMimeType: "application/json"` +
  *   `responseJsonSchema` com o MESMO schema dos outros provedores, passado por
  *   `paraSchemaGemini` (subconjunto que a API aceita; ver abaixo).
- * - Raciocínio baixo: `thinkingConfig.thinkingLevel = LOW` (família 3.x; o
- *   3.8 Flash não tem MINIMAL). Modelos 2.x não têm `thinkingLevel` e usam
- *   `thinkingBudget` pequeno. Sem `temperature`/`topP`/`topK`.
+ * - Raciocínio baixo só para quem pensa (`raciocinio`): 3.x →
+ *   `thinkingLevel = LOW` (o 3.8 Flash não tem MINIMAL); 2.5 →
+ *   `thinkingBudget` pequeno; 2.0 e aliases (`gemini-flash-latest`) → sem
+ *   `thinkingConfig` (padrão do modelo). Sem `temperature`/`topP`/`topK`.
  * - Timeout/retentativa de `comum.ts`: 30s por tentativa (`httpOptions.timeout`
- *   é por tentativa no SDK), sem `retryOptions` (o SDK não re-tenta) e uma nova
- *   tentativa só para 5xx, timeout e rede. 4xx (inclusive 429) não re-tenta.
- * - Sem crédito → `SEM_CREDITO` ("sem crédito na API do Gemini"), só por
- *   status HTTP / `error.status` / `details` estruturados do corpo — nunca
- *   pela `error.message`, que não é lida nem logada (ver `semCredito`).
+ *   é por tentativa no SDK), retentativa do SDK desligada explicitamente
+ *   (`retryOptions.attempts = 1`) e uma nova tentativa só para 5xx, timeout e
+ *   rede. 4xx (inclusive 429) não re-tenta.
+ * - Sem crédito → `SEM_CREDITO` ("sem crédito na API do Gemini"); cota
+ *   diária → `COTA_DIARIA`. Só por status HTTP / `error.status` / `details`
+ *   estruturados do corpo — nunca pela `error.message`, que não é lida nem
+ *   logada (ver `classificarCota`).
+ * - A Gemini API (`generateContent`) não guarda a conversa para consulta: não
+ *   existe equivalente ao `store: false` da OpenAI (o `store` do SDK é só da
+ *   Interactions API, que não usamos). Retenção do lado do Google: runbook §10.
  * - `promptFeedback.blockReason` e finish de segurança → `RECUSA`;
  *   `MAX_TOKENS` → `TRUNCADA`; outro finish anormal → `FALHA_PROVEDOR`;
  *   texto que não é JSON → `SEM_JSON`. Todos levam o `uso` para o log.
@@ -30,8 +36,8 @@ import { MAX_TOKENS_EXTRACAO, TIMEOUT_LLM_MS, comRetentativa, type TraducaoErro 
  */
 export const MODELO_GEMINI_PADRAO = "gemini-3.8-flash";
 
-/** Orçamento de raciocínio dos modelos 2.x (sem `thinkingLevel`). */
-const ORCAMENTO_RACIOCINIO_2X = 1024;
+/** Orçamento de raciocínio dos modelos 2.5 (sem `thinkingLevel`). */
+const ORCAMENTO_RACIOCINIO_25 = 1024;
 
 // ------------------------------------------------------------------ schema
 
@@ -47,12 +53,13 @@ const ehNo = (v: unknown): v is No => typeof v === "object" && v !== null && !Ar
 
 /**
  * Converte o JSON schema estrito dos prompts (formato OpenAI/Anthropic) para
- * o subconjunto do Gemini, sem mexer no original:
- * - `anyOf: [{ type: T }, { type: "null" }]` → `type: [T, "null"]` (forma
- *   documentada pelo Google para campo anulável, evita `anyOf` em massa, que
- *   a API recusa em schemas grandes). Com `enum` (ex.: `origem`) continua
- *   `anyOf` — `type: [string, null]` + `enum` sem null rejeitaria o null.
- * - Palavras-chave fora do subconjunto são descartadas.
+ * o subconjunto do Gemini, sem mexer no original: só descarta palavras-chave
+ * fora da lista acima. Campo anulável continua `anyOf: [{ type: T }, { type:
+ * "null" }]`: `anyOf` e `type` estão na lista do `responseJsonSchema` no SDK,
+ * e a forma `type: [T, "null"]` só está documentada pelo Google para o
+ * `response_format` da Interactions API, não para o `generateContent`. Sem
+ * chave ainda, `pnpm llm:smoke` (runbook §10) confere os três schemas na API
+ * real.
  */
 export function paraSchemaGemini(schema: unknown): No {
   return converter(schema) as No;
@@ -61,41 +68,31 @@ export function paraSchemaGemini(schema: unknown): No {
 function converter(no: unknown): unknown {
   if (Array.isArray(no)) return no.map(converter);
   if (!ehNo(no)) return no;
-  const anulavel = anulavelSimples(no.anyOf);
   const saida: No = {};
   for (const [k, v] of Object.entries(no)) {
     if (!PERMITIDAS.has(k)) continue;
-    if (k === "anyOf" && anulavel) {
-      saida.type = [anulavel, "null"];
-      continue;
-    }
     if (k === "properties" && ehNo(v)) saida.properties = Object.fromEntries(Object.entries(v).map(([campo, s]) => [campo, converter(s)]));
     else saida[k] = converter(v);
   }
   return saida;
 }
 
-/** `[{ type: "string" }, { type: "null" }]` (só `type`, em qualquer ordem) → "string"; senão null. */
-function anulavelSimples(anyOf: unknown): string | null {
-  if (!Array.isArray(anyOf) || anyOf.length !== 2 || !anyOf.every(ehNo)) return null;
-  const outro = anyOf.find((s) => s.type !== "null");
-  const temNulo = anyOf.some((s) => s.type === "null" && Object.keys(s).length === 1);
-  if (!temNulo || !outro || Object.keys(outro).length !== 1 || typeof outro.type !== "string") return null;
-  return outro.type;
-}
-
 // ------------------------------------------------------------------ erros
 
 /**
- * Falta de crédito/billing, só por campos estruturados:
- * - HTTP 402 (`payment_required`: crédito pré-pago do AI Studio esgotado —
- *   https://ai.google.dev/gemini-api/docs/api-errors);
+ * Falta de crédito/billing (`SEM_CREDITO`), só por campos estruturados:
+ * - HTTP 402: crédito pré-pago esgotado. Documentado pelo Google em
+ *   https://ai.google.dev/gemini-api/docs/api-errors (`payment_required`, 402,
+ *   "Prepay credit balance is depleted") e em
+ *   https://ai.google.dev/gemini-api/docs/troubleshooting (402 para Prepay);
  * - `ErrorInfo.reason` de billing em qualquer status (`BILLING_DISABLED` é o
- *   motivo padrão do Google Cloud para billing desligado; `CREDITS_EXHAUSTED`
- *   cobre o pré-pago se vier como 429);
- * - 429 `RESOURCE_EXHAUSTED` com `QuotaFailure` de quota DIÁRIA (`quotaId`
- *   com "PerDay": o free tier acabou e só volta amanhã). Quota por minuto é
- *   rate limit comum → `HTTP 429`.
+ *   motivo padrão do Google Cloud para billing desligado; os outros são
+ *   defensivos, não documentados para esta API).
+ *
+ * Cota diária (`COTA_DIARIA`): 429 `RESOURCE_EXHAUSTED` com um detalhe
+ * `google.rpc.QuotaFailure` cuja violação tem `quotaId` de período diário
+ * (`...PerDay...`). Não é saldo: volta sozinha no dia seguinte. Quota por
+ * minuto é rate limit comum → `HTTP 429`.
  */
 const MOTIVOS_BILLING = new Set(["BILLING_DISABLED", "BILLING_NOT_ACTIVE", "CREDITS_EXHAUSTED", "PREPAY_CREDITS_EXHAUSTED"]);
 
@@ -111,21 +108,32 @@ function corpoErro(e: ApiError): CorpoErro {
   }
 }
 
-function semCredito(status: number, corpo: CorpoErro): boolean {
-  if (status === 402) return true;
+const TIPO_QUOTA_FAILURE = "type.googleapis.com/google.rpc.QuotaFailure";
+/** `quotaId` de cota diária, ex.: `GenerateRequestsPerDayPerProjectPerModel-FreeTier`. */
+const QUOTA_ID_DIARIA = /^[A-Za-z]+PerDay(?:Per[A-Za-z]+)?(?:-[A-Za-z]+)?$/;
+
+function classificarCota(status: number, corpo: CorpoErro): "SEM_CREDITO" | "COTA_DIARIA" | null {
+  if (status === 402) return "SEM_CREDITO";
   const detalhes = (corpo.details ?? []).filter(ehNo);
-  if (detalhes.some((d) => typeof d.reason === "string" && MOTIVOS_BILLING.has(d.reason))) return true;
-  if (corpo.status !== "RESOURCE_EXHAUSTED") return false;
-  return detalhes.some(
-    (d) => Array.isArray(d.violations) && d.violations.some((v) => ehNo(v) && typeof v.quotaId === "string" && v.quotaId.includes("PerDay")),
+  if (detalhes.some((d) => typeof d.reason === "string" && MOTIVOS_BILLING.has(d.reason))) return "SEM_CREDITO";
+  if (status !== 429 || corpo.status !== "RESOURCE_EXHAUSTED") return null;
+  const diaria = detalhes.some(
+    (d) =>
+      d["@type"] === TIPO_QUOTA_FAILURE &&
+      Array.isArray(d.violations) &&
+      d.violations.some((v) => ehNo(v) && typeof v.quotaId === "string" && QUOTA_ID_DIARIA.test(v.quotaId)),
   );
+  return diaria ? "COTA_DIARIA" : null;
 }
 
 function traduzirErro(e: unknown): TraducaoErro {
   if (e instanceof ApiError) {
     const status = e.status;
     const corpo = corpoErro(e);
-    if (semCredito(status, corpo)) return { erro: new ErroLlm("SEM_CREDITO", { status, detalhe: "sem crédito na API do Gemini" }), retentavel: false };
+    const cota = classificarCota(status, corpo);
+    if (cota === "SEM_CREDITO") return { erro: new ErroLlm("SEM_CREDITO", { status, detalhe: "sem crédito na API do Gemini" }), retentavel: false };
+    if (cota === "COTA_DIARIA")
+      return { erro: new ErroLlm("COTA_DIARIA", { status, detalhe: "cota diária do Gemini esgotada; volta no próximo dia ou aumente o limite no AI Studio" }), retentavel: false };
     return { erro: new ErroLlm("HTTP", { status, ...(corpo.status ? { detalhe: { codigo: corpo.status } } : {}) }), retentavel: status >= 500 };
   }
   const nome = e instanceof Error ? e.name : typeof e;
@@ -142,12 +150,34 @@ const FINISH_RECUSA = new Set(["SAFETY", "RECITATION", "LANGUAGE", "BLOCKLIST", 
 
 type Opcoes = { apiKey: string; modelo: string; fetch?: typeof fetch; timeoutMs?: number };
 
-function raciocinio(modelo: string): ThinkingConfig {
-  return /^gemini-2\./.test(modelo) ? { thinkingBudget: ORCAMENTO_RACIOCINIO_2X } : { thinkingLevel: ThinkingLevel.LOW };
+/**
+ * `thinkingConfig` por família (doc "Thinking" do Gemini): 3.x aceita
+ * `thinkingLevel`; 2.5 só `thinkingBudget`; 2.0 não pensa (mandar a config
+ * daria 400). Alias sem versão (`gemini-flash-latest`) fica no padrão do modelo.
+ */
+function raciocinio(modelo: string): ThinkingConfig | undefined {
+  const m = modelo.toLowerCase().replace(/^models\//, "");
+  if (/^gemini-(?:[3-9]|\d{2,})(?:[.-]|$)/.test(m)) return { thinkingLevel: ThinkingLevel.LOW };
+  if (/^gemini-2\.5-/.test(m)) return { thinkingBudget: ORCAMENTO_RACIOCINIO_25 };
+  return undefined;
 }
 
+/**
+ * Retentativa do SDK desligada de forma explícita: `attempts: 1` = só a
+ * chamada original (`HttpRetryOptions` em `genai.d.ts`: "If 0 or 1, it means
+ * no retries"; no código, `pRetry` com `retries: attempts - 1 = 0`). Sem
+ * `retryOptions` o SDK 2.31 também não re-tenta (`apiCall`: `if
+ * (!retryOptions) return runFetch()`), mas o padrão documentado é 5
+ * tentativas — não dependemos disso. A política é a de `comum.ts`.
+ */
+const SEM_RETENTATIVA_SDK = { attempts: 1 } as const;
+
 export function criarProvedorGemini({ apiKey, modelo, fetch, timeoutMs }: Opcoes): ProvedorLlm {
-  const cliente = new GoogleGenAI({ apiKey, httpOptions: { timeout: timeoutMs ?? TIMEOUT_LLM_MS, ...(fetch ? { fetch } : {}) } });
+  const cliente = new GoogleGenAI({
+    apiKey,
+    httpOptions: { timeout: timeoutMs ?? TIMEOUT_LLM_MS, retryOptions: SEM_RETENTATIVA_SDK, ...(fetch ? { fetch } : {}) },
+  });
+  const pensar = raciocinio(modelo);
 
   return {
     nome: "gemini",
@@ -163,7 +193,7 @@ export function criarProvedorGemini({ apiKey, modelo, fetch, timeoutMs }: Opcoes
               maxOutputTokens: pedido.maxTokens ?? MAX_TOKENS_EXTRACAO,
               responseMimeType: "application/json",
               responseJsonSchema: paraSchemaGemini(pedido.schema),
-              thinkingConfig: raciocinio(modelo),
+              ...(pensar ? { thinkingConfig: pensar } : {}),
             },
           }),
         traduzirErro,

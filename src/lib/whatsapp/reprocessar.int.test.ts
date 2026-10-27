@@ -206,6 +206,25 @@ describe("retomarPendentes (cron)", () => {
     expect(await status(m.id)).toBe("PROCESSADA");
   });
 
+  it("FALHA por COTA_DIARIA volta mesmo com muitas tentativas (cota volta no dia seguinte)", async () => {
+    const m = await bruta({ status: "FALHA", tentativas: 7, erro: "cota diária ref=ccc", resultadoLlm: { aplicacao: { tipo: "FALHA", codigo: "LLM_COTA_DIARIA", ref: "abc" } } });
+    const r = await retomarPendentes({ agora: AGORA });
+    expect(r).toMatchObject({ tentadas: 1, processadas: 1 });
+    expect(await status(m.id)).toBe("PROCESSADA");
+  });
+
+  it("cota diária ainda esgotada → para na 1ª (não martela a LLM)", async () => {
+    const chamadas = vi.fn(() => {
+      throw new ErroLlm("COTA_DIARIA", { status: 429 });
+    });
+    definirRespostaMock(chamadas);
+    const cota = { aplicacao: { tipo: "FALHA", codigo: "LLM_COTA_DIARIA", ref: "abc" } };
+    for (let i = 0; i < 3; i++) await bruta({ status: "FALHA", tentativas: 4, erro: "cota ref=x", resultadoLlm: cota });
+    const r = await retomarPendentes({ agora: AGORA });
+    expect(chamadas).toHaveBeenCalledTimes(1);
+    expect(r).toMatchObject({ tentadas: 1, falhas: 1, interrompida: true });
+  });
+
   it("ainda sem crédito → para na 1ª (não martela a LLM)", async () => {
     const chamadas = vi.fn(() => {
       throw new ErroLlm("SEM_CREDITO", { status: 429 });

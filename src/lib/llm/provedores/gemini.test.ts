@@ -72,10 +72,21 @@ describe("provedor Gemini (SDK @google/genai, fetch falso)", () => {
     expect(gc.thinkingConfig).not.toHaveProperty("includeThoughts");
   });
 
-  it("modelos 2.x (sem thinkingLevel) usam thinkingBudget baixo", async () => {
-    const fetch = vi.fn().mockResolvedValue(http(200, resposta(JSON.stringify(SAIDA))));
-    await provedor(fetch, undefined, "gemini-2.5-flash").extrair(PEDIDO);
-    expect(corpoDe(fetch).generationConfig.thinkingConfig).toEqual({ thinkingBudget: 1024 });
+  it("thinkingConfig só para quem pensa: 3.x → thinkingLevel LOW; 2.5 → thinkingBudget; 2.0 e desconhecido → nada", async () => {
+    const casos: [string, unknown][] = [
+      ["gemini-3.8-flash", { thinkingLevel: "LOW" }],
+      ["gemini-3.5-flash-lite", { thinkingLevel: "LOW" }],
+      ["gemini-3-flash-preview", { thinkingLevel: "LOW" }],
+      ["gemini-2.5-flash", { thinkingBudget: 1024 }],
+      ["gemini-2.5-flash-lite", { thinkingBudget: 1024 }],
+      ["gemini-2.0-flash", undefined],
+      ["gemini-flash-latest", undefined],
+    ];
+    for (const [modelo, esperado] of casos) {
+      const fetch = vi.fn().mockResolvedValue(http(200, resposta(JSON.stringify(SAIDA))));
+      await provedor(fetch, undefined, modelo).extrair(PEDIDO);
+      expect(corpoDe(fetch).generationConfig.thinkingConfig, modelo).toEqual(esperado);
+    }
   });
 
   it("maxTokens do pedido vira maxOutputTokens (classificação/resumo)", async () => {
@@ -89,6 +100,12 @@ describe("provedor Gemini (SDK @google/genai, fetch falso)", () => {
     (corpo.candidates[0].content.parts as unknown[]).push({ text: "pensando no texto do usuário", thought: true }, { text: JSON.stringify(SAIDA) });
     const fetch = vi.fn().mockResolvedValue(http(200, corpo));
     await expect(provedor(fetch).extrair(PEDIDO)).resolves.toMatchObject({ bruto: SAIDA });
+  });
+
+  it("429 de rate limit: exatamente UM fetch (nem o SDK nem o provedor re-tentam)", async () => {
+    const fetch = vi.fn().mockImplementation(async () => erroApi(429, "RESOURCE_EXHAUSTED"));
+    await expect(provedor(fetch).extrair(PEDIDO)).rejects.toMatchObject({ codigo: "HTTP", status: 429 });
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 
   it("4xx (400, 401, 403, 404, 429 de rate limit) não re-tenta e não copia a mensagem da API", async () => {
@@ -120,9 +137,36 @@ describe("provedor Gemini (SDK @google/genai, fetch falso)", () => {
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
-  it("RESOURCE_EXHAUSTED com quota diária ou detalhe de billing → SEM_CREDITO; só pelo status/detalhes, nunca pela mensagem", async () => {
+  it("429 RESOURCE_EXHAUSTED com QuotaFailure de quota DIÁRIA → COTA_DIARIA (não é saldo), sem re-tentar", async () => {
+    for (const quotaId of ["GenerateRequestsPerDayPerProjectPerModel-FreeTier", "GenerateContentInputTokensPerModelPerDay"]) {
+      const fetch = vi.fn().mockResolvedValue(
+        erroApi(429, "RESOURCE_EXHAUSTED", [
+          { "@type": "type.googleapis.com/google.rpc.Help", links: [] },
+          { "@type": "type.googleapis.com/google.rpc.QuotaFailure", violations: [{ quotaMetric: "generativelanguage.googleapis.com/x", quotaId }] },
+        ]),
+      );
+      const e = await provedor(fetch).extrair(PEDIDO).catch((x) => x);
+      expect(e, quotaId).toMatchObject({ codigo: "COTA_DIARIA", status: 429 });
+      expect(e.message).toContain("cota diária do Gemini esgotada; volta no próximo dia ou aumente o limite no AI Studio");
+      expect(e.message).not.toContain("texto do usuário");
+      expect(fetch).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it("'PerDay' fora do campo quotaId de um QuotaFailure não conta (ex.: em outro detalhe ou no quotaMetric)", async () => {
     const casos: unknown[][] = [
-      [{ "@type": "type.googleapis.com/google.rpc.QuotaFailure", violations: [{ quotaMetric: "generativelanguage.googleapis.com/generate_content_free_tier_requests", quotaId: "GenerateRequestsPerDayPerProjectPerModel-FreeTier" }] }],
+      [{ "@type": "type.googleapis.com/google.rpc.ErrorInfo", reason: "RATE_LIMIT_EXCEEDED", metadata: { quota_limit: "RequestsPerDay" } }],
+      [{ "@type": "type.googleapis.com/google.rpc.QuotaFailure", violations: [{ quotaMetric: "x/PerDay", quotaId: "GenerateRequestsPerMinutePerProjectPerModel" }] }],
+      [{ "@type": "type.googleapis.com/google.rpc.RetryInfo", violations: [{ quotaId: "GenerateRequestsPerDayPerProjectPerModel" }] }],
+    ];
+    for (const details of casos) {
+      const fetch = vi.fn().mockResolvedValue(erroApi(429, "RESOURCE_EXHAUSTED", details));
+      await expect(provedor(fetch).extrair(PEDIDO), JSON.stringify(details)).rejects.toMatchObject({ codigo: "HTTP", status: 429 });
+    }
+  });
+
+  it("detalhe de billing (ErrorInfo.reason) → SEM_CREDITO; só pelo status/detalhes, nunca pela mensagem", async () => {
+    const casos: unknown[][] = [
       [{ "@type": "type.googleapis.com/google.rpc.ErrorInfo", reason: "BILLING_DISABLED", domain: "googleapis.com" }],
       [{ "@type": "type.googleapis.com/google.rpc.ErrorInfo", reason: "CREDITS_EXHAUSTED" }],
     ];
@@ -224,9 +268,10 @@ describe("paraSchemaGemini (subconjunto de JSON Schema do responseJsonSchema)", 
     return saida;
   }
 
-  it("nulo simples vira type [T, 'null']; enum anulável continua anyOf; nada fora do subconjunto", () => {
+  it("anulável continua anyOf [T, null] (forma suportada pelo responseJsonSchema); nada fora do subconjunto", () => {
     const s = paraSchemaGemini(JSON_SCHEMA_EXTRACAO) as { properties: Record<string, Record<string, unknown>> };
-    expect(s.properties.oportunidade_id).toEqual({ type: ["string", "null"], description: JSON_SCHEMA_EXTRACAO.properties.oportunidade_id.description });
+    expect(s.properties.oportunidade_id).toEqual({ anyOf: [{ type: "string" }, { type: "null" }], description: JSON_SCHEMA_EXTRACAO.properties.oportunidade_id.description });
+    expect(JSON.stringify(s)).not.toContain('"type":["');
     expect(s.properties.campos.properties).toMatchObject({
       origem: { anyOf: [{ type: "string", enum: ["COLD_CALL", "RD", "INDICACAO", "EVENTO", "OUTRO"] }, { type: "null" }] },
     });

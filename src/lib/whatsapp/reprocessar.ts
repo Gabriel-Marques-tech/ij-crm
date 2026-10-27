@@ -12,9 +12,10 @@
  *   LLM 2×30 s + transação); a cerca derruba o worker antigo se ele acordar.
  * - Travada ou órfã que já tem 3+ tentativas vai para `FALHA`
  *   (`TENTATIVAS_ESGOTADAS ref=…`) em vez de voltar: sem laço infinito.
- * - `FALHA` com menos de 3 tentativas volta. `FALHA` por `SEM_CREDITO` volta
- *   sempre (é a recarga que resolve), mas a execução PARA no primeiro
- *   `SEM_CREDITO` de novo: no máximo uma chamada inútil a cada 10 min.
+ * - `FALHA` com menos de 3 tentativas volta. `FALHA` por `SEM_CREDITO` ou
+ *   `COTA_DIARIA` (Gemini) volta sempre (é a recarga / o dia seguinte que
+ *   resolve), mas a execução PARA no primeiro desses de novo: no máximo uma
+ *   chamada inútil a cada 10 min.
  * - No máximo `limite` (20) mensagens por execução e nada novo depois do
  *   `prazo` (o script do cron desiste em 300 s).
  */
@@ -29,6 +30,8 @@ export const MAX_TENTATIVAS_FALHA = 3;
 export const LIMITE_POR_EXECUCAO = 20;
 export const PRAZO_EXECUCAO_MS = 4 * 60_000;
 const CODIGO_SEM_CREDITO = "LLM_SEM_CREDITO";
+const CODIGO_COTA_DIARIA = "LLM_COTA_DIARIA";
+const ESPERA_PROVEDOR = new Set([CODIGO_SEM_CREDITO, CODIGO_COTA_DIARIA]);
 
 export type ResultadoReprocessar = ResultadoProcessamento | { tipo: "NAO_REPROCESSAVEL" };
 
@@ -100,7 +103,7 @@ export async function retomarPendentes(
     SELECT id, status::text AS status FROM mensagem_bruta
      WHERE (status = 'RECEBIDA' AND atualizado_em < ${orfaAntes} AND tentativas < ${MAX_TENTATIVAS_FALHA})
         OR (status = 'FALHA' AND (tentativas < ${MAX_TENTATIVAS_FALHA}
-                                  OR resultado_llm -> 'aplicacao' ->> 'codigo' = ${CODIGO_SEM_CREDITO}))
+                                  OR resultado_llm -> 'aplicacao' ->> 'codigo' IN (${CODIGO_SEM_CREDITO}, ${CODIGO_COTA_DIARIA})))
      ORDER BY recebida_em, id
      LIMIT ${limite}`;
 
@@ -120,8 +123,8 @@ export async function retomarPendentes(
       c.refs.push(r.ref);
     }
     else c.ignoradas++;
-    // Ainda sem crédito, ou banco/config fora: o resto espera a próxima execução.
-    if ((r.tipo === "FALHA" && r.codigo === CODIGO_SEM_CREDITO) || r.tipo === "ERRO") {
+    // Ainda sem crédito/cota, ou banco/config fora: o resto espera a próxima execução.
+    if ((r.tipo === "FALHA" && ESPERA_PROVEDOR.has(r.codigo)) || r.tipo === "ERRO") {
       c.interrompida = true;
       break;
     }

@@ -8,6 +8,8 @@ describe("banner de sem crédito na LLM (GAB-46)", () => {
     const alerta = screen.getByRole("alert");
     expect(alerta).toHaveTextContent("Sem crédito na API de LLM");
     expect(alerta).toHaveTextContent("reprocessadas depois da recarga");
+    // Mesmo incidente da cota diária do Gemini (COTA_DIARIA divide a linha do alerta).
+    expect(alerta).toHaveTextContent("ou quando a cota diária do Gemini voltar");
     const hora = screen.getByText("26/10/2026 10:05");
     expect(hora.className).toContain("font-mono");
     expect(alerta).toHaveTextContent("Último erro de crédito: 27/10/2026 06:40");
