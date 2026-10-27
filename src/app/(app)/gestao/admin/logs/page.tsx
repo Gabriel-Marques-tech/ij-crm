@@ -2,7 +2,7 @@ import { ErroCarregamento } from "@/components/erro-carregamento";
 import { PageHeader } from "@/components/shell/page-header";
 import { exigirPapel } from "@/lib/auth/atual";
 import { comTratamento, ehInesperado } from "@/lib/erros/registrar";
-import { LIMITE_LOG_LLM, LIMITE_LOG_WEBHOOK, listarLogsLlm, listarLogsWebhook } from "@/lib/logs/tecnicos";
+import { contagemNaoAutorizados, LIMITE_LOG_LLM, LIMITE_LOG_WEBHOOK, listarLogsLlm, listarLogsWebhook } from "@/lib/logs/tecnicos";
 import { formatarDataHora } from "@/lib/oportunidades/formatar";
 import { AbasAdmin } from "../abas";
 
@@ -25,6 +25,7 @@ export default async function AdminLogsPage() {
   });
   if (ehInesperado(dados)) return <ErroCarregamento codigo={dados.ref} />;
   const { webhook, llm } = dados;
+  const nao = contagemNaoAutorizados();
 
   return (
     <>
@@ -77,6 +78,16 @@ export default async function AdminLogsPage() {
 
       <section>
         <p className="eyebrow mb-3">webhook</p>
+        <p className="mb-3 text-sm text-fg-mute">
+          Não autenticadas (401, fora da tabela): <span className="font-mono text-fg-soft">{nao.total.toLocaleString("pt-BR")}</span> desde{" "}
+          <span className="font-mono">{formatarDataHora(nao.desde)}</span> (último início do app)
+          {nao.ultimaEm ? (
+            <>
+              ; última em <span className="font-mono">{formatarDataHora(nao.ultimaEm)}</span>
+            </>
+          ) : null}
+          .
+        </p>
         {webhook.length === 0 ? (
           <p className="text-sm text-fg-mute">Nenhum evento registrado ainda.</p>
         ) : (

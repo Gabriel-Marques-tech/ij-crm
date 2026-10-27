@@ -8,7 +8,8 @@ import { MENSAGEM_CONFLITO_CONFIGURACAO } from "@/lib/configuracao/servico";
 import { comTratamento, comTratamentoForm } from "@/lib/erros/registrar";
 import { ErroEvolutionAdmin, listarGrupos, obterQr, type GrupoEvolution } from "@/lib/whatsapp/evolution-admin";
 
-export type EstadoConfigTecnica = { erro?: string; ok?: true } | undefined;
+/** `pedirConfirmacao`: a Evolution não respondeu; a tela mostra "salvar mesmo assim". */
+export type EstadoConfigTecnica = { erro?: string; ok?: true; pedirConfirmacao?: true } | undefined;
 
 const texto = (form: FormData, nome: string) => String(form.get(nome) ?? "").trim();
 
@@ -46,19 +47,23 @@ function estadoDe(r: ResultadoConfigTecnica): EstadoConfigTecnica {
   }
   if (r.erro === "SEM_PERMISSAO") return { erro: "Só admin altera a configuração técnica." };
   if (r.erro === "CONFLITO") return { erro: MENSAGEM_CONFLITO_CONFIGURACAO };
+  if (r.erro === "EVOLUTION_INDISPONIVEL") return { erro: r.mensagem, pedirConfirmacao: true };
   return { erro: r.mensagem };
 }
 
 /** Admin → Configuração: salva (campos vazios herdam do env). Vale na próxima mensagem. */
 export async function salvarConfigTecnicaAction(_prev: EstadoConfigTecnica, form: FormData): Promise<EstadoConfigTecnica> {
   const ator = await exigirPapel("ADMIN");
-  return comTratamentoForm("admin.config.salvar", async () => estadoDe(await salvarConfigTecnica(entradaDe(form), ator, versaoCarregada(form))));
+  const confirmarSemEvolution = form.get("salvarMesmoAssim") === "on";
+  return comTratamentoForm("admin.config.salvar", async () =>
+    estadoDe(await salvarConfigTecnica(entradaDe(form), ator, versaoCarregada(form), { confirmarSemEvolution })),
+  );
 }
 
-/** Apaga a config salva: tudo volta a vir do env. */
-export async function restaurarConfigTecnicaAction(): Promise<EstadoConfigTecnica> {
+/** Apaga a config salva (se ainda for a versão carregada): tudo volta a vir do env. */
+export async function restaurarConfigTecnicaAction(_prev: EstadoConfigTecnica, form: FormData): Promise<EstadoConfigTecnica> {
   const ator = await exigirPapel("ADMIN");
-  return comTratamentoForm("admin.config.restaurar", async () => estadoDe(await restaurarConfigTecnica(ator)));
+  return comTratamentoForm("admin.config.restaurar", async () => estadoDe(await restaurarConfigTecnica(ator, versaoCarregada(form))));
 }
 
 /** Erro esperado da Evolution (fora, timeout, env faltando) → frase; o resto → ref. */

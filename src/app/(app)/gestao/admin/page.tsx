@@ -2,14 +2,16 @@ import { ErroCarregamento } from "@/components/erro-carregamento";
 import { PageHeader } from "@/components/shell/page-header";
 import { exigirPapel } from "@/lib/auth/atual";
 import { chaveAnthropic, chaveOpenAI, ConfigAusente, ConfigFraca, diagnosticarSegredo, notificacoesAtivas } from "@/lib/config/env";
-import { CONFIG_TECNICA, resolverConfigTecnica } from "@/lib/config/tecnica";
+import { CONFIG_TECNICA, resolverConfigTecnica, validarCombinacao } from "@/lib/config/tecnica";
 import { obterConfiguracao } from "@/lib/configuracao/servico";
 import { comTratamento, ehInesperado, registrarErro } from "@/lib/erros/registrar";
+import { contarOutroChatUltimaHora } from "@/lib/logs/tecnicos";
 import { formatarDataHora } from "@/lib/oportunidades/formatar";
 import { nomesDeUsuarios } from "@/lib/oportunidades/oportunidades";
 import { ErroEvolutionAdmin, estadoConexao, type EstadoConexao } from "@/lib/whatsapp/evolution-admin";
 import { AbasAdmin } from "./abas";
 import { ConfigTecnicaForm } from "./config-form";
+import { situacaoSafeMode } from "./safe-mode";
 import { StatusEvolution } from "./status-evolution";
 
 export const metadata = { title: "Admin · Gestão" };
@@ -49,13 +51,16 @@ export default async function AdminConfigPage() {
   const dados = await comTratamento("pagina.admin.config", async () => {
     const c = await obterConfiguracao(CONFIG_TECNICA);
     const autor = c.atualizadoPor ? ((await nomesDeUsuarios([c.atualizadoPor])).get(c.atualizadoPor) ?? null) : null;
-    return { c, autor };
+    const outroChat = await contarOutroChatUltimaHora();
+    return { c, autor, outroChat };
   });
   if (ehInesperado(dados)) return <ErroCarregamento codigo={dados.ref} />;
-  const { c, autor } = dados;
+  const { c, autor, outroChat } = dados;
   const herdado = resolverConfigTecnica({});
   const efetivo = resolverConfigTecnica(c.valor);
-  const safe = !notificacoesAtivas();
+  // Mesma regra da carga (tecnica.ts): combinação salva inválida é ignorada e vale só o env.
+  const ignorada = c.padrao ? null : (validarCombinacao(efetivo) ?? (efetivo.grupoJid.valor ? null : "sem GRUPO_JID"));
+  const safe = situacaoSafeMode({ producao: process.env.NODE_ENV === "production", enviando: notificacoesAtivas() });
   const evo = await conexao();
 
   return (
@@ -65,18 +70,21 @@ export default async function AdminConfigPage() {
       <div className="max-w-3xl space-y-4">
         <StatusEvolution conexao={evo} />
 
-        <section className={`rounded-xl border bg-surface p-5 ${safe ? "border-border" : "border-l-2 border-border border-l-warn"}`}>
-          <p className="eyebrow mb-2">safe mode (só leitura, do ambiente)</p>
-          {safe ? (
-            <p className="text-sm">
-              <span className="font-medium">Ligado</span> — <span className="font-mono">NOTIFICATIONS_ENABLED</span> não é <span className="font-mono">true</span>: o CRM processa as mensagens, mas não responde nada no grupo.
-            </p>
-          ) : (
-            <p role="alert" className="text-sm text-warn">
-              <span className="font-medium">Desligado</span> — o bot envia mensagens reais ao grupo do WhatsApp. Para pausar, defina <span className="font-mono">NOTIFICATIONS_ENABLED=false</span> no ambiente e reinicie.
-            </p>
-          )}
+        <section className={`rounded-xl border bg-surface p-5 ${safe.aviso ? "border-l-2 border-border border-l-warn" : "border-border"}`}>
+          <p className="eyebrow mb-2">
+            safe mode (só leitura, do ambiente) · ambiente: <span className="font-mono">{safe.ambiente}</span>
+          </p>
+          <p className={`text-sm ${safe.aviso ? "text-warn" : ""}`} role={safe.aviso ? "alert" : undefined}>
+            <span className="font-medium">{safe.titulo}</span> — {safe.texto}
+          </p>
         </section>
+
+        {outroChat > 0 ? (
+          <p role="alert" className="rounded-xl border border-l-2 border-border border-l-warn bg-surface p-4 text-sm text-warn">
+            <span className="font-mono">{outroChat}</span> {outroChat === 1 ? "evento" : "eventos"} de outro chat na última hora (dos últimos registrados em Logs). Se as
+            mensagens do grupo não estão entrando, confira o GRUPO_JID.
+          </p>
+        ) : null}
 
         <section className="rounded-xl border border-border bg-surface p-5">
           <p className="eyebrow mb-3">segredos (só no ambiente, nunca editáveis aqui)</p>
@@ -90,6 +98,11 @@ export default async function AdminConfigPage() {
           </ul>
         </section>
 
+        {ignorada ? (
+          <p role="alert" className="rounded-xl border border-l-2 border-border border-l-danger bg-surface p-4 text-sm text-danger">
+            A configuração salva aqui está sendo <span className="font-medium">ignorada</span> (vale só o ambiente): {ignorada} Corrija e salve, ou apague.
+          </p>
+        ) : null}
         {c.invalido ? (
           <p role="alert" className="font-mono text-xs text-warn">
             valor salvo inválido — usando o ambiente. Salve para corrigir.

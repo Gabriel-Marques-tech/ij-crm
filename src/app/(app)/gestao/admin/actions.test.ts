@@ -48,7 +48,7 @@ describe("Admin: gestor recebe 403", () => {
     m.papel = "GESTOR";
     await expect(AdminLayout({ children: null })).rejects.toThrow("/403");
     await expect(salvarConfigTecnicaAction(undefined, form({ grupoJid: "1@g.us" }))).rejects.toThrow("/403");
-    await expect(restaurarConfigTecnicaAction()).rejects.toThrow("/403");
+    await expect(restaurarConfigTecnicaAction(undefined, form({ versao: "1" }))).rejects.toThrow("/403");
     await expect(listarGruposAction()).rejects.toThrow("/403");
     await expect(mostrarQrAction()).rejects.toThrow("/403");
     expect(m.exigirPapel.mock.calls.every(([p]) => p === "ADMIN")).toBe(true);
@@ -70,6 +70,7 @@ describe("salvarConfigTecnicaAction", () => {
       { grupoJid: "120@g.us", limiarConfianca: 0.6, limiarClassificador: 0.5, timeoutEnvioMs: 30000 },
       { id: "u1", papel: "ADMIN" },
       new Date(1700000000000),
+      { confirmarSemEvolution: false },
     );
     expect(m.revalidatePath).toHaveBeenCalledWith("/gestao/admin");
   });
@@ -79,6 +80,20 @@ describe("salvarConfigTecnicaAction", () => {
     expect(await salvarConfigTecnicaAction(undefined, form({}))).toEqual({ erro: "O limiar sem #crm (0.5) precisa…" });
     m.salvarConfigTecnica.mockResolvedValueOnce({ ok: false, erro: "CONFLITO" });
     expect(await salvarConfigTecnicaAction(undefined, form({}))).toEqual({ erro: expect.stringMatching(/Outra pessoa alterou/) });
+  });
+
+  it("Evolution fora com grupo novo: pede confirmação; com \"salvar mesmo assim\" repassa", async () => {
+    m.salvarConfigTecnica.mockResolvedValueOnce({ ok: false, erro: "EVOLUTION_INDISPONIVEL", mensagem: "Não deu para conferir…" });
+    expect(await salvarConfigTecnicaAction(undefined, form({ grupoJid: "9@g.us" }))).toEqual({ erro: "Não deu para conferir…", pedirConfirmacao: true });
+    m.salvarConfigTecnica.mockResolvedValueOnce({ ok: true, valor: {} });
+    await salvarConfigTecnicaAction(undefined, form({ grupoJid: "9@g.us", salvarMesmoAssim: "on" }));
+    expect(m.salvarConfigTecnica).toHaveBeenLastCalledWith({ grupoJid: "9@g.us" }, expect.anything(), null, { confirmarSemEvolution: true });
+  });
+
+  it("restaurar manda a versão carregada (conflito se mudou)", async () => {
+    m.restaurarConfigTecnica.mockResolvedValueOnce({ ok: false, erro: "CONFLITO" });
+    expect(await restaurarConfigTecnicaAction(undefined, form({ versao: "1700000000000" }))).toEqual({ erro: expect.stringMatching(/Outra pessoa alterou/) });
+    expect(m.restaurarConfigTecnica).toHaveBeenCalledWith({ id: "u1", papel: "ADMIN" }, new Date(1700000000000));
   });
 
   it("erro inesperado → mensagem com ref", async () => {
