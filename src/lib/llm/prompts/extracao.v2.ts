@@ -111,7 +111,15 @@ export type ContextoExtracao = {
 };
 
 /** Uma mensagem de venda já gravada do remetente (ledger da janela, GAB-49). */
-export type EntradaHistorico = { em: Date; texto: string; card: { id: string; titulo: string } | null };
+export type EntradaHistorico = {
+  em: Date;
+  texto: string;
+  card: { id: string; titulo: string } | null;
+  /** Mensagem com #crm que não foi aplicada (null/ausente = processada). */
+  situacao?: SituacaoHistorico | null;
+};
+
+export type SituacaoHistorico = "pendente de revisão" | "falhou" | "em processamento";
 
 /** Orçamento do contexto de 12 h (caracteres): entram as mais recentes primeiro. */
 export const MAX_CHARS_HISTORICO = 3_000;
@@ -130,7 +138,8 @@ function linhasHistorico(historico: EntradaHistorico[]): { linhas: string[]; omi
   let total = 0;
   for (const h of recentes) {
     const card = h.card ? `[card id=${h.card.id} ${JSON.stringify(cortar(h.card.titulo, 80))}] ` : "";
-    const l = `- ${HORA_SP.format(h.em)} ${card}${cortar(h.texto.replace(/\s+/g, " ").trim(), MAX_CHARS_ENTRADA_HISTORICO)}`;
+    const situacao = h.situacao ? `(${h.situacao}) ` : "";
+    const l = `- ${HORA_SP.format(h.em)} ${card}${situacao}${cortar(h.texto.replace(/\s+/g, " ").trim(), MAX_CHARS_ENTRADA_HISTORICO)}`;
     if (linhas.length > 0 && total + l.length > MAX_CHARS_HISTORICO) break;
     linhas.push(l);
     total += l.length + 1;

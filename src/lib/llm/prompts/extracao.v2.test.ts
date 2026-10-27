@@ -100,6 +100,11 @@ describe("contexto de 12 h: histórico + resumo da janela anterior (GAB-49)", ()
     expect(u.indexOf("<historico>")).toBeLessThan(u.indexOf("<mensagem>"));
   });
 
+  it("mensagem #crm não aplicada mostra a situação", () => {
+    const u = montarMensagemUsuario("#crm x", { ...CTX, historico: [{ em: em(3), texto: "lead da Alfa", card: null, situacao: "pendente de revisão" }] });
+    expect(u).toContain("- 24/10, 08:57 (pendente de revisão) lead da Alfa");
+  });
+
   it("orçamento de caracteres: as mais recentes ficam, as antigas saem com aviso; cada uma é cortada", () => {
     const longa = "a".repeat(MAX_CHARS_ENTRADA_HISTORICO + 50);
     const historico: EntradaHistorico[] = Array.from({ length: 40 }, (_, i) => ({ em: em(i + 1), texto: `${i} ${longa}`, card: null }));

@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { dbTeste, limparBanco } from "@/test/db";
 import { semear } from "../../../prisma/seed";
 import { janelaDe } from "./janela";
-import { cardsDoLedger, ledgerDaJanela } from "./ledger";
+import { MAX_LEDGER, cardsDaJanela, cardsDoLedger, ledgerDaJanela } from "./ledger";
 
 const dbT = dbTeste();
 const TABELAS = ["timeline", "transicao_fase", "mensagem_enviada", "oportunidade", "contato", "empresa", "fase", "pipeline", "mensagem_bruta", "usuario"];
@@ -40,7 +40,7 @@ beforeEach(async () => {
 describe("ledgerDaJanela — derivado de mensagem_bruta (remetente + janela)", () => {
   it("só do remetente, só da janela, só o que foi gravado como venda; o mais recente primeiro", async () => {
     const a = await bruta("falei com o Gustavo", { recebidaEm: min(-60) });
-    const b = await bruta("é da Economia Sensata", { recebidaEm: min(-10), semTag: true, status: "PENDENTE_REVISAO" });
+    const b = await bruta("é da Economia Sensata", { recebidaEm: min(-10), semTag: true, status: "PROCESSADA" });
     await bruta("da Maria", { remetenteUsuarioId: maria.id, recebidaEm: min(-5) });
     await bruta("janela anterior", { recebidaEm: new Date("2026-10-27T02:59:00Z") });
     await bruta("irrelevante", { recebidaEm: min(-3), status: "CLASSIFICADA_IRRELEVANTE" });
@@ -49,7 +49,24 @@ describe("ledgerDaJanela — derivado de mensagem_bruta (remetente + janela)", (
 
     const l = await ledgerDaJanela({ usuarioId: joao.id, janela: janelaDe(AGORA), ate: AGORA, excluirId: atual.id }, dbT);
     expect(l.map((x) => x.id)).toEqual([b.id, a.id]);
-    expect(l[0]).toMatchObject({ texto: "é da Economia Sensata", em: min(-10), card: null });
+    expect(l[0]).toMatchObject({ texto: "é da Economia Sensata", em: min(-10), card: null, situacao: null });
+  });
+
+  it("#crm entra em qualquer status, com a situação; sem tag só PROCESSADA", async () => {
+    const st = ["RECEBIDA", "PROCESSANDO", "PENDENTE_REVISAO", "FALHA", "PROCESSADA"] as const;
+    for (const [i, status] of st.entries()) {
+      await bruta(`crm ${status}`, { recebidaEm: min(-20 + i), status });
+      await bruta(`semtag ${status}`, { recebidaEm: min(-10 + i), status, semTag: true });
+    }
+    const l = await ledgerDaJanela({ usuarioId: joao.id, janela: janelaDe(AGORA), ate: AGORA }, dbT);
+    expect(l.map((x) => [x.texto, x.situacao])).toEqual([
+      ["semtag PROCESSADA", null],
+      ["crm PROCESSADA", null],
+      ["crm FALHA", "falhou"],
+      ["crm PENDENTE_REVISAO", "pendente de revisão"],
+      ["crm PROCESSANDO", "em processamento"],
+      ["crm RECEBIDA", "em processamento"],
+    ]);
   });
 
   it("sem `ate`: a janela inteira", async () => {
@@ -71,6 +88,25 @@ describe("ledgerDaJanela — derivado de mensagem_bruta (remetente + janela)", (
     await mexeu(m3.id, proj.id);
     const l = await ledgerDaJanela({ usuarioId: joao.id, janela: janelaDe(AGORA), ate: AGORA }, dbT);
     expect(l.map((x) => x.card)).toEqual([null, null, { id: vivo.id, titulo: "Gustavo — Economia Sensata" }]);
+  });
+
+  it("cardsDaJanela: consulta própria — vê o card antigo mesmo com mais de MAX_LEDGER mensagens depois", async () => {
+    const antigo = await card("Antigo");
+    const novo = await card("Novo");
+    const m0 = await bruta("primeira", { recebidaEm: min(-200) });
+    await mexeu(m0.id, antigo.id);
+    for (let i = 0; i < MAX_LEDGER + 5; i++) {
+      const m = await bruta(`msg ${i}`, { recebidaEm: min(-100 + i) });
+      await mexeu(m.id, novo.id);
+    }
+    const semTagPendente = await bruta("sem tag pendente", { recebidaEm: min(-150), semTag: true, status: "PENDENTE_REVISAO" });
+    const outro = await card("Outro");
+    await mexeu(semTagPendente.id, outro.id);
+    const recorte = { usuarioId: joao.id, janela: janelaDe(AGORA), ate: AGORA };
+    const ledger = await ledgerDaJanela(recorte, dbT);
+    expect(ledger).toHaveLength(MAX_LEDGER);
+    expect(cardsDoLedger(ledger)).toEqual([novo.id]); // o ledger cortado não vê o antigo
+    expect(await cardsDaJanela(recorte, 5, dbT)).toEqual([novo.id, antigo.id]);
   });
 
   it("cardsDoLedger: ids distintos, do mais recente, com limite", () => {
