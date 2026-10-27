@@ -8,8 +8,8 @@
  *   aparecem pela regra do Kanban (`nomeExibido`): mesclado → nome da
  *   principal se ela estiver viva, senão o próprio nome (`refNaTabela`).
  * - Ordenação só por colunas da lista branca, sempre com `id` como desempate
- *   (página estável: o mesmo card não aparece em duas páginas). Empresa e
- *   contato ordenam pelo nome EXIBIDO (`ordemPorNomeSql`, GAB-48).
+ *   (página estável: o mesmo card não aparece em duas páginas). Texto (título,
+ *   responsável, empresa/contato pelo nome EXIBIDO) ordena em pt-BR (GAB-48).
  * - Faixas da próxima ação = `faixaProximaAcao` (Kanban e Minha Semana),
  *   traduzidas para intervalos de `proxima_acao_em` em dias civis de SP.
  */
@@ -114,7 +114,8 @@ function nomeNaCelulaSql(ref: string, principal: string): string {
 }
 
 /**
- * Colação da ordem por nome: `ij_ptbr`, ICU pt-BR criada pela migration
+ * Colação da ordem das colunas de texto (título, responsável, empresa,
+ * contato): `ij_ptbr`, ICU pt-BR criada pela migration
  * 20261027140000_colacao_ptbr (banco sem ICU falha no `migrate deploy`, não
  * no request). A colação padrão do banco (en_US.utf8 sobre musl, imagem
  * postgres:16-alpine) compara bytes: "Zebra" < "abc" < "Ágil". Com a ICU a
@@ -123,10 +124,19 @@ function nomeNaCelulaSql(ref: string, principal: string): string {
  */
 const COLACAO_NOMES = "COLLATE ij_ptbr";
 
-const REF_ORDEM = {
-  empresa: { tabela: "empresa", coluna: "empresa_id" },
-  contato: { tabela: "contato", coluna: "contato_id" },
-} as const;
+/** Colunas de texto ordenadas em SQL com `ij_ptbr`: JOINs (só literais daqui) + chave. */
+const ORDEM_TEXTO: Partial<Record<OrdemTabela["coluna"], { joins: string; chave: string }>> = {
+  titulo: { joins: "", chave: "o.titulo" },
+  responsavel: { joins: "JOIN usuario u ON u.id = o.responsavel_id", chave: "u.nome" },
+  empresa: {
+    joins: "LEFT JOIN empresa r ON r.id = o.empresa_id LEFT JOIN empresa rp ON rp.id = r.merged_into_id AND rp.deletado_em IS NULL",
+    chave: nomeNaCelulaSql("r", "rp"),
+  },
+  contato: {
+    joins: "LEFT JOIN contato r ON r.id = o.contato_id LEFT JOIN contato rp ON rp.id = r.merged_into_id AND rp.deletado_em IS NULL",
+    chave: nomeNaCelulaSql("r", "rp"),
+  },
+};
 
 /**
  * Todos os ids que batem nos filtros e na busca, já na ordem pedida (a
@@ -135,9 +145,11 @@ const REF_ORDEM = {
  * - A busca (`idsDaBusca`) é cruzada em memória com os ids dos filtros, nunca
  *   vira `id IN (...)` grande: o Prisma não divide essa lista quando há outros
  *   filtros/ordem, e acima de 32.767 ids o Postgres recusa a query (bind).
- * - Prisma não ordena por expressão: empresa/contato ordenam os ids em SQL
- *   parametrizado (um único parâmetro array) por `nomeNaCelulaSql`, vazios por
- *   último nos dois sentidos, desempate por `id` (critério de `montarOrderBy`).
+ * - Prisma não ordena por expressão nem por colação: as colunas de texto
+ *   (`ORDEM_TEXTO`: título, responsável, empresa/contato pelo nome exibido em
+ *   `nomeNaCelulaSql`) ordenam os ids em SQL parametrizado (um único parâmetro
+ *   array) com `ij_ptbr`, vazios por último nos dois sentidos, desempate por
+ *   `id` (critério de `montarOrderBy`). As demais usam `montarOrderBy`.
  *
  * Limite conhecido: lê todos os ids filtrados a cada página (não só 50).
  * Aceito na escala do produto (≤ 15 usuários, alguns milhares de cards: uns
@@ -150,19 +162,17 @@ async function idsOrdenados(f: FiltrosTabela, ordem: OrdemTabela, agora: Date): 
   const daBusca = termo ? new Set(await idsDaBusca(termo)) : null;
   const naBusca = (ids: string[]) => (daBusca ? ids.filter((id) => daBusca.has(id)) : ids);
   if (daBusca?.size === 0) return [];
-  if (ordem.coluna !== "empresa" && ordem.coluna !== "contato") {
+  const texto = ORDEM_TEXTO[ordem.coluna];
+  if (!texto) {
     return naBusca((await db.oportunidade.findMany({ where, orderBy: montarOrderBy(ordem), select: { id: true } })).map((r) => r.id));
   }
   const ids = naBusca((await db.oportunidade.findMany({ where, select: { id: true } })).map((r) => r.id));
   if (!ids.length) return [];
-  const { tabela, coluna } = REF_ORDEM[ordem.coluna];
   const dir = ordem.dir === "asc" ? "ASC" : "DESC";
   const linhas = await db.$queryRaw<{ id: string }[]>`
-    SELECT o.id FROM oportunidade o
-    LEFT JOIN ${Prisma.raw(tabela)} r ON r.id = o.${Prisma.raw(coluna)}
-    LEFT JOIN ${Prisma.raw(tabela)} rp ON rp.id = r.merged_into_id AND rp.deletado_em IS NULL
+    SELECT o.id FROM oportunidade o ${Prisma.raw(texto.joins)}
     WHERE o.id = ANY(${ids})
-    ORDER BY ${Prisma.raw(`${nomeNaCelulaSql("r", "rp")} ${COLACAO_NOMES} ${dir} NULLS LAST`)}, o.id ASC`;
+    ORDER BY ${Prisma.raw(`${texto.chave} ${COLACAO_NOMES} ${dir} NULLS LAST`)}, o.id ASC`;
   return linhas.map((l) => l.id);
 }
 
@@ -203,8 +213,9 @@ export async function montarWhere(f: FiltrosTabela, agora: Date, restrito: strin
 
 /**
  * Lista branca coluna → ORDER BY. Campos anuláveis: vazios por último nos
- * dois sentidos. Empresa/contato não passam por aqui (`idsOrdenados`, pelo
- * nome exibido); a entrada deles é só o fallback pelo nome próprio.
+ * dois sentidos. Título, responsável, empresa e contato não passam por aqui
+ * (`ORDEM_TEXTO` em `idsOrdenados`, colação `ij_ptbr`); as entradas deles são
+ * só o fallback na colação padrão.
  */
 export function montarOrderBy(o: OrdemTabela): OrderBy[] {
   const d = o.dir;

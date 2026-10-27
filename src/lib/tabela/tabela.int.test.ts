@@ -324,6 +324,52 @@ describe("listarTabela", () => {
     expect(filtrada.linhas.map((l) => l.id)).toEqual(esperado.slice(0, 27));
   });
 
+  it("título e responsável também em pt-BR (ij_ptbr): acento e caixa só desempatam, nos dois sentidos", async () => {
+    const s = await semear();
+    const nomes = ["Zebra", "abc", "Ágil", "ágil"];
+    for (const n of nomes) {
+      const u = await db.usuario.create({ data: { nome: n, email: `${n.normalize("NFD").replace(/\p{Diacritic}/gu, "")}-${n === "Ágil" ? 1 : 2}@ij.test` } });
+      await card(s, n, { resp: u.id });
+    }
+    const ordemTitulo = async (dir: "asc" | "desc") => titulos(estado({}, { ordem: { coluna: "titulo", dir } }));
+    const ordemResp = async (dir: "asc" | "desc") =>
+      (await listarTabela(estado({}, { ordem: { coluna: "responsavel", dir } }), AGORA)).linhas.map((l) => l.responsavel.nome);
+    expect(await ordemTitulo("asc")).toEqual(["abc", "ágil", "Ágil", "Zebra"]);
+    expect(await ordemTitulo("desc")).toEqual(["Zebra", "Ágil", "ágil", "abc"]);
+    expect(await ordemResp("asc")).toEqual(["abc", "ágil", "Ágil", "Zebra"]);
+    expect(await ordemResp("desc")).toEqual(["Zebra", "Ágil", "ágil", "abc"]);
+  });
+
+  it("título e responsável empatados na virada da página: id desempata, sem duplicar nem pular, nos dois sentidos; CSV na mesma ordem", async () => {
+    const s = await semear();
+    const igual1 = await db.usuario.create({ data: { nome: "Igual", email: "igual1@ij.test" } });
+    const igual2 = await db.usuario.create({ data: { nome: "Igual", email: "igual2@ij.test" } });
+    const agil = await db.usuario.create({ data: { nome: "Ágil", email: "agil@ij.test" } });
+    const empatados = [];
+    for (let i = 0; i < 55; i++) empatados.push(await card(s, "mesmo", { resp: i % 2 ? igual1.id : igual2.id }));
+    const doAgil = [];
+    for (let i = 0; i < 5; i++) doAgil.push(await card(s, "mesmo", { resp: agil.id }));
+    const porId = (xs: { id: string }[]) => xs.map((x) => x.id).sort((a, b) => (a < b ? -1 : 1));
+    const todos = porId([...empatados, ...doAgil]);
+    const esperado = {
+      titulo: { asc: todos, desc: todos },
+      // "Ágil" < "Igual" em pt-BR; dentro de cada nome, id asc nos dois sentidos.
+      responsavel: { asc: [...porId(doAgil), ...porId(empatados)], desc: [...porId(empatados), ...porId(doAgil)] },
+    };
+    for (const coluna of ["titulo", "responsavel"] as const) {
+      for (const dir of ["asc", "desc"] as const) {
+        const ordem = { coluna, dir };
+        const p1 = await listarTabela(estado({}, { ordem, pagina: 1 }), AGORA);
+        const p2 = await listarTabela(estado({}, { ordem, pagina: 2 }), AGORA);
+        expect(p1).toMatchObject({ total: 60, paginas: 2 });
+        expect(p2.linhas).toHaveLength(10);
+        expect([...p1.linhas, ...p2.linhas].map((l) => l.id), `${coluna} ${dir}`).toEqual(esperado[coluna][dir]);
+        const csv = (await csvTexto(estado({}, { ordem }), 7)).slice(1).split("\r\n").filter(Boolean).slice(1);
+        expect(csv.map((l) => l.split(";")[0]), `csv ${coluna} ${dir}`).toEqual(esperado[coluna][dir]);
+      }
+    }
+  });
+
   it("ordem por nome: a página reaplica os filtros (card apagado entre a leitura dos ids e a da página some)", async () => {
     const s = await semear();
     const a = await card(s, "a", { empresaId: s.acme.id });
