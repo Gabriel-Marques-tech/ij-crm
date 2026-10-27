@@ -181,8 +181,15 @@ responde. Cron fica só para reprocessar `FALHA` e para backup.
   `classificar(texto) → {relevante, confianca}` com provedor por env var.
 - **Produção:** OpenAI GPT-6.1 Sol com raciocínio `low` (SDK oficial
   `openai`, Responses API, structured outputs estrito) — escolha do usuário
-  (GAB-45). **Alternativa:** Anthropic (Claude Haiku 5.5 / Sonnet 5.5), por
-  env (`LLM_PROVEDOR=anthropic`).
+  (GAB-45), padrão do código. **Alternativas:** Anthropic (Claude Haiku 5.5 /
+  Sonnet 5.5, `LLM_PROVEDOR=anthropic`) e Google Gemini (Gemini 3.8 Flash,
+  `gemini-3.8-flash`, SDK oficial `@google/genai` com chave do Google AI
+  Studio em `GEMINI_API_KEY`, `responseJsonSchema` + `thinkingLevel: LOW`;
+  `LLM_PROVEDOR=gemini`), por env ou Admin → Configuração. Os três seguem o
+  mesmo contrato (`ProvedorLlm`): timeout 30 s, 2ª tentativa só em
+  5xx/timeout/rede, recusa → `RECUSA`, teto → `TRUNCADA`, saldo/billing →
+  `SEM_CREDITO` (só por código/status, nunca pelo texto). O guard de modelo
+  usa o prefixo (`claude-`, `gemini-`; OpenAI é o resto).
 - **Benchmark** (parte do plano): ~50 mensagens reais do grupo rotuladas;
   script roda Sonnet 5.5, Haiku 5.5, GPT-5 mini, GPT-5 nano no mesmo
   prompt/schema; mede campos corretos, fase, intenção, latência, custo.
@@ -300,6 +307,12 @@ Matriz de papéis:
   provedor de LLM nos EUA — OpenAI em produção, como antes ia à Anthropic —
   com `store: false` e sem texto em log. O aviso de privacidade da IJ deve
   citar essa transferência internacional (runbook §10).
+- LGPD com `LLM_PROVEDOR=gemini`: as mesmas mensagens (e o contexto/resumo de
+  12 h) vão ao **Google** (Gemini API), processadas onde o Google opera. Só
+  com projeto de **billing ativo** (serviço pago: o Google não usa prompts
+  para treinar e só guarda log por tempo limitado contra abuso); no free tier
+  o Google pode usar o conteúdo e fazer revisão humana — proibido para este
+  CRM. O aviso de privacidade deve citar o Google como destinatário.
 - **Retenção (GAB-41, decisão do usuário): 90 dias** para o JSON que a LLM
   devolveu — `mensagem_bruta.resultado_llm` e a chave `saida` do payload das
   entradas `MENSAGEM_WHATSAPP` da Timeline são apagados pelo cron

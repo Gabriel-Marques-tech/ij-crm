@@ -410,10 +410,11 @@ cliente e pode ser forjado.
 - Os contadores ficam em memória, com teto de 10 mil chaves por limitador.
   Reiniciar o container zera todos.
 
-## 10. Provedor de LLM e crédito da OpenAI
+## 10. Provedor de LLM e crédito da OpenAI / Gemini
 
-Produção usa **OpenAI, GPT-6.1 Sol com raciocínio `low`** (`LLM_PROVEDOR=openai`,
-padrão). A Anthropic (Claude Haiku 5.5) segue como alternativa por env.
+O padrão do código é **OpenAI, GPT-6.1 Sol com raciocínio `low`**
+(`LLM_PROVEDOR=openai`). Alternativas: Anthropic (Claude Haiku 5.5) e **Google
+Gemini (Gemini 3.8 Flash, thinking `LOW`)** pela chave do Google AI Studio.
 
 **Trocar de provedor** (no `.env` da VPS, depois `scripts/deploy.sh`, que recria o
 app com o env novo):
@@ -428,7 +429,22 @@ LLM_EXTRACAO_MODELO=          # vazio = gpt-6.1-sol
 LLM_PROVEDOR=anthropic
 ANTHROPIC_API_KEY=sk-ant-...
 LLM_EXTRACAO_MODELO=          # vazio = claude-haiku-5-5 (ou claude-sonnet-5-5)
+
+# Gemini (Google AI Studio)
+LLM_PROVEDOR=gemini
+GEMINI_API_KEY=AIza...
+LLM_EXTRACAO_MODELO=          # vazio = gemini-3.8-flash
 ```
+
+Provedor e modelo também podem ser trocados sem deploy em **Admin →
+Configuração** (a config salva vence o env). A chave **não**: ela só existe no
+`.env`, e o Admin mostra se está "configurada" ou "ausente". O `deploy.sh`
+confere só o `LLM_PROVEDOR` do `.env` (recusa o deploy se faltar a chave
+dele; não enxerga o que está salvo no Admin). Por isso o caminho recomendado
+para o Gemini é o `.env` (`LLM_PROVEDOR=gemini` + `GEMINI_API_KEY`, depois
+`scripts/deploy.sh`). Pelo Admin também funciona se o `.env` já tiver a chave
+do provedor dele (ex.: OpenAI) **e** a `GEMINI_API_KEY`. Voltar para a OpenAI:
+`LLM_PROVEDOR=openai` no `.env` (com `OPENAI_API_KEY`) ou `openai` no Admin.
 
 Troque ou esvazie `LLM_EXTRACAO_MODELO` junto: modelo de um provedor com o outro
 selecionado faz toda mensagem ir para `FALHA` com "PROVEDOR_INVALIDO" (ref no
@@ -453,6 +469,23 @@ Cada mensagem `#crm` vai para `FALHA` com "sem crédito na API da OpenAI" + ref
 (sem re-tentar, sem gastar), e o grupo recebe "❌ ... (ref: ...)". Recarregue e as
 mensagens voltam pelo reprocessamento (GAB-41, mantendo `erro`).
 
+**Gemini — chave e cobrança** (aistudio.google.com):
+
+1. Em **Get API key** (https://aistudio.google.com/apikey), crie a chave num
+   projeto do Google Cloud **com billing ativo** (é o projeto onde estão os
+   créditos). Sem billing é o free tier: o Google pode usar o conteúdo para
+   treinar e fazer revisão humana — não use com mensagens reais (LGPD).
+2. Guarde a chave no `.env` da VPS (`GEMINI_API_KEY`) e uma cópia offline.
+3. Acompanhe gasto e créditos no AI Studio (Usage/Billing) e o custo real nos
+   logs (`[llm] ... provedor=gemini ... tokens_in= tokens_out= tokens_reasoning=`;
+   `tokens_out` já inclui o raciocínio, que o Google cobra como saída).
+4. **Saldo/quota acabou:** 402 (crédito pré-pago), billing desativado
+   (`BILLING_DISABLED`) ou 429 `RESOURCE_EXHAUSTED` de quota **diária** → cada
+   mensagem vai para `FALHA` com "sem crédito na API do Gemini" + ref, sem
+   re-tentar, e dispara o alerta de ops (GAB-46). 429 de quota por minuto é
+   rate limit: `FALHA` "HTTP 429", reprocessada depois pelo cron. Recarregue e
+   as mensagens voltam pelo reprocessamento (GAB-41).
+
 **LGPD — transferência internacional.** O texto das mensagens `#crm` vai para a
 API do provedor de LLM, nos EUA (OpenAI; antes, igualmente, Anthropic). Só vai o
 que chega à LLM: mensagens do grupo configurado marcadas com `#crm`, com o
@@ -460,6 +493,9 @@ contexto mínimo (nomes/ids de candidatos e fases). A chamada usa `store: false`
 (a OpenAI não guarda a resposta para consulta) e nenhum log do CRM grava o texto
 da mensagem nem o texto devolvido pela API. O aviso de privacidade da IJ deve
 mencionar essa transferência ao provedor de LLM — decisão jurídica do usuário.
+Com `LLM_PROVEDOR=gemini`, o destinatário é o **Google** (Gemini API, serviço
+pago: sem uso para treino, log limitado contra abuso, processamento onde o
+Google opera); o aviso deve citá-lo.
 
 ## 11. Recursos: limites, medição e instância mínima
 
