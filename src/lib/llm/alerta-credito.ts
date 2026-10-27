@@ -20,7 +20,10 @@
  *   chamada à LLM volta a dar certo (`marcarCreditoOk`), que fecha o
  *   incidente mas NÃO mexe no cooldown: o limite de 1 aviso a cada 6 h vale
  *   mesmo com falhas e sucessos alternados.
- * - Agnóstico de provedor: reage ao código `SEM_CREDITO` do `ErroLlm`.
+ * - Agnóstico de provedor: reage ao código `SEM_CREDITO` do `ErroLlm`, e
+ *   também a `COTA_DIARIA` (Gemini: cota do dia esgotada), com texto próprio.
+ *   Os dois usam a MESMA linha (cooldown e banner compartilhados): para quem
+ *   opera, é o mesmo incidente — mensagens em FALHA até a LLM voltar.
  * - Nunca lança e nunca loga texto de mensagem do WhatsApp (só a ref).
  */
 import type { PrismaClient } from "@prisma/client";
@@ -44,21 +47,30 @@ export function textoAlertaSemCredito(ref: string): string {
   return `⚠️ Sem crédito na API de LLM. Mensagens do grupo estão ficando em FALHA e serão reprocessadas depois da recarga. Mensagens sem #crm não são reprocessadas; quem precisar, reenvie com #crm. ref: ${ref}`;
 }
 
+export function textoAlertaCotaDiaria(ref: string): string {
+  return `⚠️ Cota diária da API de LLM (Gemini) esgotada. Mensagens do grupo estão ficando em FALHA e serão reprocessadas quando a cota voltar (no próximo dia) ou depois de aumentar o limite no AI Studio. Mensagens sem #crm não são reprocessadas; quem precisar, reenvie com #crm. ref: ${ref}`;
+}
+
 /** JID de operações. Vazio/ausente ⇒ alerta desligado (o banner continua). */
 function opsJid(): string | undefined {
   return process.env.ALERTA_OPS_JID?.trim() || undefined;
 }
 
-function ehSemCredito(e: unknown): boolean {
-  return e instanceof ErroLlm && e.codigo === "SEM_CREDITO";
+/** Tipo de incidente que avisa ops, ou null. */
+function incidente(e: unknown): { rotulo: string; texto: (ref: string) => string } | null {
+  if (!(e instanceof ErroLlm)) return null;
+  if (e.codigo === "SEM_CREDITO") return { rotulo: "LLM sem crédito", texto: textoAlertaSemCredito };
+  if (e.codigo === "COTA_DIARIA") return { rotulo: "LLM cota diária", texto: textoAlertaCotaDiaria };
+  return null;
 }
 
 /**
  * Chamar no caminho de FALHA do pipeline com o erro e a ref já registrada.
- * Não faz nada se o erro não for `SEM_CREDITO`. Nunca lança.
+ * Não faz nada se o erro não for `SEM_CREDITO`/`COTA_DIARIA`. Nunca lança.
  */
 export async function alertarSeSemCredito(e: unknown, ref: string, deps: Deps = {}): Promise<ResultadoAlerta> {
-  if (!ehSemCredito(e)) return "IGNORADO";
+  const inc = incidente(e);
+  if (!inc) return "IGNORADO";
   const db = deps.db ?? dbPadrao;
   const enviar = deps.enviar ?? enviarWhatsApp;
   try {
@@ -75,7 +87,7 @@ export async function alertarSeSemCredito(e: unknown, ref: string, deps: Deps = 
     const para = opsJid();
     if (!para || !notificacoesAtivas()) {
       const motivo = !para ? "ALERTA_OPS_JID vazio" : "safe mode";
-      console.warn(`[alerta-credito] LLM sem crédito ref=${ref}: aviso não enviado (${motivo})`);
+      console.warn(`[alerta-credito] ${inc.rotulo} ref=${ref}: aviso não enviado (${motivo})`);
       return "SO_LOG";
     }
 
@@ -89,7 +101,7 @@ export async function alertarSeSemCredito(e: unknown, ref: string, deps: Deps = 
     if (reivindicado.length === 0) return "EM_COOLDOWN";
 
     try {
-      const r = await enviar({ para, texto: textoAlertaSemCredito(ref) });
+      const r = await enviar({ para, texto: inc.texto(ref) });
       if (!r.enviada) throw new Error("envio não confirmado");
     } catch (erroEnvio) {
       if (erroEnvio instanceof ErroPosEnvio) {
@@ -113,7 +125,7 @@ export async function alertarSeSemCredito(e: unknown, ref: string, deps: Deps = 
       console.error(`[alerta-credito] aviso entregue mas cooldown de 6 h não gravado ref=${ref}; pode repetir em 5 min`);
       return "ENVIADO";
     }
-    console.warn(`[alerta-credito] LLM sem crédito ref=${ref}: aviso enviado para ${mascararJid(para)}; próximo em 6 h`);
+    console.warn(`[alerta-credito] ${inc.rotulo} ref=${ref}: aviso enviado para ${mascararJid(para)}; próximo em 6 h`);
     return "ENVIADO";
   } catch (erro) {
     registrarErro("alerta-credito", erro);

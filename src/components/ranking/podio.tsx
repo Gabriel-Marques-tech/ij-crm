@@ -1,5 +1,6 @@
 import { cn } from "cn";
 import { Avatar } from "@/components/avatar";
+import { EstadoVazio } from "@/components/estado-vazio";
 import type { LinhaRanking } from "@/lib/ranking/calculo";
 import { fmtDinheiro, fmtInteiro, plural } from "@/lib/ranking/formatar";
 
@@ -11,9 +12,15 @@ export function Podio({ linhas, euId }: { linhas: LinhaRanking[]; euId: string }
   const top = linhas.slice(0, 3).filter((l) => l.pontos > 0);
   if (top.length === 0) {
     return (
-      <section className="rounded-xl border border-border bg-surface p-6 text-sm text-fg-mute">
-        <p className="eyebrow mb-2">pódio</p>
-        Ninguém pontuou neste período ainda. Crie cards, avance fases e feche vendas para aparecer aqui.
+      <section className="rounded-xl border border-border bg-surface p-5">
+        <p className="eyebrow">pódio</p>
+        <EstadoVazio
+          mascote="notebook"
+          tamanho="lg"
+          className="pt-2"
+          titulo="Ninguém pontuou neste período ainda"
+          texto="Crie cards, avance fases e feche vendas para aparecer aqui."
+        />
       </section>
     );
   }

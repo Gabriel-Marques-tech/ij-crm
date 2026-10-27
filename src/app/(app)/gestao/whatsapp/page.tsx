@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { EstadoVazio } from "@/components/estado-vazio";
 import { ErroCarregamento } from "@/components/erro-carregamento";
 import { PageHeader } from "@/components/shell/page-header";
 import { exigirPapel } from "@/lib/auth/atual";
@@ -85,7 +86,12 @@ export default async function WhatsappPage({ searchParams }: { searchParams: Pro
         }
       >
         {fila.itens.length === 0 ? (
-          <p className="text-sm text-fg-mute">Nada na fila. 🎉</p>
+          <EstadoVazio
+            mascote="piscando"
+            titulo="Fila zerada"
+            texto="Nenhuma mensagem do grupo esperando revisão."
+            className="rounded-xl border border-border bg-surface"
+          />
         ) : (
           <ul className="divide-y divide-border rounded-xl border border-border bg-surface">
             {fila.itens.map((m) => {

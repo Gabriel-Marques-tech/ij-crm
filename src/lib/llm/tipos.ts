@@ -1,6 +1,6 @@
 /**
  * Contrato dos provedores de LLM (design doc §4.4): o pipeline só conhece
- * esta interface; OpenAI (padrão de produção, GAB-45), Anthropic e mock
+ * esta interface; OpenAI (padrão de produção, GAB-45), Anthropic, Gemini e mock
  * ficam atrás dela, escolhidos por `LLM_PROVEDOR`.
  */
 
@@ -8,9 +8,9 @@ export type UsoLlm = {
   provedor: string;
   modelo: string;
   tokensEntrada: number;
-  /** Inclui os de raciocínio, quando o provedor os cobra como saída (OpenAI). */
+  /** Inclui os de raciocínio, quando o provedor os cobra como saída (OpenAI, Gemini). */
   tokensSaida: number;
-  /** Parte de `tokensSaida` gasta em raciocínio (só quem informa: OpenAI). */
+  /** Parte de `tokensSaida` gasta em raciocínio (só quem informa: OpenAI, Gemini). */
   tokensRaciocinio?: number;
   ms: number;
 };
@@ -39,6 +39,8 @@ export type CodigoErroLlm =
   | "SEM_CHAVE"
   | "HTTP"
   | "SEM_CREDITO"
+  /** Cota diária do provedor esgotada (Gemini): volta sozinha no dia seguinte. Reprocessável como SEM_CREDITO. */
+  | "COTA_DIARIA"
   | "TIMEOUT"
   | "REDE"
   | "RECUSA"
@@ -57,10 +59,13 @@ export type CodigoErroLlm =
 export type DetalheFixo =
   | "sem crédito na API da OpenAI"
   | "sem crédito na API da Anthropic"
+  | "sem crédito na API do Gemini"
+  | "cota diária do Gemini esgotada; volta no próximo dia ou aumente o limite no AI Studio"
   | "sem crédito na API de LLM"
   | "OPENAI_API_KEY ausente"
   | "ANTHROPIC_API_KEY ausente"
-  | "LLM_PROVEDOR deve ser openai, anthropic ou mock"
+  | "GEMINI_API_KEY ausente"
+  | "LLM_PROVEDOR deve ser openai, anthropic, gemini ou mock"
   | "LLM_PROVEDOR=mock não é permitido em produção";
 
 /**
@@ -89,7 +94,7 @@ function textoDetalhe(d: DetalheLlm): string {
  */
 const DETALHE_PADRAO: Partial<Record<CodigoErroLlm, DetalheFixo>> = {
   // Reprocessável (GAB-41) depois de recarregar o saldo. Os provedores
-  // passam o próprio `detalhe` ("... da OpenAI"/"... da Anthropic"); o
+  // passam o próprio `detalhe` ("... da OpenAI"/"... da Anthropic"/"... do Gemini"); o
   // padrão é neutro para não apontar o provedor errado.
   SEM_CREDITO: "sem crédito na API de LLM",
 };

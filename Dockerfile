@@ -47,7 +47,9 @@ RUN ./node_modules/.bin/prisma generate && pnpm build && mkdir -p public
 
 # Poda do standalone (~60 MB): o app usa só o engine nativo (library) do Prisma
 # para Postgres; os runtimes wasm/edge e os de outros bancos nunca carregam.
-# sharp/libvips: nenhuma página usa next/image (se passar a usar, remova a poda).
+# sharp/libvips: next.config tem `images.unoptimized: true`, então o next/image
+# só gera <img> para os arquivos de public/ (já pré-dimensionados) e o
+# otimizador /_next/image nunca roda. Se ligar o otimizador, remova a poda.
 FROM build AS standalone
 RUN set -eu; cd .next/standalone/node_modules/.pnpm; \
     for d in @prisma+client*/node_modules; do \

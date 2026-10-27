@@ -22,7 +22,7 @@ import { definirConfiguracao } from "@/lib/configuracao/definicao";
 import { obterConfiguracao, restaurarConfiguracao, salvarConfiguracao } from "@/lib/configuracao/servico";
 import { registrarErro } from "@/lib/erros/registrar";
 import { ErroEvolutionAdmin, listarGrupos } from "@/lib/whatsapp/evolution-admin";
-import { ConfigAusente, ConfigFraca, LIMIAR_CLASSIFICADOR_PADRAO, LIMIAR_CONFIANCA_PADRAO, LIMIAR_SEM_TAG_PADRAO, MODELOS_EXTRACAO_PADRAO, TIMEOUT_ENVIO_MAX_MS, TIMEOUT_ENVIO_MIN_MS, TIMEOUT_ENVIO_PADRAO_MS } from "./env";
+import { ConfigAusente, ConfigFraca, LIMIAR_CLASSIFICADOR_PADRAO, LIMIAR_CONFIANCA_PADRAO, LIMIAR_SEM_TAG_PADRAO, MODELOS_EXTRACAO_PADRAO, TIMEOUT_ENVIO_MAX_MS, TIMEOUT_ENVIO_MIN_MS, TIMEOUT_ENVIO_PADRAO_MS, modeloDoProvedor } from "./env";
 import { definirSobrescritas } from "./sobrescritas";
 
 /** Campo da config → variável de ambiente que ele sobrescreve. */
@@ -40,7 +40,7 @@ export const VARIAVEIS_TECNICAS = {
 export type CampoTecnico = keyof typeof VARIAVEIS_TECNICAS;
 
 
-const PROVEDORES = ["openai", "anthropic", "mock"] as const;
+const PROVEDORES = ["openai", "anthropic", "gemini", "mock"] as const;
 type Provedor = (typeof PROVEDORES)[number];
 
 const limiar = (rotulo: string) =>
@@ -53,7 +53,7 @@ const schemaTecnica = z.object({
     .string()
     .trim()
     .regex(/^[\d-]{5,40}@g\.us$/, "Grupo: o JID precisa terminar em @g.us (use \"Listar grupos\")."),
-  provedor: z.enum(PROVEDORES, { error: "Provedor: openai, anthropic ou mock." }),
+  provedor: z.enum(PROVEDORES, { error: "Provedor: openai, anthropic, gemini ou mock." }),
   modeloExtracao: modelo("Modelo de extração"),
   modeloClassificacao: modelo("Modelo de classificação"),
   limiarConfianca: limiar("Limiar com #crm"),
@@ -112,8 +112,10 @@ function escolher<T>(config: T | undefined, env: T | undefined, padrao: T): Valo
   return { valor: padrao, origem: "padrao" };
 }
 
-const ehModeloAnthropic = (m: string) => m.startsWith("claude-");
-const modeloCombina = (m: string, p: string) => (p === "anthropic" ? ehModeloAnthropic(m) : p === "openai" ? !ehModeloAnthropic(m) : true);
+// `Object.hasOwn`: `in` aceitaria "constructor"/"toString" vindos do env.
+const ehReal = (p: string): p is keyof typeof MODELOS_EXTRACAO_PADRAO => Object.hasOwn(MODELOS_EXTRACAO_PADRAO, p);
+/** Mesma regra de `env.ts` (prefixo); mock/inválido não restringe o modelo. */
+const modeloCombina = (m: string, p: string) => (ehReal(p) ? modeloDoProvedor(m, p) : true);
 
 /**
  * O que está valendo, campo a campo, e de onde veio. Espelha as leituras de
@@ -122,7 +124,7 @@ const modeloCombina = (m: string, p: string) => (p === "anthropic" ? ehModeloAnt
 export function resolverConfigTecnica(cfg: ConfigTecnica, env: Env = process.env): ConfigTecnicaEfetiva {
   const provedor = escolher<string>(cfg.provedor, lerEnv(env, "LLM_PROVEDOR")?.toLowerCase(), "openai");
   const p = provedor.valor;
-  const padraoModelo = p === "openai" || p === "anthropic" ? MODELOS_EXTRACAO_PADRAO[p] : null;
+  const padraoModelo = ehReal(p) ? MODELOS_EXTRACAO_PADRAO[p] : null;
   const modeloExtracao = escolher<string | null>(cfg.modeloExtracao, lerEnv(env, "LLM_EXTRACAO_MODELO"), padraoModelo);
   // Como o GAB-39: modelo de classificação de outro provedor vindo do env é ignorado (usa o da extração).
   const classifEnv = lerEnv(env, "LLM_CLASSIFICACAO_MODELO");
@@ -153,11 +155,11 @@ const deOnde = (o: Origem) => (o === "env" ? " (vindo do ambiente)" : o === "pad
 /** Regras entre campos. `null` = ok; senão a frase para o Admin. */
 export function validarCombinacao(e: ConfigTecnicaEfetiva, nodeEnv = process.env.NODE_ENV): string | null {
   const p = e.provedor.valor;
-  if (!(PROVEDORES as readonly string[]).includes(p)) return `LLM_PROVEDOR=${p} no ambiente é inválido: escolha o provedor aqui (openai, anthropic ou mock).`;
+  if (!(PROVEDORES as readonly string[]).includes(p)) return `LLM_PROVEDOR=${p} no ambiente é inválido: escolha o provedor aqui (openai, anthropic, gemini ou mock).`;
   if (p === "mock" && nodeEnv === "production") return "O provedor mock não é permitido em produção (criaria cards com dados de teste).";
   const me = e.modeloExtracao.valor;
   if (me && !modeloCombina(me, p))
-    return `O modelo de extração "${me}"${deOnde(e.modeloExtracao.origem)} não é do provedor ${p}. Modelos da Anthropic começam com "claude-"; informe um modelo do provedor escolhido.`;
+    return `O modelo de extração "${me}"${deOnde(e.modeloExtracao.origem)} não é do provedor ${p}. Modelos da Anthropic começam com "claude-" e os do Gemini com "gemini-"; informe um modelo do provedor escolhido.`;
   const mc = e.modeloClassificacao.valor;
   if (mc && e.modeloClassificacao.origem === "config" && !modeloCombina(mc, p))
     return `O modelo de classificação "${mc}" não é do provedor ${p}. Deixe vazio para usar o mesmo da extração.`;

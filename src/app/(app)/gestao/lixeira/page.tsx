@@ -1,6 +1,6 @@
 import Link from "next/link";
+import { EstadoVazio } from "@/components/estado-vazio";
 import { cn } from "cn";
-import { Trash2 } from "lucide-react";
 import { FormBusca } from "@/components/entidades/form-busca";
 import { AcaoConfirmada } from "@/components/lixeira/acao-confirmada";
 import { Restaurar } from "@/components/lixeira/restaurar";
@@ -187,9 +187,13 @@ export default async function LixeiraPage({ searchParams }: { searchParams: Prom
       </nav>
       <FormBusca key={aba} ocultos={{ aba }} valor={q} rotulo="Buscar na lixeira" placeholder={aba === "cards" ? "título do card" : aba === "contatos" ? "nome, telefone ou email" : "nome ou CNPJ"} />
       {vazio ? (
-        <p className="flex items-center gap-2 rounded-xl border border-border bg-surface p-5 text-sm text-fg-faint">
-          <Trash2 className="size-4" aria-hidden /> {q ? "Nada encontrado na lixeira." : "Lixeira vazia."}
-        </p>
+        <EstadoVazio
+          mascote="piscando"
+          className="rounded-xl border border-border bg-surface"
+          {...(q
+            ? { titulo: "Nada encontrado na lixeira", texto: "Nenhum item excluído bate com essa busca." }
+            : { titulo: "Lixeira vazia", texto: "Nada foi excluído por aqui. Tudo no lugar." })}
+        />
       ) : (
         <ul className="divide-y divide-border rounded-xl border border-border bg-surface px-4">{conteudo}</ul>
       )}

@@ -22,6 +22,7 @@ import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalList
 import { CSS } from "@dnd-kit/utilities";
 import { ChevronsLeftRight, Plus } from "lucide-react";
 import { cn } from "cn";
+import { EstadoVazio } from "@/components/estado-vazio";
 import { MensagemErro } from "@/components/erros/mensagem-erro";
 import { DialogoTerminal, type PedidoTerminal } from "@/components/kanban/dialogo-terminal";
 import { Button } from "@/components/ui/button";
@@ -31,7 +32,7 @@ import { dialogoTerminal, type DadosTerminal } from "@/lib/oportunidades/termina
 import { criarCardAction, moverCardAction, salvarVisualizacaoKanbanAction } from "./actions";
 import { CardVisual } from "./card-visual";
 import { colunasAbertas, proximoAlvo } from "./colunas";
-import { escreverFiltros, filtrarCards, lerFiltros, type Filtros } from "./filtros";
+import { FILTROS_VAZIOS, escreverFiltros, filtrarCards, lerFiltros, type Filtros } from "./filtros";
 import { desfazerMovimento } from "./otimista";
 import { BarraFiltros, type Pessoa } from "./painel-filtros";
 import type { VisualizacaoKanban } from "@/lib/preferencias/preferencias";
@@ -263,8 +264,23 @@ export function QuadroKanban({ pipelineId, fases, cards: cardsServidor, agoraMs,
           <MensagemErro falha={erro} className="text-sm" />
         </div>
       ) : null}
-      {visiveis.length === 0 && cards.length > 0 ? (
-        <p className="mb-4 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-fg-mute">Nenhum card com esses filtros.</p>
+      {visiveis.length === 0 ? (
+        <EstadoVazio
+          mascote="cabeca"
+          tamanho="sm"
+          className="mb-4 shrink-0 rounded-xl border border-border bg-surface"
+          {...(cards.length > 0
+            ? {
+                titulo: "Nenhum card com esses filtros",
+                texto: "Afrouxe os filtros para ver o resto do quadro.",
+                acao: (
+                  <Button variant="outline" size="sm" onClick={() => mudarFiltros(FILTROS_VAZIOS)}>
+                    Limpar filtros
+                  </Button>
+                ),
+              }
+            : { titulo: "Este quadro ainda não tem cards", texto: "Use o + de uma fase para criar o primeiro." })}
+        />
       ) : null}
       <DndContext
         id={`kanban-${pipelineId}`}
@@ -313,6 +329,7 @@ export function QuadroKanban({ pipelineId, fases, cards: cardsServidor, agoraMs,
                 agoraMs={agoraMs}
                 pipelineId={pipelineId}
                 criandoInicial={criarEm === f.id}
+                mascoteNoVazio={visiveis.length > 0}
                 onCriado={(id) => {
                   setCriarEm(null);
                   if (id) fixar(id);
@@ -350,6 +367,7 @@ function Coluna({
   criandoInicial,
   onCriado,
   onRecolher,
+  mascoteNoVazio,
 }: {
   fase: FaseCliente;
   cards: CardCliente[];
@@ -359,6 +377,8 @@ function Coluna({
   /** Fim do formulário de novo card; `id` quando criou. */
   onCriado: (id?: string) => void;
   onRecolher?: () => void;
+  /** Falso quando o quadro todo está vazio: o aviso geral já traz o mascote (um só, não um por coluna). */
+  mascoteNoVazio: boolean;
 }) {
   // A coluna inteira é o alvo do drop (inclusive o cabeçalho).
   const { setNodeRef, isOver } = useDroppable({ id: idColuna(fase.id) });
@@ -402,7 +422,13 @@ function Coluna({
             <CardArrastavel key={c.id} card={c} fase={fase} agoraMs={agoraMs} />
           ))}
         </SortableContext>
-        {cards.length === 0 && !criando ? <p className="px-2 py-6 text-center text-xs text-fg-faint">Solte um card aqui</p> : null}
+        {cards.length === 0 && !criando ? (
+          mascoteNoVazio ? (
+            <EstadoVazio mascote="cabeca" tamanho="sm" titulo="Nenhum card nesta fase" texto="Solte um card aqui." />
+          ) : (
+            <p className="px-2 py-6 text-center text-xs text-fg-faint">Solte um card aqui</p>
+          )
+        ) : null}
       </div>
     </section>
   );
