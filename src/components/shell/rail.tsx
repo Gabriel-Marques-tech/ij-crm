@@ -13,7 +13,7 @@ import { SimboloIJ } from "@/components/marca/marca";
  * Visual: bg-subtle (sidebar) com borda, item ativo em primary-soft + coral.
  * Recebe só o papel (serializável); ícones são resolvidos aqui, no client.
  */
-export function Rail({ papel }: { papel: Papel }) {
+export function Rail({ papel, inicio }: { papel: Papel; inicio: string }) {
   const pathname = usePathname();
   // Vendas e Projetos são o mesmo /kanban: na lista o quadro vem do ?quadro=;
   // no detalhe, a página declara o quadro do card (`MarcarQuadroAtivo`).
@@ -30,7 +30,7 @@ export function Rail({ papel }: { papel: Papel }) {
         className="hidden md:flex fixed inset-y-0 left-0 w-[88px] flex-col items-center gap-1 border-r border-sidebar-border bg-sidebar py-4"
       >
         {/* Rail estreito (88 px): só o símbolo; o logo inteiro ficaria ilegível. */}
-        <Link href="/" className="mb-4 flex size-[60px] items-center justify-center rounded-xl bg-primary-soft/40 ring-1 ring-primary/20 hover:bg-primary-soft/70" title="Início">
+        <Link href={inicio} className="mb-4 flex size-[60px] items-center justify-center rounded-xl bg-primary-soft/40 ring-1 ring-primary/20 hover:bg-primary-soft/70" title="Início">
           <SimboloIJ tamanho={48} />
         </Link>
         {itens.map((item) => {

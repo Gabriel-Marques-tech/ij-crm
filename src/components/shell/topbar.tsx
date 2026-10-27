@@ -8,10 +8,10 @@ import { SimboloIJ } from "@/components/marca/marca";
 
 const ROTULO_PAPEL = { ADMIN: "admin", GESTOR: "gestor", VENDEDOR: "vendedor" } as const;
 
-export function Topbar({ usuario }: { usuario: UsuarioSessao }) {
+export function Topbar({ usuario, inicio }: { usuario: UsuarioSessao; inicio: string }) {
   return (
     <header className="sticky top-0 z-10 flex h-14 items-center justify-between border-b border-border bg-background/80 px-4 backdrop-blur md:px-8">
-      <Link href="/" className="md:hidden" title="Início">
+      <Link href={inicio} className="md:hidden" title="Início">
         <SimboloIJ tamanho={32} />
       </Link>
       <span className="hidden md:block" />
