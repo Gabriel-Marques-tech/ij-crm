@@ -138,7 +138,7 @@ lança (roda no `after()`): erro de banco vira log com ref e a linha fica para o
   `DUPLICADO` e não reprocessa);
 - `PROCESSANDO` há **mais de 5 min** (`atualizado_em`; pior caso LLM 2×30 s + transação) — nunca antes,
   ou dois workers pagam a LLM (a cerca impede só a gravação dupla);
-- `FALHA` (inclusive "sem crédito na API da Anthropic", depois da recarga), **mantendo `erro`**.
+- `FALHA` (inclusive "sem crédito na API de LLM/da OpenAI/da Anthropic", depois da recarga), **mantendo `erro`**.
 
 Env: `LLM_PROVEDOR=openai|anthropic|mock` (padrão `openai`; ver "Provedor de LLM" abaixo; dev sem chave: `mock`, que responde com as fixtures de
 `src/lib/llm/fixtures/extracao.ts`), `OPENAI_API_KEY`/`ANTHROPIC_API_KEY` (a do provedor escolhido;
@@ -173,6 +173,26 @@ com `maxRetries: 0`, 2ª tentativa só em 5xx/timeout/rede).
   ms=… tokens_in=… tokens_out=… tokens_reasoning=… ok` (`tokens_out` já inclui os de raciocínio).
 - Crédito pré-pago com recarga manual (auto-reload desligado, mínimo US$ 5, expira em 1 ano,
   sugestão US$ 50 a cada ~3 meses): `docs/runbook.md` §10.
+
+## Alerta de sem crédito na LLM
+
+GAB-46. A recarga da API de LLM é manual (pré-pago). Quando uma chamada falha com `SEM_CREDITO`
+(qualquer provedor), o caminho de `FALHA` de `processar.ts` chama `alertarSeSemCredito`
+(`src/lib/llm/alerta-credito.ts`), que:
+
+- manda `⚠️ Sem crédito na API de LLM. Mensagens do grupo estão ficando em FALHA e serão reprocessadas
+  depois da recarga. ref: …` para `ALERTA_OPS_JID` pelo `enviarWhatsApp` de sempre (timeout 60 s);
+- respeita cooldown guardado no banco (`alerta_operacional`, sobrevive a restart): 6 h depois de um aviso
+  entregue, 5 min se o envio falhou (ou se o processo cair entre reivindicar e enviar). Entrega confirmada
+  pela Evolution conta como avisado mesmo se a gravação local falhar depois (`ErroPosEnvio` em `enviar.ts`);
+- com `NOTIFICATIONS_ENABLED`≠`true` ou `ALERTA_OPS_JID` vazio, só loga (`[alerta-credito] … ref=…`);
+- nunca lança e nunca leva texto de mensagem do grupo (só a ref; `grep 'ref=…'` acha a causa).
+
+Gestor/admin veem um banner no topo do app ("desde …" e "Último erro de crédito: …") enquanto o incidente
+estiver aberto. Ele **não expira por tempo**: sem uma chamada bem-sucedida não dá para saber se o saldo voltou.
+A primeira chamada à LLM que der certo (`marcarCreditoOk`) fecha o incidente e apaga o banner, mas **não**
+zera o cooldown: o limite de 1 aviso a cada 6 h vale mesmo com falhas e sucessos alternados. Depois da
+recarga, as mensagens em `FALHA` voltam pelo reprocessamento (GAB-41).
 
 ## Kanban
 
