@@ -486,4 +486,35 @@ describe("descrição do Pipefy", () => {
     await importarConteudo(csv(""), undefined, admin, AGORA);
     expect((await card("700001")).descricao).toBe("Quer loja e blog");
   });
+
+  it("descrição editada no CRM depois do export conta como edição: o reimport pula o card (regra do GAB-37)", async () => {
+    const { admin } = await preparar();
+    const csv = (d: string, atualizado = "06/01/2026 10:00") => `ID;Título;Fase atual;Atualizado em;Descrição\n700002;Padaria;Primeiro Contato;${atualizado};${d}\n`;
+    const r1 = await importarConteudo(csv("do Pipefy"), undefined, admin, AGORA);
+    if (!r1.ok) throw new Error(r1.erro);
+    expect((await editarCard((await card("700002")).id, { descricao: "ajustada no CRM" }, admin)).ok).toBe(true);
+
+    const r2 = await importarConteudo(csv("nova do Pipefy"), undefined, admin, AGORA);
+    if (!r2.ok) throw new Error(r2.erro);
+    expect(r2.relatorio).toMatchObject({ atualizados: 0, pulados: 1 });
+    expect(r2.relatorio.erros[0].mensagem).toMatch(/^Card editado no CRM depois do export/);
+    expect((await card("700002")).descricao).toBe("ajustada no CRM");
+
+    // Export mais novo que a edição: o Pipefy vale.
+    const r3 = await importarConteudo(csv("nova do Pipefy", "01/01/2099 10:00"), undefined, admin, AGORA);
+    if (!r3.ok) throw new Error(r3.erro);
+    expect((await card("700002")).descricao).toBe("nova do Pipefy");
+  });
+
+  it("IMPORT “atualizado” guarda só prévia da descrição longa", async () => {
+    const { admin } = await preparar();
+    const csv = (d: string) => `ID;Título;Fase atual;Descrição\n700003;Padaria;Primeiro Contato;${d}\n`;
+    await importarConteudo(csv("curta"), undefined, admin, AGORA);
+    const longa = "y".repeat(1000);
+    const r = await importarConteudo(csv(longa), undefined, admin, AGORA);
+    if (!r.ok) throw new Error(r.erro);
+    expect((await card("700003")).descricao).toBe(longa);
+    const tl = await db.timeline.findFirstOrThrow({ where: { oportunidade: { pipefyId: "700003" }, tipo: "IMPORT", payload: { path: ["acao"], equals: "atualizado" } } });
+    expect((tl.payload as { mudancas: unknown[] }).mudancas).toContainEqual({ campo: "descricao", antes: "curta", depois: "y".repeat(300), truncado: true });
+  });
 });

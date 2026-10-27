@@ -31,7 +31,8 @@ const FASES = [fase("a", "Primeiro Contato"), fase("b", "Proposta")];
 const card: CardCliente = {
   id: "c1",
   titulo: "Padaria do Zé",
-  descricao: null,
+  descricaoPrevia: null,
+  descricaoTruncada: false,
   faseId: "a",
   faseDesdeMs: AGORA,
   revisar: false,

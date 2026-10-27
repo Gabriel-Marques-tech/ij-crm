@@ -5,7 +5,8 @@ import type { CardCliente } from "./tipos";
 const card = (id: string, faseId: string, faseDesdeMs = 1): CardCliente => ({
   id,
   titulo: id,
-  descricao: null,
+  descricaoPrevia: null,
+  descricaoTruncada: false,
   faseId,
   faseDesdeMs,
   revisar: false,

@@ -166,3 +166,12 @@ describe("interpretarCsv — coluna de descrição", () => {
     expect(en.cards[0]).toMatchObject({ dor: null, descricao: "landing page" });
   });
 });
+
+describe("interpretarCsv — corte de texto longo", () => {
+  it("corta no limite sem partir emoji e avisa", () => {
+    const longa = `${"x".repeat(4999)}😀fim`;
+    const r = ok(`ID;Título;Fase atual;Descrição\n1;Padaria;Primeiro Contato;${longa}\n`);
+    expect(r.cards[0].descricao).toBe("x".repeat(4999));
+    expect(r.avisos.map((a) => a.mensagem)).toContain('"descricao" com mais de 5000 caracteres: cortado.');
+  });
+});

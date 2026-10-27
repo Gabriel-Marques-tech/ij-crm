@@ -15,6 +15,7 @@
 import type { Origem, TipoContatoPonto } from "@prisma/client";
 import { normalizarCnpj, normalizarEmail, normalizarTelefoneBr } from "@/lib/normalizacao";
 import { DESCRICAO_MAX, UFS, validarTitulo } from "@/lib/oportunidades/campos";
+import { cortarTexto } from "@/lib/texto";
 import { lerCsv } from "./csv";
 import { ALIASES_PADRAO, mapearCabecalho, type Aliases, type Campo, type ColunaHistorico } from "./colunas";
 import { lerData, lerLista, lerOrigem, lerValor, normalizarTexto } from "./valores";
@@ -162,7 +163,7 @@ export function interpretarCsv(texto: string, opts: { aliases?: Aliases; maxLinh
       if (!t) return null;
       if (t.length > max) {
         avisar(`"${c}" com mais de ${max} caracteres: cortado.`);
-        return t.slice(0, max);
+        return cortarTexto(t, max).texto;
       }
       return t;
     };
