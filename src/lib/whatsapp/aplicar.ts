@@ -5,9 +5,15 @@
  *
  * Duas fases: PLANO (só leitura; decide e pode desistir com PENDENTE sem ter
  * gravado nada) e ESCRITA. Regras de identidade (contrato de GAB-31):
- * - Contato reaproveitado só por telefone/email EXATO citado no texto. Ponto
- *   de contato excluído (`BLOQUEADO_EXCLUIDO`) → PENDENTE, nunca cria.
- *   Pontos que a LLM atribui ao contato só valem se aparecem no texto.
+ * - Identidade vem do TEXTO, não do que a LLM ecoa: os telefones/emails
+ *   achados por regex (`citados`) decidem o contato. Exatamente um dono vivo
+ *   → reaproveita; donos diferentes → PENDENTE (IDENTIFICADORES_CONFLITANTES);
+ *   ponto de contato excluído (`BLOQUEADO_EXCLUIDO`) → PENDENTE, nunca cria.
+ *   Os pontos gravados são os citados no texto (o que a LLM devolve e não
+ *   está no texto é descartado).
+ * - Empresa do contato reaproveitado (cadeia exata, não match por nome) é
+ *   vinculada, resolvendo merge até a principal viva; se o nome que a LLM
+ *   leu difere (sem acento/caixa) do cadastrado → revisar.
  * - Empresa vinculada automaticamente SÓ por CNPJ (`encontrarEmpresa` →
  *   `via: "cnpj"`). Domínio do email é SUGESTÃO: vai para `sugestoes` e
  *   marca `revisar`, sem vincular. Nome igual a um cadastro existente também
@@ -17,9 +23,11 @@
  *   como em `criarCard`) → `primeiro_contato` + revisar.
  * - Responsável = remetente; `responsavel_nome` só troca com match exato
  *   (sem acento/caixa) do nome completo de UM usuário ativo.
+ * - Motivos de revisão vão para o grupo: nunca ecoam texto livre da LLM
+ *   (fase/responsável viram frase fixa).
  */
 import type { Origem, Prisma } from "@prisma/client";
-import { encontrarContatoPorIdentificador, encontrarEmpresa } from "@/lib/contatos/match";
+import { encontrarContatoPorIdentificador, encontrarEmpresa, resolverEmpresas } from "@/lib/contatos/match";
 import { validarNome } from "@/lib/entidades/campos";
 import { travarPipelines } from "@/lib/fases/fases";
 import { resolverDataRelativa } from "@/lib/llm/datas";
@@ -71,18 +79,26 @@ function pendente(motivo: MotivoPendente): Desfecho {
   return { tipo: "PENDENTE", motivo };
 }
 
-/** Pontos que a LLM atribuiu ao contato, normalizados, e só se citados no texto. */
-function pontosDoContato(ex: Extracao, citados: Set<string>): (PontoNormalizado & { valorOriginal: string })[] {
-  const saida: (PontoNormalizado & { valorOriginal: string })[] = [];
+type PontoNovo = PontoNormalizado & { valorOriginal: string };
+
+/**
+ * Pontos a gravar: os identificadores citados no texto. O valor original é o
+ * que a LLM devolveu quando ele normaliza para o mesmo valor; senão o próprio
+ * valor normalizado.
+ */
+function pontosCitados(ex: Extracao, ids: { telefones: string[]; emails: string[] }): PontoNovo[] {
+  const original = new Map<string, string>();
   for (const [bruto, tipo] of [
     [ex.contato.telefone, "TELEFONE"],
     [ex.contato.email, "EMAIL"],
   ] as const) {
-    if (!bruto) continue;
-    const p = normalizarPonto(bruto, tipo);
-    if (p && citados.has(p.valorNormalizado)) saida.push({ ...p, valorOriginal: bruto.trim() });
+    const p = bruto ? normalizarPonto(bruto, tipo) : null;
+    if (p) original.set(p.valorNormalizado, bruto!.trim());
   }
-  return saida;
+  return [
+    ...ids.telefones.map((v) => ({ tipo: "TELEFONE" as const, valorNormalizado: v, valorOriginal: original.get(v) ?? v })),
+    ...ids.emails.map((v) => ({ tipo: "EMAIL" as const, valorNormalizado: v, valorOriginal: original.get(v) ?? v })),
+  ];
 }
 
 export async function aplicarExtracao(tx: Tx, e: EntradaAplicacao): Promise<Desfecho> {
@@ -110,8 +126,8 @@ export async function aplicarExtracao(tx: Tx, e: EntradaAplicacao): Promise<Desf
       donoDoPonto.set(valor, m.contato.id);
     }
   }
-  const pontos = pontosDoContato(ex, citados);
-  const donos = new Set(pontos.map((p) => donoDoPonto.get(p.valorNormalizado)).filter((v): v is string => !!v));
+  const pontos = pontosCitados(ex, ids);
+  const donos = new Set(donoDoPonto.values());
   if (donos.size > 1) return pendente("IDENTIFICADORES_CONFLITANTES");
 
   let contatoExistente: { id: string; nome: string; empresaId: string | null } | null = null;
@@ -137,7 +153,13 @@ export async function aplicarExtracao(tx: Tx, e: EntradaAplicacao): Promise<Desf
     motivos.push("empresa indicada pela leitura não confere por CNPJ");
   }
   if (!empresaExistente && contatoExistente?.empresaId) {
-    empresaExistente = await tx.empresa.findFirst({ where: { id: contatoExistente.empresaId, ...VIVO }, select: { id: true, nome: true } });
+    const fim = (await resolverEmpresas([contatoExistente.empresaId], tx)).get(contatoExistente.empresaId);
+    if (fim && !fim.deletado) {
+      empresaExistente = { id: fim.id, nome: fim.nome };
+      if (ex.empresa.nome && nomeComparavel(ex.empresa.nome) !== nomeComparavel(fim.nome)) {
+        motivos.push("empresa da mensagem difere da empresa do contato");
+      }
+    }
   }
   const nomeEmpresaNova = !empresaExistente && ex.empresa.nome ? validarNome(ex.empresa.nome) : null;
 
@@ -177,7 +199,7 @@ export async function aplicarExtracao(tx: Tx, e: EntradaAplicacao): Promise<Desf
     motivos.unshift("fechamento (ganho/perdido) só pelo CRM");
     fase = undefined;
   } else if (ex.fase_chave && !fase) {
-    motivos.push(`fase “${ex.fase_chave}” não reconhecida`);
+    motivos.push("fase indicada não reconhecida");
   }
   fase ??= fases.find((f) => f.chave === FASE_PADRAO_CRIAR && !f.isTerminal) ?? fases.find((f) => !f.isTerminal);
   if (!fase) throw new ErroDeRegra("FASE_NAO_ENCONTRADA");
@@ -191,7 +213,7 @@ export async function aplicarExtracao(tx: Tx, e: EntradaAplicacao): Promise<Desf
     const ativos = await tx.usuario.findMany({ where: { ativo: true }, select: { id: true, nome: true } });
     const iguais = ativos.filter((u) => nomeComparavel(u.nome) === alvo);
     if (iguais.length === 1) responsavel = iguais[0];
-    else motivos.push(`responsável “${ex.responsavel_nome.trim()}” não encontrado`);
+    else motivos.push("responsável indicado não encontrado");
   }
 
   // ---- PLANO: campos

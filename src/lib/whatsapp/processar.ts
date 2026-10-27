@@ -5,18 +5,31 @@
  * - O webhook comita a ingestão e agenda `processarMensagem(id)` em
  *   `after()` (mesmo request, depois do 200). O cron de reprocessamento
  *   (GAB-41) chama a MESMA função para linhas que ficaram para trás.
- * - Reivindicação atômica: `UPDATE … SET status = 'PROCESSANDO' WHERE id = $1
- *   AND status = 'RECEBIDA'`. Só quem muda a linha segue; retry/concorrência
- *   viram no-op (`IGNORADA`) e nunca cobram a LLM duas vezes. Linha presa em
- *   PROCESSANDO (processo morreu no meio) é assunto do GAB-41 (devolver a
- *   RECEBIDA depois de N minutos).
+ * - Reivindicação atômica: `UPDATE … SET status = 'PROCESSANDO', tentativas =
+ *   tentativas + 1 WHERE id = $1 AND status = 'RECEBIDA' RETURNING tentativas`.
+ *   Só quem muda a linha segue; retry/concorrência viram no-op (`IGNORADA`) e
+ *   nunca cobram a LLM duas vezes.
+ * - Cerca (fencing): a reivindicação vale para a tentativa `n` devolvida. A
+ *   1ª instrução da transação de aplicação (e o registro de FALHA) é um
+ *   UPDATE condicionado a `status = 'PROCESSANDO' AND tentativas = n`; 0
+ *   linhas = outro worker reivindicou depois → desiste sem gravar nem
+ *   responder (`IGNORADA`).
+ * - Contrato do GAB-41 (reprocessamento): pega RECEBIDA com mais de N min
+ *   (o processo pode ter morrido antes do `after()`; o retry da Evolution cai
+ *   em DUPLICADO), FALHA, e PROCESSANDO com mais de 5 min (pior caso: LLM
+ *   2×30 s + transação). Ao devolver FALHA → RECEBIDA mantém `erro`: é o que
+ *   faz a resposta começar com "Reprocessada:".
  * - A LLM roda FORA de qualquer transação (a tx interativa do Prisma expira
  *   em 5s); a aplicação (Empresa/Contato/Oportunidade/Timeline + status) roda
  *   numa transação só.
  * - Falha da LLM ou da aplicação → `FALHA`, `erro` = código + ref,
  *   `registrarErro` loga a causa com a mesma ref (nunca o texto), e o grupo
  *   recebe "❌ … (ref: …)". `resultado_llm` guarda o que deu para guardar.
- * - Uma resposta por mensagem: a confirmação real substitui o "recebido".
+ * - Uma resposta por tentativa que conclui: a confirmação real substitui o
+ *   "recebido"; reprocessar uma ❌ manda uma 2ª ("✅ Reprocessada: …").
+ * - `processarMensagem` nunca lança (roda dentro de `after()`): erro de
+ *   banco ao carregar ou ao gravar a FALHA é registrado com ref e a linha
+ *   fica para o GAB-41.
  */
 import { Prisma } from "@prisma/client";
 import { modeloExtracao, limiarConfianca } from "@/lib/config/env";
@@ -37,7 +50,17 @@ export type ResultadoProcessamento =
   | { tipo: "IGNORADA" }
   | { tipo: "PROCESSADA"; oportunidadeId: string; confirmacao: string }
   | { tipo: "PENDENTE_REVISAO"; confirmacao: string }
-  | { tipo: "FALHA"; ref: string; codigo: string; confirmacao: string };
+  | { tipo: "FALHA"; ref: string; codigo: string; confirmacao: string }
+  /** Erro inesperado fora do fluxo normal (ex.: banco fora); registrado com ref. */
+  | { tipo: "ERRO"; ref: string };
+
+/** Outro worker reivindicou a linha depois de nós: desistir sem gravar nada. */
+class CercaPerdida extends Error {
+  constructor() {
+    super("reivindicação perdida");
+    this.name = "CercaPerdida";
+  }
+}
 
 type Bruta = NonNullable<Awaited<ReturnType<typeof carregar>>>;
 
@@ -55,6 +78,7 @@ function carregar(id: string) {
       remetenteLid: true,
       remetenteUsuarioId: true,
       remetenteUsuario: { select: { nome: true } },
+      erro: true,
     },
   });
 }
@@ -165,14 +189,21 @@ async function responder(m: Bruta, texto: string, oportunidadeId: string | null,
   }
 }
 
-async function falhar(m: Bruta, e: unknown, llm: ReturnType<typeof registroLlm>, participantJid?: string | null): Promise<ResultadoProcessamento> {
+async function falhar(
+  m: Bruta,
+  tentativa: number,
+  e: unknown,
+  llm: ReturnType<typeof registroLlm>,
+  participantJid?: string | null,
+): Promise<ResultadoProcessamento> {
   const ref = registrarErro("processar", erroSeguro(e));
   const codigo = codigoDe(e);
   const motivo = e instanceof ErroLlm ? e.message : codigo;
-  await db.mensagemBruta.update({
-    where: { id: m.id },
+  const { count } = await db.mensagemBruta.updateMany({
+    where: { id: m.id, status: "PROCESSANDO", tentativas: tentativa },
     data: { status: "FALHA", erro: `${motivo} ref=${ref}`, resultadoLlm: { ...llm, aplicacao: { tipo: "FALHA", codigo, ref } } as Prisma.InputJsonValue },
   });
+  if (count === 0) return { tipo: "IGNORADA" };
   const confirmacao = textoFalha(ref);
   await responder(m, confirmacao, null, participantJid);
   return { tipo: "FALHA", ref, codigo, confirmacao };
@@ -184,20 +215,33 @@ async function falhar(m: Bruta, e: unknown, llm: ReturnType<typeof registroLlm>,
  * de LLM/aplicação — vira `FALHA`.
  */
 export async function processarMensagem(id: string, opts: { participantJid?: string | null } = {}): Promise<ResultadoProcessamento> {
-  const reivindicadas = await db.$executeRaw`
+  try {
+    return await processar(id, opts);
+  } catch (e) {
+    const ref = registrarErro("processar", erroSeguro(e));
+    return { tipo: "ERRO", ref };
+  }
+}
+
+async function processar(id: string, opts: { participantJid?: string | null }): Promise<ResultadoProcessamento> {
+  const reivindicadas = await db.$queryRaw<{ tentativas: number }[]>`
     UPDATE mensagem_bruta
        SET status = 'PROCESSANDO', tentativas = tentativas + 1, atualizado_em = now()
-     WHERE id = ${id} AND status = 'RECEBIDA'`;
-  if (reivindicadas !== 1) return { tipo: "IGNORADA" };
+     WHERE id = ${id} AND status = 'RECEBIDA'
+ RETURNING tentativas`;
+  if (reivindicadas.length !== 1) return { tipo: "IGNORADA" };
+  const tentativa = reivindicadas[0].tentativas;
   const m = (await carregar(id))!;
+  // Já tinha terminado em FALHA (❌ enviado) e o GAB-41 devolveu: avisa na resposta.
+  const reprocessada = m.erro !== null;
 
-  if (!m.remetenteUsuarioId) return falhar(m, new ErroDeRegra("RESPONSAVEL_INVALIDO"), registroLlm(null), opts.participantJid);
+  if (!m.remetenteUsuarioId) return falhar(m, tentativa, new ErroDeRegra("RESPONSAVEL_INVALIDO"), registroLlm(null), opts.participantJid);
 
   let r: ResultadoExtracao;
   try {
     r = await extrairAtualizacao(m.texto, await montarContexto(m), { ref: m.id });
   } catch (e) {
-    return falhar(m, e, registroLlm(null, e instanceof ErroLlm ? e.bruto : undefined, e instanceof ErroLlm ? e.uso : undefined), opts.participantJid);
+    return falhar(m, tentativa, e, registroLlm(null, e instanceof ErroLlm ? e.bruto : undefined, e instanceof ErroLlm ? e.uso : undefined), opts.participantJid);
   }
   const llm = registroLlm(r);
 
@@ -205,6 +249,12 @@ export async function processarMensagem(id: string, opts: { participantJid?: str
   try {
     desfecho = await db.$transaction(
       async (tx) => {
+        // Cerca: 1ª instrução. Trava a linha até o commit e confirma que a
+        // reivindicação ainda é nossa.
+        const minha = await tx.$executeRaw`
+          UPDATE mensagem_bruta SET atualizado_em = now()
+           WHERE id = ${m.id} AND status = 'PROCESSANDO' AND tentativas = ${tentativa}`;
+        if (minha !== 1) throw new CercaPerdida();
         const d = await aplicarExtracao(tx, {
           mensagem: { id: m.id, texto: m.texto, recebidaEm: m.recebidaEm, remetenteUsuarioId: m.remetenteUsuarioId! },
           extracao: r.extracao,
@@ -224,15 +274,16 @@ export async function processarMensagem(id: string, opts: { participantJid?: str
       { timeout: 15_000 },
     );
   } catch (e) {
-    return falhar(m, e, llm, opts.participantJid);
+    if (e instanceof CercaPerdida) return { tipo: "IGNORADA" };
+    return falhar(m, tentativa, e, llm, opts.participantJid);
   }
 
   if (desfecho.tipo === "PENDENTE") {
-    const confirmacao = textoPendente(desfecho.motivo);
+    const confirmacao = textoPendente(desfecho.motivo, { reprocessada });
     await responder(m, confirmacao, null, opts.participantJid);
     return { tipo: "PENDENTE_REVISAO", confirmacao };
   }
-  const confirmacao = textoCriado(desfecho);
+  const confirmacao = textoCriado(desfecho, { reprocessada });
   await responder(m, confirmacao, desfecho.oportunidadeId, opts.participantJid);
   return { tipo: "PROCESSADA", oportunidadeId: desfecho.oportunidadeId, confirmacao };
 }

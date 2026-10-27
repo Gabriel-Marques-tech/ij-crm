@@ -187,7 +187,81 @@ describe("identidade: reaproveita só por identificador exato", () => {
     definirRespostaMock(() => saida({ empresa: { nome: "X" }, responsavel_nome: "Maria Antiga" }));
     const r = await processarMensagem((await bruta("#crm X, passa pra Maria Antiga")).id);
     expect(r).toMatchObject({ confirmacao: expect.stringContaining("Resp: João.") });
-    expect(r).toMatchObject({ confirmacao: expect.stringContaining("responsável “Maria Antiga” não encontrado") });
+    expect(r).toMatchObject({ confirmacao: expect.stringContaining("Marquei para revisar: responsável indicado não encontrado.") });
+    expect(r).not.toMatchObject({ confirmacao: expect.stringContaining("Maria Antiga") });
+  });
+
+  it("fase devolvida pela LLM não é ecoada no grupo", async () => {
+    definirRespostaMock(() => saida({ empresa: { nome: "X" }, fase_chave: "fase_inventada\ncom quebra" }));
+    const r = await processarMensagem((await bruta("#crm X")).id);
+    expect(r).toMatchObject({ confirmacao: expect.stringContaining("Marquei para revisar: fase indicada não reconhecida.") });
+    expect(r).not.toMatchObject({ confirmacao: expect.stringContaining("inventada") });
+  });
+
+  it("LLM omite o telefone citado no texto → mesmo assim reusa o contato dono dele", async () => {
+    const existente = await dbT.contato.create({
+      data: { nome: "Gustavo Saab", pontos: { create: [{ tipo: "TELEFONE", valorNormalizado: "+5511977776666", valorOriginal: "x" }] } },
+    });
+    definirRespostaMock(() => saida({ contato: { nome: "Gustavo" }, empresa: { nome: "Economia Sensata" } }));
+    const r = await processarMensagem((await bruta("#crm falei com o Gustavo 11 97777-6666 da Economia Sensata")).id);
+    expect(r.tipo).toBe("PROCESSADA");
+    expect(await dbT.contato.count()).toBe(1);
+    expect(await dbT.oportunidade.findFirstOrThrow()).toMatchObject({ contatoId: existente.id });
+  });
+
+  it("dois identificadores citados de contatos diferentes → PENDENTE, mesmo se a LLM devolve só um", async () => {
+    await dbT.contato.create({ data: { nome: "A", pontos: { create: [{ tipo: "TELEFONE", valorNormalizado: "+5511977776666", valorOriginal: "x" }] } } });
+    await dbT.contato.create({ data: { nome: "B", pontos: { create: [{ tipo: "EMAIL", valorNormalizado: "b@acme.com.br", valorOriginal: "x" }] } } });
+    definirRespostaMock(() => saida({ contato: { nome: "A", telefone: "11 97777-6666" }, empresa: { nome: "Acme" } }));
+    const r = await processarMensagem((await bruta("#crm A 11 97777-6666 b@acme.com.br da Acme")).id);
+    expect(r).toMatchObject({ tipo: "PENDENTE_REVISAO", confirmacao: expect.stringMatching(/^⚠️ .*cadastros diferentes/u) });
+    expect(await dbT.oportunidade.count()).toBe(0);
+    expect(await dbT.contato.count()).toBe(2);
+  });
+
+  it("contato novo recebe os identificadores citados no texto, mesmo os que a LLM não devolveu", async () => {
+    definirRespostaMock(() => saida({ contato: { nome: "Pedro", telefone: "11 90000-0000" }, empresa: { nome: "X" } }));
+    await processarMensagem((await bruta("#crm Pedro 11 98888-1111 pedro@x.com.br da X")).id);
+    const pontos = (await dbT.contatoPonto.findMany({ select: { tipo: true, valorNormalizado: true } })).sort((a, b) => a.tipo.localeCompare(b.tipo));
+    // O telefone que a LLM inventou (não está no texto) não entra.
+    expect(pontos).toEqual([
+      { tipo: "EMAIL", valorNormalizado: "pedro@x.com.br" },
+      { tipo: "TELEFONE", valorNormalizado: "+5511988881111" },
+    ]);
+  });
+
+  it("empresa do contato reusado com nome diferente do que a LLM leu → vincula, mas marca revisar", async () => {
+    const emp = await dbT.empresa.create({ data: { nome: "Economia Sensata" } });
+    await dbT.contato.create({
+      data: { nome: "Gustavo", empresaId: emp.id, pontos: { create: [{ tipo: "TELEFONE", valorNormalizado: "+5511977776666", valorOriginal: "x" }] } },
+    });
+    definirRespostaMock(() => saida({ contato: { nome: "Gustavo" }, empresa: { nome: "Outra Firma" } }));
+    const r = await processarMensagem((await bruta("#crm Gustavo 11 97777-6666 da Outra Firma")).id);
+    expect(await dbT.oportunidade.findFirstOrThrow()).toMatchObject({ empresaId: emp.id, revisar: true });
+    expect(r).toMatchObject({ confirmacao: expect.stringContaining("Marquei para revisar: empresa da mensagem difere da empresa do contato.") });
+    expect(await dbT.empresa.count()).toBe(1);
+  });
+
+  it("nome igual com acento/caixa diferente não marca revisar", async () => {
+    const emp = await dbT.empresa.create({ data: { nome: "Economia Sensata" } });
+    await dbT.contato.create({
+      data: { nome: "Gustavo", empresaId: emp.id, pontos: { create: [{ tipo: "TELEFONE", valorNormalizado: "+5511977776666", valorOriginal: "x" }] } },
+    });
+    definirRespostaMock(() => saida({ contato: { nome: "Gustavo" }, empresa: { nome: "ECONOMIA  sénsata" } }));
+    await processarMensagem((await bruta("#crm Gustavo 11 97777-6666")).id);
+    expect(await dbT.oportunidade.findFirstOrThrow()).toMatchObject({ empresaId: emp.id, revisar: false });
+  });
+
+  it("empresa do contato reusado foi mesclada → vincula a principal viva (não cria nova)", async () => {
+    const principal = await dbT.empresa.create({ data: { nome: "Sensata Holding" } });
+    const antiga = await dbT.empresa.create({ data: { nome: "Economia Sensata", mergedIntoId: principal.id } });
+    await dbT.contato.create({
+      data: { nome: "Gustavo", empresaId: antiga.id, pontos: { create: [{ tipo: "TELEFONE", valorNormalizado: "+5511977776666", valorOriginal: "x" }] } },
+    });
+    definirRespostaMock(() => saida({ contato: { nome: "Gustavo" }, empresa: { nome: "Sensata Holding" } }));
+    await processarMensagem((await bruta("#crm Gustavo 11 97777-6666")).id);
+    expect(await dbT.oportunidade.findFirstOrThrow()).toMatchObject({ empresaId: principal.id });
+    expect(await dbT.empresa.count()).toBe(2);
   });
 });
 
@@ -210,6 +284,46 @@ describe("reivindicação e idempotência", () => {
     expect(await processarMensagem(m.id)).toEqual({ tipo: "IGNORADA" });
     expect(await dbT.oportunidade.count()).toBe(1);
     expect((await dbT.mensagemBruta.findUniqueOrThrow({ where: { id: m.id } })).tentativas).toBe(1);
+  });
+
+  it("cerca: linha devolvida e re-reivindicada durante a LLM → o worker antigo não grava nem responde", async () => {
+    let id = "";
+    definirRespostaMock(async () => {
+      // GAB-41 devolveu a RECEBIDA e outro worker reivindicou (tentativas+1).
+      await dbT.$executeRaw`UPDATE mensagem_bruta SET status = 'PROCESSANDO', tentativas = tentativas + 1 WHERE id = ${id}`;
+      return FIXTURES_EXTRACAO[0].saida;
+    });
+    const m = await bruta(FIXTURES_EXTRACAO[0].texto);
+    id = m.id;
+    const r = await processarMensagem(m.id);
+    expect(r).toEqual({ tipo: "IGNORADA" });
+    expect(await dbT.oportunidade.count()).toBe(0);
+    expect(await dbT.empresa.count()).toBe(0);
+    expect(await dbT.contato.count()).toBe(0);
+    expect(await dbT.mensagemBruta.findUniqueOrThrow({ where: { id } })).toMatchObject({ status: "PROCESSANDO", tentativas: 2, resultadoLlm: null });
+    expect(logs(console.info)).not.toContain("SAFE MODE");
+  });
+
+  it("cerca também no caminho de falha: worker antigo não marca FALHA nem manda ❌", async () => {
+    let id = "";
+    definirRespostaMock(async () => {
+      await dbT.$executeRaw`UPDATE mensagem_bruta SET status = 'PROCESSANDO', tentativas = tentativas + 1 WHERE id = ${id}`;
+      throw new ErroLlm("HTTP", { status: 500 });
+    });
+    const m = await bruta("#crm x");
+    id = m.id;
+    const r = await processarMensagem(m.id);
+    expect(r).toEqual({ tipo: "IGNORADA" });
+    expect(await dbT.mensagemBruta.findUniqueOrThrow({ where: { id } })).toMatchObject({ status: "PROCESSANDO", erro: null });
+    expect(logs(console.info)).not.toContain("SAFE MODE");
+  });
+
+  it("mensagem que já tinha dado ❌ e foi reprocessada → \"✅ Reprocessada: …\"", async () => {
+    // Contrato GAB-41: ao devolver FALHA → RECEBIDA, mantém `erro`.
+    const m = await bruta(FIXTURES_EXTRACAO[0].texto, { erro: "LLM HTTP HTTP 500 ref=abc12345", tentativas: 1 });
+    const r = await processarMensagem(m.id);
+    expect(r).toMatchObject({ tipo: "PROCESSADA", confirmacao: expect.stringMatching(/^✅ Reprocessada: Gustavo — Economia Sensata/u) });
+    expect(await dbT.mensagemBruta.findUniqueOrThrow({ where: { id: m.id } })).toMatchObject({ status: "PROCESSADA", erro: null });
   });
 
   it("linha que não está RECEBIDA (FALHA, PROCESSADA) é ignorada", async () => {
@@ -309,6 +423,28 @@ describe("falhas → FALHA com ref, nunca quebra, nunca loga o texto", () => {
     expect(d.status).toBe("FALHA");
     expect(d.resultadoLlm).toMatchObject({ saida: FIXTURES_EXTRACAO[0].saida });
     expect(logs(console.error)).not.toContain("sensível");
+  });
+
+  it("nunca lança para o after(): erro ao carregar a linha → registra com ref e devolve", async () => {
+    const m = await bruta("#crm x");
+    vi.spyOn(db.mensagemBruta, "findUnique").mockRejectedValueOnce(new Error("banco caiu com texto sensível"));
+    const r = await processarMensagem(m.id);
+    expect(r).toMatchObject({ tipo: "ERRO", ref: expect.any(String) });
+    if (r.tipo !== "ERRO") throw new Error();
+    expect(logs(console.error)).toContain(`ref=${r.ref}`);
+    expect(logs(console.error)).not.toContain("sensível");
+  });
+
+  it("nunca lança para o after(): erro ao gravar a FALHA → registra com ref e devolve (linha fica para o GAB-41)", async () => {
+    definirRespostaMock(() => {
+      throw new ErroLlm("HTTP", { status: 500 });
+    });
+    const m = await bruta("#crm x");
+    vi.spyOn(db.mensagemBruta, "updateMany").mockRejectedValue(new Error("banco caiu"));
+    const r = await processarMensagem(m.id);
+    expect(r).toMatchObject({ tipo: "ERRO" });
+    expect(await dbT.mensagemBruta.findUniqueOrThrow({ where: { id: m.id } })).toMatchObject({ status: "PROCESSANDO" });
+    expect(logs(console.info)).not.toContain("SAFE MODE");
   });
 
   it("log de custo/latência por chamada, sem o texto", async () => {
