@@ -12,17 +12,25 @@
  *   Telefone/email sem dono acumulam no contato do card; de outro contato →
  *   revisar (não rouba ponto). Card sem contato: dono único → vincula;
  *   senão nome lido → contato novo.
- * - Empresa: CNPJ citado vincula. Nome lido: card sem empresa → empresa do
- *   contato (se o nome bate) ou nova; card com empresa de outro nome → só
- *   troca numa CORREÇÃO (reply a confirmação), senão revisar.
- * - Fase pela chave. Terminal só com o dado obrigatório na mensagem (valor
- *   do ganho / motivo da perda); sem ele não move e marca revisar.
+ * - Empresa: CNPJ citado só vincula card SEM empresa (outra → sugestão +
+ *   revisar). Nome lido comparado EXATO (acento/caixa/espaços normalizados,
+ *   nunca por trecho): card sem empresa → a do contato (nome diferente →
+ *   sugestão + revisar) ou nova; card com empresa de outro nome → só troca
+ *   numa CORREÇÃO (reply a confirmação), e mesmo assim com revisar.
+ *   Contato que já tem empresa nunca é reescrito.
+ * - Fase pela chave. Terminal só com o dado obrigatório ANCORADO no texto
+ *   (`fechamento.ts`); sem ele não move e marca revisar.
  * - Campos: só os que vieram (nunca apaga); origem só se o card não tinha.
+ *   Dono do card existente nunca muda pelo WhatsApp ("responsável
+ *   sugerido" + revisar). Identificador citado sem contato onde guardar →
+ *   revisar.
+ * - Corrida de reabertura: os cards ABERTOS da identidade são relidos dentro
+ *   do lock, então a 2ª mensagem usa o card que a 1ª reabriu.
  *
  * ESCRITA: Timeline MENSAGEM_WHATSAPP, vínculos (CAMPO_ALTERADO no formato do
- * `vincularAoCard`), movimento pelo núcleo (`registrarMovimento`, origem
- * WHATSAPP, ganchos de terminal) e campos por `aplicarPatch` (CAMPO_ALTERADO
- * só do que mudou). Card fechado como alvo → card NOVO com `reaberta_de_id`.
+ * `vincularAoCard`), campos por `aplicarPatch` (CAMPO_ALTERADO só do
+ * que mudou) e, por último, o movimento pelo núcleo (`registrarMovimento`,
+ * origem WHATSAPP, ganchos de terminal — que já leem a venda atualizada). Card fechado como alvo → card NOVO com `reaberta_de_id`.
  */
 import type { Fase, Prisma } from "@prisma/client";
 import { encontrarContatoPorIdentificador, encontrarEmpresa, resolverContatos, resolverEmpresas } from "@/lib/contatos/match";
@@ -79,11 +87,51 @@ async function empresaViva(tx: Tx, id: string | null): Promise<Ref | null> {
   return r && !r.deletado ? { id: r.id, nome: r.nome } : null;
 }
 
-/** Mesmo nome (sem acento/caixa); fora de correção, um contido no outro também conta ("Sensata" ~ "Economia Sensata"). */
-function mesmaEmpresa(a: string, b: string, estrito: boolean): boolean {
-  const x = nomeComparavel(a);
-  const y = nomeComparavel(b);
-  return x === y || (!estrito && (x.includes(y) || y.includes(x)));
+/** Mesmo nome, exato depois de normalizar acento/caixa/espaços. Nunca por trecho ("Tech" ≠ "Techno Ltda"). */
+function mesmoNome(a: string, b: string): boolean {
+  return nomeComparavel(a) === nomeComparavel(b);
+}
+
+/**
+ * Cards ABERTOS dos mesmos contatos/empresas das candidatas por identidade,
+ * relidos DENTRO do lock. Cobre a corrida: duas mensagens montaram o contexto
+ * vendo só o card fechado; a 1ª reabriu (card novo), a 2ª tem de achar e
+ * usar esse card novo em vez de reabrir outro.
+ */
+async function abertasDaIdentidade(
+  tx: Tx,
+  vendasId: string,
+  vivas: { id: string; contatoId: string | null; empresaId: string | null }[],
+  enviadas: Map<string, Pick<Candidata, "via">>,
+): Promise<Candidata[]> {
+  const contatos = new Set<string>();
+  const empresas = new Set<string>();
+  for (const v of vivas) {
+    const via = enviadas.get(v.id)!.via;
+    if (via.includes("contato") && v.contatoId) contatos.add(v.contatoId);
+    if (via.includes("empresa") && v.empresaId) empresas.add(v.empresaId);
+  }
+  if (!contatos.size && !empresas.size) return [];
+  const novos = await tx.oportunidade.findMany({
+    where: {
+      pipelineId: vendasId,
+      deletadoEm: null,
+      id: { notIn: vivas.map((v) => v.id) },
+      fase: { isTerminal: false },
+      OR: [{ contatoId: { in: [...contatos] } }, { empresaId: { in: [...empresas] } }],
+    },
+    select: { id: true, contatoId: true, empresaId: true, criadoEm: true },
+    take: 10,
+  });
+  if (!novos.length) return [];
+  const ultimos = await tx.timeline.groupBy({ by: ["oportunidadeId"], where: { oportunidadeId: { in: novos.map((n) => n.id) } }, _max: { em: true } });
+  const tocada = new Map(ultimos.map((u) => [u.oportunidadeId, u._max.em]));
+  return novos.map((n) => ({
+    id: n.id,
+    terminal: false,
+    tocadaEm: tocada.get(n.id) ?? n.criadoEm,
+    via: [...(n.contatoId && contatos.has(n.contatoId) ? (["contato"] as const) : []), ...(n.empresaId && empresas.has(n.empresaId) ? (["empresa"] as const) : [])],
+  }));
 }
 
 export async function aplicarAtualizacao(tx: Tx, e: EntradaAplicacao, locks: { vendasId: string; travados: string[] }): Promise<Desfecho> {
@@ -98,10 +146,11 @@ export async function aplicarAtualizacao(tx: Tx, e: EntradaAplicacao, locks: { v
   const vivas = enviadas.size
     ? await tx.oportunidade.findMany({
         where: { id: { in: [...enviadas.keys()] }, pipelineId: locks.vendasId, deletadoEm: null },
-        select: { id: true, fase: { select: { isTerminal: true } } },
+        select: { id: true, contatoId: true, empresaId: true, fase: { select: { isTerminal: true } } },
       })
     : [];
   const candidatas: Candidata[] = vivas.map((v) => ({ ...enviadas.get(v.id)!, terminal: v.fase.isTerminal }));
+  candidatas.push(...(await abertasDaIdentidade(tx, locks.vendasId, vivas, enviadas)));
   const alvo = resolverAlvo({ alvoResposta, escolhaLlm: ex.oportunidade_id, candidatas });
   if (alvo.tipo === "NENHUM") return pendente("ALVO_NAO_ENCONTRADO");
   motivos.push(...alvo.motivos);
@@ -162,17 +211,35 @@ export async function aplicarAtualizacao(tx: Tx, e: EntradaAplicacao, locks: { v
   let empresaFinal: Ref | null = empresaAtual;
   let nomeEmpresaNova: string | null = null;
   const nomeLido = ex.empresa.nome ? validarNome(ex.empresa.nome) : null;
+  let corrigida = false;
   if (porCnpj.size === 1) {
-    empresaFinal = [...porCnpj.values()][0];
+    const doCnpj = [...porCnpj.values()][0];
+    // CNPJ só vincula card SEM empresa; com outra empresa, a troca é decisão do CRM.
+    if (!empresaAtual) empresaFinal = doCnpj;
+    else if (doCnpj.id !== empresaAtual.id) {
+      sugestoes.push({ tipo: "EMPRESA_POR_CNPJ", empresaId: doCnpj.id, nome: doCnpj.nome });
+      motivos.push("CNPJ da mensagem é de outra empresa do CRM");
+    }
   } else if (nomeLido && empresaAtual) {
-    if (!mesmaEmpresa(nomeLido, empresaAtual.nome, correcao)) {
-      if (correcao) nomeEmpresaNova = nomeLido;
-      else motivos.push("empresa da mensagem difere da empresa do card");
+    if (!mesmoNome(nomeLido, empresaAtual.nome)) {
+      if (correcao) {
+        nomeEmpresaNova = nomeLido;
+        corrigida = true;
+      } else {
+        sugestoes.push({ tipo: "EMPRESA_NOME_LIDO", nome: nomeLido });
+        motivos.push("empresa da mensagem difere da empresa do card");
+      }
     }
   } else if (!empresaAtual) {
     const doContato = await empresaViva(tx, contatoFinal?.empresaId ?? null);
-    if (nomeLido && !(doContato && mesmaEmpresa(nomeLido, doContato.nome, false))) nomeEmpresaNova = nomeLido;
-    else empresaFinal = doContato;
+    if (doContato) {
+      // Vínculo pela cadeia exata contato → empresa; nome lido diferente só sugere.
+      empresaFinal = doContato;
+      if (nomeLido && !mesmoNome(nomeLido, doContato.nome)) {
+        sugestoes.push({ tipo: "EMPRESA_NOME_LIDO", nome: nomeLido });
+        motivos.push("empresa da mensagem difere da empresa do contato");
+      }
+    } else if (nomeLido) nomeEmpresaNova = nomeLido;
   }
   if (nomeEmpresaNova) {
     const igual = await tx.empresa.findFirst({ where: { ...VIVO, nome: { equals: nomeEmpresaNova, mode: "insensitive" } }, select: { id: true, nome: true } });
@@ -196,7 +263,7 @@ export async function aplicarAtualizacao(tx: Tx, e: EntradaAplicacao, locks: { v
   if (ex.fase_chave && !destino) motivos.push("fase indicada não reconhecida");
   let dadosTerminal: DadosTerminal | undefined;
   if (destino?.isTerminal) {
-    const d = dadosDoFechamento(destino, ex.campos);
+    const d = dadosDoFechamento(destino, ex.campos, e.mensagem.texto);
     if (!d.ok) {
       motivos.unshift(d.motivo);
       destino = undefined;
@@ -213,7 +280,16 @@ export async function aplicarAtualizacao(tx: Tx, e: EntradaAplicacao, locks: { v
   }
 
   // ---- PLANO: responsável e campos
-  const { remetente, responsavel } = await remetenteEResponsavel(tx, ex, e.mensagem.remetenteUsuarioId, motivos);
+  const quem = await remetenteEResponsavel(tx, ex, e.mensagem.remetenteUsuarioId, motivos);
+  const remetente = quem.remetente;
+  // Dono de card existente nunca muda pelo WhatsApp: nome casado vira só sugestão.
+  let responsavel = quem.responsavel;
+  if (!reabrir && responsavel) {
+    if (responsavel.id !== base.responsavelId) motivos.push(`responsável sugerido: ${responsavel.nome}`);
+    responsavel = null;
+  }
+  if (!contatoFinal && !nomeContatoNovo && pontos.length) motivos.push("identificadores citados sem contato");
+  if (corrigida) motivos.unshift(`empresa corrigida por resposta: “${empresaAtual!.nome}” → “${nomeEmpresaNova}”`);
   const { campos, proximaAcaoEm } = interpretarCamposExtracao(ex, e.mensagem.recebidaEm, motivos);
   if (base.origem && !reabrir) delete campos.origem; // origem é histórico: só preenche vazio
   if (ex.confianca < e.limiar) motivos.push("confiança baixa da leitura");
@@ -236,8 +312,8 @@ export async function aplicarAtualizacao(tx: Tx, e: EntradaAplicacao, locks: { v
     // Pontos acumulam (só os citados no texto e sem dono).
     const destinoPontos = contatoFinal.id;
     if (pontos.length) await tx.contatoPonto.createMany({ data: pontos.map((p) => ({ contatoId: destinoPontos, ...p })) });
-    // Contato sem empresa (ou com a que o card acabou de trocar) segue a do card.
-    if (empresaFinal && contatoFinal.empresaId !== empresaFinal.id && (!contatoFinal.empresaId || contatoFinal.empresaId === empresaAtual?.id)) {
+    // Contato SEM empresa passa a ter a do card; contato com outra empresa nunca é reescrito.
+    if (empresaFinal && !contatoFinal.empresaId) {
       await tx.contato.update({ where: { id: contatoFinal.id }, data: { empresaId: empresaFinal.id } });
     }
   }
@@ -303,13 +379,31 @@ export async function aplicarAtualizacao(tx: Tx, e: EntradaAplicacao, locks: { v
       data: {
         oportunidadeId: base.id,
         tipo: "CAMPO_ALTERADO",
-        payload: { campo, antes: antes?.nome ?? null, depois: depois.nome, antesId: antes?.id ?? null, depoisId: depois.id },
+        payload: {
+          campo,
+          antes: antes?.nome ?? null,
+          depois: depois.nome,
+          antesId: antes?.id ?? null,
+          depoisId: depois.id,
+          ...(campo === "empresa" && corrigida ? { motivo: "correção por resposta a confirmação" } : {}),
+        },
         usuarioId: remetente.id,
         em: new Date(++t),
       },
     });
     alterados.push(campo);
   }
+
+  // Campos ANTES do movimento: o gancho de ganho (card de projeto) lê a venda já atualizada.
+  const patch: PatchCard = {};
+  for (const [k, v] of Object.entries(campos)) {
+    if (v !== null && v !== undefined) (patch as Record<string, unknown>)[k] = v;
+  }
+  if (tituloAntigoAuto && tituloNovo && tituloNovo !== base.titulo) patch.titulo = tituloNovo;
+  if (revisar) patch.revisar = true; // nunca desmarca: limpar revisão é do CRM
+  const mudados = await aplicarPatch(tx, base.id, patch, remetente, t + 1);
+  alterados.push(...mudados);
+  t += mudados.length + 1;
 
   let deFaseNome: string | null = null;
   if (destino && destino.id !== faseAtual.id) {
@@ -324,18 +418,8 @@ export async function aplicarAtualizacao(tx: Tx, e: EntradaAplicacao, locks: { v
       via: "WHATSAPP",
       dadosTerminal,
     });
-    t += 50; // espaço para as entradas dos ganchos de terminal (em + n ms)
     deFaseNome = faseAtual.nome;
   }
-
-  const patch: PatchCard = {};
-  for (const [k, v] of Object.entries(campos)) {
-    if (v !== null && v !== undefined) (patch as Record<string, unknown>)[k] = v;
-  }
-  if (tituloAntigoAuto && tituloNovo && tituloNovo !== base.titulo) patch.titulo = tituloNovo;
-  if (responsavel && responsavel.id !== base.responsavelId) patch.responsavelId = responsavel.id;
-  if (revisar) patch.revisar = true; // nunca desmarca: limpar revisão é do CRM
-  alterados.push(...(await aplicarPatch(tx, base.id, patch, remetente, t + 1)));
 
   const final = await tx.oportunidade.findUniqueOrThrow({ where: { id: base.id }, select: { titulo: true, fase: { select: { nome: true } } } });
   return {

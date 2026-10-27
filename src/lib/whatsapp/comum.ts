@@ -12,6 +12,7 @@ import { inicioDoDia, interpretarCampo } from "@/lib/oportunidades/campos";
 import { ErroDeRegra } from "@/lib/oportunidades/erros";
 import type { NovoCard } from "@/lib/oportunidades/oportunidades";
 import type { Candidata } from "./alvo";
+import type { MotivoRespostaInvalida } from "./candidatas";
 import type { MotivoPendente, ResumoAtualizado, ResumoCriado } from "./confirmacao";
 
 export type Tx = Prisma.TransactionClient;
@@ -19,6 +20,10 @@ export type Tx = Prisma.TransactionClient;
 export type Sugestao =
   | { tipo: "EMPRESA_POR_DOMINIO"; empresaId: string; nome: string }
   | { tipo: "EMPRESA_MESMO_NOME"; empresaId: string; nome: string }
+  /** CNPJ citado é de outra empresa do CRM que não a do card (GAB-38: não troca sozinho). */
+  | { tipo: "EMPRESA_POR_CNPJ"; empresaId: string; nome: string }
+  /** Nome de empresa lido difere do vínculo atual (GAB-38: só sugestão). */
+  | { tipo: "EMPRESA_NOME_LIDO"; nome: string }
   | { tipo: "CONTATO_MESMO_NOME"; contatoId: string; nome: string };
 
 export type Desfecho =
@@ -53,6 +58,8 @@ export type EntradaAplicacao = {
   candidatas?: Pick<Candidata, "id" | "tocadaEm" | "via">[];
   /** Card da confirmação do bot que a mensagem responde: fixa o alvo. */
   alvoResposta?: string | null;
+  /** Reply a confirmação de card que não vale mais (antiga/removido): vai para revisão, nunca CRIAR. */
+  respostaInvalida?: MotivoRespostaInvalida | null;
 };
 
 export const FASE_PADRAO_CRIAR = "primeiro_contato";
