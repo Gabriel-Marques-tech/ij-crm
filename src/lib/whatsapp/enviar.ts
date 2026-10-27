@@ -6,6 +6,7 @@
  */
 import { db } from "@/lib/db";
 import { configEvolution, notificacoesAtivas } from "@/lib/config/env";
+import { descreverErro } from "@/lib/erros/registrar";
 import { mascararJid } from "./mascarar";
 
 export const TIMEOUT_ENVIO_MS = 60_000;
@@ -40,6 +41,23 @@ export class ErroEnvioWhatsApp extends Error {
   ) {
     super(message);
     this.name = "ErroEnvioWhatsApp";
+  }
+}
+
+/**
+ * A Evolution CONFIRMOU a entrega (tem `eventoId`), mas algo depois falhou
+ * (gravar MensagemEnviada). Subclasse do genérico: quem já trata
+ * `ErroEnvioWhatsApp` não muda; quem precisa saber que a mensagem saiu
+ * (ex.: cooldown do alerta de crédito, GAB-46) checa esta classe.
+ * A causa vai só descrita por `descreverErro` (Prisma sem argumentos/texto).
+ */
+export class ErroPosEnvio extends ErroEnvioWhatsApp {
+  constructor(
+    public readonly eventoId: string,
+    causa: unknown,
+  ) {
+    super(`mensagem entregue (evento ${eventoId}) mas não registrada: ${descreverErro(causa)}`);
+    this.name = "ErroPosEnvio";
   }
 }
 
@@ -96,7 +114,11 @@ export async function enviarWhatsApp({ para, texto, citar, oportunidadeId = null
   const eventoId = (json as { key?: { id?: unknown } } | null)?.key?.id;
   if (typeof eventoId !== "string" || !eventoId) throw new ErroEnvioWhatsApp("Evolution sendText sem key.id na resposta", status);
 
-  await db.mensagemEnviada.create({ data: { eventoId, grupoJid: para, texto, oportunidadeId } });
+  try {
+    await db.mensagemEnviada.create({ data: { eventoId, grupoJid: para, texto, oportunidadeId } });
+  } catch (e) {
+    throw new ErroPosEnvio(eventoId, e);
+  }
   console.info(`[whatsapp] enviado para ${mascararJid(para)} (evento ${eventoId})`);
   return { eventoId, enviada: true };
 }
