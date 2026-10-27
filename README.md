@@ -175,6 +175,14 @@ sem próxima ação — com a mais urgente em destaque. As faixas vêm de `faixa
 (ou "sem próxima ação", só por escolha explícita) como `CAMPO_ALTERADO`. `?vendedor=<id>` só vale
 para gestor/admin e usuário ativo; para os demais o servidor ignora e mostra a própria semana.
 
+## Tabela
+
+`/tabela`: todas as oportunidades vivas (qualquer responsável e quadro: carteira é filtro, não parede), 50 por página, com filtro, ordenação e busca feitos no banco (`src/lib/tabela/`).
+
+- **Estado na URL** (`src/lib/tabela/params.ts`), compartilhável e igual ao Kanban onde coincide: `quadro` (chaves de pipeline), `fase` (ids), `resp`, `origem` (`SEM` = sem origem), `revisar` e `terminais` (`sim`/`nao`), `acao` (`vencida,hoje,semana,sem`, mesmas faixas da Minha Semana), `de`/`ate` (criação, `YYYY-MM-DD` em SP, inclusivo), `q` (título, empresa ou contato vivos; sem acento, sem caixa e com espaços colapsados como no Kanban, via `public.unaccent` da migration `20261024174500_review_fixes`; `%`/`_` literais), `ordem`/`dir` (lista branca, desempate por id) e `pagina`. Valor inválido é ignorado.
+- **CSV**: `GET /tabela/csv?<mesmos parâmetros>` exporta todas as linhas filtradas (sem limite de página), em streaming: UTF-8 com BOM, `;`, vírgula decimal e datas dd/mm/aaaa (abre direto no Excel pt-BR). Texto que começa com `= + - @`, tab ou CR (mesmo depois de espaços) ganha um `'` visível (mitigação padrão OWASP contra formula injection). Erro antes do primeiro byte → 500 com `ref`; erro no meio do streaming não vira 500 (o 200 já saiu): o arquivo termina com a linha `EXPORTAÇÃO INCOMPLETA: erro no servidor (ref: …)`, que é o sinal de arquivo truncado. Cada lote reaplica os filtros: toda linha exportada ainda batia neles no momento do lote, sem duplicar (não é um retrato único no tempo).
+- **Busca: Tabela × Kanban** (diferença intencional). O Kanban busca em título + empresa, no cliente, sobre os cards já carregados do quadro; a Tabela busca também no nome do contato, no banco, porque é a visão de pesquisa geral. Card ligado a empresa/contato excluído ou mesclado não é achado pelo nome dela, nem pelo da principal (resolver a cadeia de merge custaria uma CTE recursiva por busca).
+
 ## Preferências de visualização
 
 Opções de visualização de cada usuário (ex.: no Kanban, "mostrar colunas vazias" e colunas abertas à mão, por quadro) ficam em `usuario.preferencias` (JSONB versionado, validado com zod em `src/lib/preferencias/`); cada um só grava as próprias, e JSON inválido vira o padrão.
