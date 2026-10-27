@@ -129,3 +129,11 @@ describe("ehInesperado (leituras de página envolvidas em comTratamento)", () =>
     expect(ehInesperado(await comTratamento("pagina.teste", async () => null))).toBe(false);
   });
 });
+
+describe("registrarErro com ref dada (digest do Next)", () => {
+  it("usa a ref recebida em vez de gerar outra", () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(registrarErro("render /x", new Error("a"), "2338718455")).toBe("2338718455");
+    expect(String(log.mock.calls[0][0]).startsWith("[render /x] ref=2338718455 ")).toBe(true);
+  });
+});
