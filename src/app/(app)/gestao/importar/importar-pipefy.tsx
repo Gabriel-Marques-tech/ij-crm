@@ -1,13 +1,18 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useRef, useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { ocorrenciasParaCsv } from "@/lib/importacao/pipefy/erros-csv";
 import type { Ocorrencia } from "@/lib/importacao/pipefy/interpretar";
 import type { Relatorio } from "@/lib/importacao/pipefy/aplicar";
 import type { Previa } from "@/lib/importacao/pipefy/servico";
-import { confirmarImportAction, previsualizarImportAction, remapearImportAction } from "./actions";
+import { MOTIVOS_PERDA } from "@/lib/oportunidades/terminal-regras";
+import { confirmarImportAction, remapearImportAction, type RespostaPrevia } from "./actions";
+
+/** Mesmo teto do servidor (`LIMITE_BYTES`): avisa antes de subir 50 MB à toa. */
+const LIMITE_BYTES = 8 * 1024 * 1024;
+const ROTA_PREVIA = "/api/gestao/importar/previa";
 
 const SELECT_CLASSE =
   "h-9 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50";
@@ -24,6 +29,37 @@ type Estado =
 function textoFalha(r: Falha): string {
   if (r.erro === "INESPERADO") return `Erro no servidor (ref: ${r.ref ?? "?"}). Tente de novo; se persistir, informe a ref.`;
   return r.ref ? `${r.erro} (ref: ${r.ref})` : r.erro;
+}
+
+/** Falha ao confirmar: parte pode ter sido gravada antes; o caminho é reenviar (reimport não duplica). */
+function textoFalhaImport(r: Falha): string {
+  if (r.erro === "INESPERADO") {
+    return `O import falhou no servidor (ref: ${r.ref ?? "?"}). Parte dos cards pode ter sido gravada: envie o arquivo de novo — reimportar não duplica. Se persistir, informe a ref.`;
+  }
+  return textoFalha(r);
+}
+
+/** Upload pela rota (não por server action): limite próprio e erros em JSON. */
+async function enviarArquivo(arquivo: File): Promise<RespostaPrevia> {
+  if (arquivo.size > LIMITE_BYTES) {
+    const mb = (n: number) => (n / 1024 / 1024).toFixed(1).replace(".", ",");
+    return { ok: false, erro: `Arquivo com ${mb(arquivo.size)} MB; o limite é ${mb(LIMITE_BYTES)} MB. Divida o export (por fase ou período) ou use o CLI.` };
+  }
+  let res: Response;
+  try {
+    res = await fetch(ROTA_PREVIA, {
+      method: "POST",
+      body: arquivo,
+      headers: { "Content-Type": "text/csv", "X-Nome-Arquivo": encodeURIComponent(arquivo.name) },
+    });
+  } catch {
+    return { ok: false, erro: "Sem conexão com o servidor. Verifique a rede e tente de novo." };
+  }
+  try {
+    return (await res.json()) as RespostaPrevia;
+  } catch {
+    return { ok: false, erro: `Resposta inesperada do servidor (HTTP ${res.status}). Tente de novo.` };
+  }
 }
 
 function baixarCsv(nome: string, erros: Ocorrencia[], avisos: Ocorrencia[]) {
@@ -74,10 +110,17 @@ export function ImportarPipefy() {
   const [erro, setErro] = useState<string | null>(null);
   const [pendente, iniciar] = useTransition();
 
-  function enviar(form: FormData) {
+  const campoArquivo = useRef<HTMLInputElement>(null);
+
+  function enviar() {
     setErro(null);
+    const arquivo = campoArquivo.current?.files?.[0];
+    if (!arquivo || arquivo.size === 0) {
+      setErro("Escolha o arquivo CSV exportado do Pipefy.");
+      return;
+    }
     iniciar(async () => {
-      const r = await previsualizarImportAction(form);
+      const r = await enviarArquivo(arquivo);
       if (r.ok) setEstado({ etapa: "previa", token: r.token, expiraEm: r.expiraEm, previa: r.previa });
       else setErro(textoFalha(r));
     });
@@ -91,6 +134,7 @@ export function ImportarPipefy() {
           <input
             id="arquivo"
             name="arquivo"
+            ref={campoArquivo}
             type="file"
             accept=".csv,text/csv"
             required
@@ -144,9 +188,11 @@ function PreviaImport({
 }) {
   const inicial = useMemo(() => Object.fromEntries(previa.fases.map((f) => [f.chave, f.faseId ?? ""])), [previa.fases]);
   const [mapa, setMapa] = useState<Record<string, string>>(inicial);
+  const motivoInicial = previa.opcoes.motivoPerdaPadrao ?? "";
+  const [motivo, setMotivo] = useState<string>(motivoInicial);
   const [erro, setErro] = useState<string | null>(null);
   const [pendente, iniciar] = useTransition();
-  const alterado = previa.fases.some((f) => (mapa[f.chave] ?? "") !== inicial[f.chave]);
+  const alterado = previa.fases.some((f) => (mapa[f.chave] ?? "") !== inicial[f.chave]) || motivo !== motivoInicial;
   const pipelines = useMemo(() => {
     const g = new Map<string, { nome: string; fases: Previa["fasesCrm"] }>();
     for (const f of previa.fasesCrm) {
@@ -162,7 +208,7 @@ function PreviaImport({
     setErro(null);
     const m = Object.fromEntries(previa.fases.map((f) => [f.chave, mapa[f.chave] || null]));
     iniciar(async () => {
-      const r = await remapearImportAction(token, m);
+      const r = await remapearImportAction(token, m, { motivoPerdaPadrao: motivo || null });
       if (r.ok) onNovaPrevia(r.token, r.expiraEm, r.previa);
       else setErro(textoFalha(r));
     });
@@ -173,7 +219,7 @@ function PreviaImport({
     iniciar(async () => {
       const r = await confirmarImportAction(token, previa.hash);
       if (r.ok) onImportado(r.relatorio);
-      else setErro(textoFalha(r));
+      else setErro(textoFalhaImport(r));
     });
   }
 
@@ -237,18 +283,50 @@ function PreviaImport({
             </tbody>
           </table>
         </div>
-        {alterado ? (
-          <div className="flex flex-wrap items-center gap-3">
-            <p className="text-xs text-warn">Mapeamento alterado: recalcule a prévia antes de confirmar.</p>
-            <Button type="button" size="sm" variant="outline" onClick={remapear} disabled={pendente}>
-              Recalcular prévia
-            </Button>
-            <Button type="button" size="sm" variant="ghost" onClick={() => setMapa(inicial)} disabled={pendente}>
-              Desfazer
-            </Button>
-          </div>
-        ) : null}
       </section>
+
+      {previa.perdidosSemMotivo > 0 ? (
+        <section className="space-y-2" aria-label="Perdidos sem motivo">
+          <h3 className="text-sm font-medium text-warn">
+            Perdidos sem motivo no export <span className="font-mono">({previa.perdidosSemMotivo})</span>
+          </h3>
+          <p className="text-xs text-fg-mute">
+            O import não inventa motivo de perda. Sem escolha, esses cards ficam de fora (erro na linha). Se escolher, o motivo é gravado com o detalhe “Motivo
+            definido na importação por você”.
+          </p>
+          <div className="max-w-sm">
+            <select aria-label="Motivo para perdidos sem motivo" value={motivo} onChange={(e) => setMotivo(e.target.value)} className={SELECT_CLASSE} disabled={pendente}>
+              <option value="">— pular esses cards —</option>
+              {MOTIVOS_PERDA.map((m) => (
+                <option key={m.chave} value={m.chave}>
+                  {m.rotulo}
+                </option>
+              ))}
+            </select>
+          </div>
+        </section>
+      ) : null}
+
+      {alterado ? (
+        <div className="flex flex-wrap items-center gap-3">
+          <p className="text-xs text-warn">Escolhas alteradas: recalcule a prévia antes de confirmar.</p>
+          <Button type="button" size="sm" variant="outline" onClick={remapear} disabled={pendente}>
+            Recalcular prévia
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              setMapa(inicial);
+              setMotivo(motivoInicial);
+            }}
+            disabled={pendente}
+          >
+            Desfazer
+          </Button>
+        </div>
+      ) : null}
 
       {previa.responsaveisSemMatch.length > 0 ? (
         <section className="space-y-2" aria-label="Responsáveis sem usuário">
@@ -302,9 +380,17 @@ function PreviaImport({
 function RelatorioFinal({ relatorio, onNovo }: { relatorio: Relatorio; onNovo: () => void }) {
   return (
     <div className="space-y-6">
-      <p role="status" className="text-sm text-success">
-        Import concluído.
-      </p>
+      {relatorio.interrompido ? (
+        <p role="alert" className="text-sm text-danger">
+          Import interrompido por um erro no servidor (ref: <span className="font-mono">{relatorio.interrompido.ref}</span>):{" "}
+          <span className="font-mono">{relatorio.interrompido.naoProcessados}</span> cards não foram processados. O que aparece abaixo foi gravado; envie o
+          arquivo de novo para terminar — reimportar não duplica.
+        </p>
+      ) : (
+        <p role="status" className="text-sm text-success">
+          Import concluído.
+        </p>
+      )}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         <Numero rotulo="criados" valor={relatorio.criados} tom="success" />
         <Numero rotulo="atualizados" valor={relatorio.atualizados} />

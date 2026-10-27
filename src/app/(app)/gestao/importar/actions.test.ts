@@ -1,77 +1,58 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const exigirPapel = vi.fn<(papel: string) => Promise<{ id: string; papel: string }>>(async () => ({ id: "u1", papel: "GESTOR" }));
-const criarPrevia = vi.fn();
-const confirmarPrevia = vi.fn();
-const remapearPrevia = vi.fn();
-
-vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
-vi.mock("@/lib/auth/atual", () => ({ exigirPapel: (p: string) => exigirPapel(p) }));
-vi.mock("@/lib/importacao/pipefy/servico", () => ({
-  LIMITE_BYTES: 1024,
-  criarPrevia: (...a: unknown[]) => criarPrevia(...a),
-  confirmarPrevia: (...a: unknown[]) => confirmarPrevia(...a),
-  remapearPrevia: (...a: unknown[]) => remapearPrevia(...a),
+const { exigirPapel, confirmarPrevia, remapearPrevia, revalidatePath } = vi.hoisted(() => ({
+  exigirPapel: vi.fn<(papel: string) => Promise<{ id: string; papel: string }>>(async () => ({ id: "u1", papel: "GESTOR" })),
+  confirmarPrevia: vi.fn(),
+  remapearPrevia: vi.fn(),
+  revalidatePath: vi.fn(),
 }));
 
-const { previsualizarImportAction, confirmarImportAction, remapearImportAction } = await import("./actions");
+vi.mock("next/cache", () => ({ revalidatePath }));
+vi.mock("@/lib/auth/atual", () => ({ exigirPapel }));
+vi.mock("@/lib/importacao/pipefy/servico", () => ({ confirmarPrevia, remapearPrevia }));
 
-function form(arquivo?: File) {
-  const f = new FormData();
-  if (arquivo) f.set("arquivo", arquivo);
-  return f;
-}
+const { confirmarImportAction, remapearImportAction } = await import("./actions");
 
 const HEX = "a".repeat(64);
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
-describe("previsualizarImportAction", () => {
-  it("exige GESTOR", async () => {
-    await previsualizarImportAction(form());
-    expect(exigirPapel).toHaveBeenCalledWith("GESTOR");
-  });
-
-  it("sem arquivo, .xlsx, extensão estranha e arquivo grande → mensagens específicas, sem prévia", async () => {
-    expect(await previsualizarImportAction(form())).toEqual({ ok: false, erro: "Escolha o arquivo CSV exportado do Pipefy." });
-    const xlsx = await previsualizarImportAction(form(new File(["x"], "export.xlsx")));
-    expect(xlsx.ok === false && xlsx.erro).toMatch(/salve como CSV/);
-    const pdf = await previsualizarImportAction(form(new File(["x"], "export.pdf")));
-    expect(pdf.ok === false && pdf.erro).toBe("Envie o export em CSV (.csv).");
-    const grande = await previsualizarImportAction(form(new File(["x".repeat(2048)], "export.csv")));
-    expect(grande.ok === false && grande.erro).toMatch(/limite é/);
-    expect(criarPrevia).not.toHaveBeenCalled();
-  });
-
-  it("CSV válido → decodifica (BOM) e devolve token + prévia", async () => {
-    const expiraEm = new Date("2026-10-26T12:30:00Z");
-    criarPrevia.mockResolvedValue({ ok: true, token: HEX, expiraEm, previa: { cards: 1 } });
-    const r = await previsualizarImportAction(form(new File(["﻿ID,Title\n1,A\n"], "export.csv")));
-    expect(r).toEqual({ ok: true, token: HEX, expiraEm: expiraEm.toISOString(), previa: { cards: 1 } });
-    expect(criarPrevia).toHaveBeenCalledWith({ conteudo: expect.stringContaining("ID,Title"), nomeArquivo: "export.csv" }, { id: "u1", papel: "GESTOR" });
-  });
-
-  it("exceção inesperada vira INESPERADO com ref", async () => {
-    criarPrevia.mockRejectedValue(new Error("db caiu"));
-    const r = await previsualizarImportAction(form(new File(["ID\n1\n"], "a.csv")));
-    expect(r).toMatchObject({ ok: false, erro: "INESPERADO", ref: expect.any(String) });
-  });
-});
-
-describe("confirmar/remapear", () => {
-  it("token ou hash malformado não chega no serviço", async () => {
+describe("confirmarImportAction", () => {
+  it("exige GESTOR; token ou hash malformado não chega no serviço", async () => {
     expect(await confirmarImportAction("x", HEX)).toEqual({ ok: false, erro: "Dados inválidos. Recarregue a página." });
     expect(await confirmarImportAction(HEX, "../")).toEqual({ ok: false, erro: "Dados inválidos. Recarregue a página." });
-    expect(await remapearImportAction(HEX, "nao-e-objeto")).toEqual({ ok: false, erro: "Dados inválidos. Recarregue a página." });
+    expect(exigirPapel).toHaveBeenCalledWith("GESTOR");
     expect(confirmarPrevia).not.toHaveBeenCalled();
-    expect(remapearPrevia).not.toHaveBeenCalled();
   });
 
-  it("repassa token + hash ao serviço com o usuário da sessão", async () => {
-    confirmarPrevia.mockResolvedValue({ ok: true, relatorio: { criados: 2 } });
-    expect(await confirmarImportAction(HEX, HEX)).toEqual({ ok: true, relatorio: { criados: 2 } });
+  it("repassa token + hash e devolve o relatório (inclusive parcial, com a ref)", async () => {
+    const parcial = { criados: 2, interrompido: { ref: "abcd1234", naoProcessados: 3 } };
+    confirmarPrevia.mockResolvedValue({ ok: true, relatorio: parcial });
+    expect(await confirmarImportAction(HEX, HEX)).toEqual({ ok: true, relatorio: parcial });
     expect(confirmarPrevia).toHaveBeenCalledWith(HEX, HEX, { id: "u1", papel: "GESTOR" });
+    expect(revalidatePath).toHaveBeenCalledWith("/kanban");
+  });
+
+  it("exceção no meio: revalida mesmo assim (finally) e devolve INESPERADO com ref", async () => {
+    confirmarPrevia.mockRejectedValue(new Error("db caiu"));
+    const r = await confirmarImportAction(HEX, HEX);
+    expect(r).toMatchObject({ ok: false, erro: "INESPERADO", ref: expect.stringMatching(/^[0-9a-f]{8}$/) });
+    expect(revalidatePath).toHaveBeenCalledWith("/kanban");
+    expect(revalidatePath).toHaveBeenCalledWith("/");
+  });
+});
+
+describe("remapearImportAction", () => {
+  it("valida token, mapa e opções; repassa as opções", async () => {
+    expect(await remapearImportAction(HEX, "nao-e-objeto")).toEqual({ ok: false, erro: "Dados inválidos. Recarregue a página." });
+    expect(await remapearImportAction(HEX, {}, { outra: 1 })).toEqual({ ok: false, erro: "Dados inválidos. Recarregue a página." });
+    expect(remapearPrevia).not.toHaveBeenCalled();
+    const expiraEm = new Date("2026-10-26T12:30:00Z");
+    remapearPrevia.mockResolvedValue({ ok: true, token: HEX, expiraEm, previa: { cards: 1 } });
+    expect(await remapearImportAction(HEX, { lead: null }, { motivoPerdaPadrao: "preco" })).toEqual({ ok: true, token: HEX, expiraEm: expiraEm.toISOString(), previa: { cards: 1 } });
+    expect(remapearPrevia).toHaveBeenCalledWith(HEX, { lead: null }, { id: "u1", papel: "GESTOR" }, expect.any(Date), { motivoPerdaPadrao: "preco" });
   });
 });
