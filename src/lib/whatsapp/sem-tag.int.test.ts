@@ -7,7 +7,7 @@ import { ErroLlm } from "@/lib/llm/tipos";
 import { dbTeste, limparBanco } from "@/test/db";
 import { semear } from "../../../prisma/seed";
 import type { MensagemRecebida } from "./payload";
-import { avaliarSemTag, reiniciarAvisoSemTag } from "./sem-tag";
+import { CONCORRENCIA_SEM_TAG, FILA_SEM_TAG, avaliarSemTag, avaliarSemTagComLimite, reiniciarAvisoSemTag } from "./sem-tag";
 
 const dbT = dbTeste();
 const GRUPO = "120363000000000001@g.us";
@@ -186,6 +186,44 @@ describe("avaliarSemTag", () => {
     expect(await contador()).toMatchObject({ naoClassificadas: 2 });
     // GAB-46: o mesmo alerta de ops do FALHA abre o incidente de sem crédito.
     expect(await dbT.alertaOperacional.count()).toBe(1);
+  });
+
+  it("erro QUALQUER na etapa de classificação (não só ErroLlm) → NAO_CLASSIFICADA, sem texto no log", async () => {
+    definirClassificacaoMock(() => {
+      throw new TypeError(`quebrou lendo "${RELEVANTE.texto}"`);
+    });
+    const r = await avaliarSemTag(msg(RELEVANTE.texto), joao.id);
+    expect(r).toMatchObject({ tipo: "NAO_CLASSIFICADA", codigo: "INESPERADO" });
+    if (r.tipo !== "NAO_CLASSIFICADA") return;
+    expect(await dbT.mensagemBruta.count()).toBe(0);
+    expect(await contador()).toMatchObject({ naoClassificadas: 1 });
+    const erro = logs(console.error);
+    expect(erro).toContain(`[sem-tag] ref=${r.ref} TypeError: (mensagem omitida)`);
+    expect(logs(console.info, console.warn, console.error)).not.toContain("Padaria");
+  });
+
+  it("limite: no máximo CONCORRENCIA_SEM_TAG classificações ao mesmo tempo, fila limitada; além dela → NAO_CLASSIFICADA (FILA_CHEIA)", async () => {
+    let soltar!: () => void;
+    const portao = new Promise<void>((r) => (soltar = r));
+    let simultaneas = 0;
+    let pico = 0;
+    definirClassificacaoMock(async () => {
+      simultaneas++;
+      pico = Math.max(pico, simultaneas);
+      await portao;
+      simultaneas--;
+      return { relevante: false, confianca: 0.9 };
+    });
+    const total = CONCORRENCIA_SEM_TAG + FILA_SEM_TAG;
+    const aceitas = Array.from({ length: total }, () => avaliarSemTagComLimite(msg(RUIDO.texto), joao.id));
+    const recusada = await avaliarSemTagComLimite(msg(RUIDO.texto), joao.id);
+    expect(recusada).toMatchObject({ tipo: "NAO_CLASSIFICADA", codigo: "FILA_CHEIA" });
+    soltar();
+    const r = await Promise.all(aceitas);
+    expect(r.every((x) => x.tipo === "DESCARTADA")).toBe(true);
+    expect(pico).toBe(CONCORRENCIA_SEM_TAG);
+    expect(await contador()).toMatchObject({ total, naoClassificadas: 1 });
+    expect(await dbT.mensagemBruta.count()).toBe(0);
   });
 
   it("contador usa o dia civil de São Paulo", async () => {

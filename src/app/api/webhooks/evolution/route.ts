@@ -23,7 +23,7 @@ import { ingerirMensagem } from "@/lib/whatsapp/ingestao";
 import { mascararJid } from "@/lib/whatsapp/mascarar";
 import { interpretarPayload } from "@/lib/whatsapp/payload";
 import { processarMensagem } from "@/lib/whatsapp/processar";
-import { avaliarSemTag } from "@/lib/whatsapp/sem-tag";
+import { avaliarSemTagComLimite } from "@/lib/whatsapp/sem-tag";
 
 export const runtime = "nodejs";
 
@@ -122,7 +122,8 @@ export async function POST(req: Request): Promise<Response> {
       const usuarioId = resultado.usuarioId;
       // Sem #crm (GAB-39): o classificador (LLM) roda depois do 200 e só ele
       // decide se o texto é gravado. `avaliarSemTag` nunca lança.
-      after(() => avaliarSemTag(mensagem, usuarioId));
+      // Até 3 simultâneas por processo, 50 na fila; além disso NAO_CLASSIFICADA.
+      after(() => avaliarSemTagComLimite(mensagem, usuarioId));
       return Response.json({ ok: true, emAvaliacao: true });
     }
     case "PERSISTIDA": {
