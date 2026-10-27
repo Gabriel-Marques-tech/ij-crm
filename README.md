@@ -23,6 +23,20 @@ pnpm db:seed               # pipelines e fases do Pipefy
 pnpm dev
 ```
 
+## Worktrees de agentes: FORA do diretório do projeto
+
+O `compose.yml` monta o repo inteiro em `/app` e o `next dev` (Turbopack) varre
+tudo o que está lá. Uma worktree dentro do projeto (ex.: `.claude/worktrees/`)
+é uma cópia inteira do código: o dev server passa a indexá-la, a CPU/RAM sobe e
+os reloads ficam lentos. Crie worktrees ao lado do repo:
+
+```bash
+git worktree add ../ij-crm-wt/<nome> -b <branch> origin/main
+```
+
+Como rede de segurança, o container de dev esconde `.claude/` (tmpfs) e
+`tsconfig`/ESLint ignoram `.claude/`, `.code-review-graph/` e `graphify-out/`.
+
 ## Primeiro acesso
 
 ```bash
@@ -390,6 +404,9 @@ erro do Prisma só loga `code` + `target`/`modelName` (a mensagem ecoa dados da 
 
 Deploy, rollback, backup/restore, QR da Evolution e troca do número do bot:
 [`docs/runbook.md`](docs/runbook.md) (`compose.prod.yml` + `scripts/deploy.sh`).
+As imagens são buildadas no GitHub Actions a cada push na `main` e publicadas no
+GHCR; a VPS só baixa (`scripts/deploy.sh [sha-<commit>]`). Limites de memória e
+instância mínima: runbook §11.
 
 ## Testes
 

@@ -12,6 +12,11 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Fora do app: worktrees de agentes e saídas de ferramentas locais.
+    ".claude/**",
+    ".code-review-graph/**",
+    "graphify-out/**",
+    "coverage/**",
   ]),
 ]);
 
