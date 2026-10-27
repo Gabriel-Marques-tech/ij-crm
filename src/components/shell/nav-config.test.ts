@@ -29,6 +29,10 @@ describe("NAV_ITEMS", () => {
     expect(itemAtivo(semana, "/semana", null)).toBe(true);
   });
 
+  it("Ranking aparece para todos os papéis (GAB-44)", () => {
+    for (const papel of ["VENDEDOR", "GESTOR", "ADMIN"] as const) expect(itensParaPapel(papel).map((i) => i.href)).toContain("/ranking");
+  });
+
   it("tem hrefs únicos", () => {
     const hrefs = NAV_ITEMS.map((i) => i.href);
     expect(new Set(hrefs).size).toBe(hrefs.length);
