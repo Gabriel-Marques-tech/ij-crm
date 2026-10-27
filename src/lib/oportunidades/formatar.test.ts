@@ -19,6 +19,11 @@ describe("formatarValorCampo", () => {
     expect(formatarValorCampo("responsavelId", "sumiu", nomes)).toBe("usuário removido");
     expect(formatarValorCampo("cidade", "Recife", nomes)).toBe("Recife");
   });
+
+  it("descrição na Timeline: uma linha só, cortada em 120 caracteres", () => {
+    expect(formatarValorCampo("descricao", "linha 1\n\nlinha 2", nomes)).toBe("linha 1 linha 2");
+    expect(formatarValorCampo("descricao", "x".repeat(200), nomes)).toBe(`${"x".repeat(120)}…`);
+  });
 });
 
 describe("formatarDataHora", () => {

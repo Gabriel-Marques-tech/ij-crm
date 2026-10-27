@@ -473,6 +473,7 @@ async function aplicarCard(ctx: Ctx, card: CardPipefy): Promise<Desfecho> {
         revisar: revisar || !responsavel,
         origem: card.origem,
         dor: card.dor,
+        descricao: card.descricao,
         orcamentoPrevisto: card.orcamento,
         propostaUrl: card.propostaUrl,
         cidade: card.cidade,
@@ -519,6 +520,7 @@ async function aplicarCard(ctx: Ctx, card: CardPipefy): Promise<Desfecho> {
   comparar("titulo", existente.titulo, card.titulo);
   comparar("origem", existente.origem, card.origem as Origem | null);
   comparar("dor", existente.dor, card.dor);
+  comparar("descricao", existente.descricao, card.descricao);
   comparar("orcamentoPrevisto", existente.orcamentoPrevisto?.toFixed(2) ?? null, card.orcamento);
   comparar("propostaUrl", existente.propostaUrl, card.propostaUrl);
   comparar("cidade", existente.cidade, card.cidade);

@@ -28,6 +28,7 @@ import { DialogoTerminal, type PedidoTerminal } from "@/components/kanban/dialog
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { FALHA_CONEXAO, executarAcao, falhaDe, type FalhaUI } from "@/lib/erros/cliente";
+import { DESCRICAO_MAX } from "@/lib/oportunidades/descricao";
 import { dialogoTerminal, type DadosTerminal } from "@/lib/oportunidades/terminal-regras";
 import { criarCardAction, moverCardAction, salvarVisualizacaoKanbanAction } from "./actions";
 import { CardVisual } from "./card-visual";
@@ -329,7 +330,6 @@ export function QuadroKanban({ pipelineId, fases, cards: cardsServidor, agoraMs,
                 agoraMs={agoraMs}
                 pipelineId={pipelineId}
                 criandoInicial={criarEm === f.id}
-                mascoteNoVazio={visiveis.length > 0}
                 onCriado={(id) => {
                   setCriarEm(null);
                   if (id) fixar(id);
@@ -367,7 +367,6 @@ function Coluna({
   criandoInicial,
   onCriado,
   onRecolher,
-  mascoteNoVazio,
 }: {
   fase: FaseCliente;
   cards: CardCliente[];
@@ -377,8 +376,6 @@ function Coluna({
   /** Fim do formulário de novo card; `id` quando criou. */
   onCriado: (id?: string) => void;
   onRecolher?: () => void;
-  /** Falso quando o quadro todo está vazio: o aviso geral já traz o mascote (um só, não um por coluna). */
-  mascoteNoVazio: boolean;
 }) {
   // A coluna inteira é o alvo do drop (inclusive o cabeçalho).
   const { setNodeRef, isOver } = useDroppable({ id: idColuna(fase.id) });
@@ -422,13 +419,8 @@ function Coluna({
             <CardArrastavel key={c.id} card={c} fase={fase} agoraMs={agoraMs} />
           ))}
         </SortableContext>
-        {cards.length === 0 && !criando ? (
-          mascoteNoVazio ? (
-            <EstadoVazio mascote="cabeca" tamanho="sm" titulo="Nenhum card nesta fase" texto="Solte um card aqui." />
-          ) : (
-            <p className="px-2 py-6 text-center text-xs text-fg-faint">Solte um card aqui</p>
-          )
-        ) : null}
+        {/* Sem mascote: só o aviso do quadro todo vazio tem (um, não um por coluna). */}
+        {cards.length === 0 && !criando ? <p className="px-2 py-4 text-center text-xs text-fg-faint">Nenhum card nesta fase · Solte um card aqui.</p> : null}
       </div>
     </section>
   );
@@ -488,6 +480,7 @@ function CardArrastavel({ card, fase, agoraMs }: { card: CardCliente; fase: Fase
 
 function NovoCard({ pipelineId, faseId, onFim }: { pipelineId: string; faseId: string; onFim: (id?: string) => void }) {
   const [titulo, setTitulo] = useState("");
+  const [descricao, setDescricao] = useState("");
   const [erro, setErro] = useState<FalhaUI | null>(null);
   const [pendente, startTransition] = useTransition();
 
@@ -499,7 +492,7 @@ function NovoCard({ pipelineId, faseId, onFim }: { pipelineId: string; faseId: s
       // Chamada direta (não `executarAcao`) porque precisamos do id criado.
       let r: Awaited<ReturnType<typeof criarCardAction>>;
       try {
-        r = await criarCardAction(pipelineId, faseId, titulo);
+        r = await criarCardAction(pipelineId, faseId, titulo, descricao);
       } catch {
         setErro(FALHA_CONEXAO);
         return;
@@ -508,6 +501,7 @@ function NovoCard({ pipelineId, faseId, onFim }: { pipelineId: string; faseId: s
       if (falha) setErro(falha);
       else {
         setTitulo("");
+        setDescricao("");
         onFim("id" in r ? r.id : undefined);
       }
     });
@@ -524,6 +518,17 @@ function NovoCard({ pipelineId, faseId, onFim }: { pipelineId: string; faseId: s
         aria-label="Título do novo card"
         maxLength={200}
         disabled={pendente}
+      />
+      <textarea
+        value={descricao}
+        onChange={(e) => setDescricao(e.target.value)}
+        onKeyDown={(e) => e.key === "Escape" && onFim()}
+        placeholder="Descrição (opcional)"
+        aria-label="Descrição do novo card (opcional)"
+        rows={2}
+        maxLength={DESCRICAO_MAX}
+        disabled={pendente}
+        className="mt-2 w-full resize-y rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50 dark:bg-input/30"
       />
       <MensagemErro falha={erro} className="mt-1" />
       <div className="mt-2 flex justify-end gap-1">

@@ -448,7 +448,29 @@ describe("exportarCsv", () => {
       "30/10/2026",
       "12500,50",
       expect.stringMatching(/^\d{2}\/10\/2026 \d{2}:\d{2}$/),
+      "",
     ]);
+  });
+
+  it("coluna Descrição no fim (só no CSV): multilinha entre aspas e com a guarda anti fórmula", async () => {
+    const s = await semear();
+    const a = await card(s, "a");
+    const b = await card(s, "b");
+    await card(s, "c");
+    await db.oportunidade.update({ where: { id: a.id }, data: { descricao: '=HYPERLINK("x")\nlinha 2' } });
+    await db.oportunidade.update({ where: { id: b.id }, data: { descricao: "texto; com separador" } });
+
+    const csv = await csvTexto(estado({}, { ordem: { coluna: "titulo", dir: "asc" } }));
+    const [cabecalho] = csv.slice(1).split("\r\n");
+    expect(cabecalho.split(";").at(-1)).toBe("Descrição");
+    expect(csv).toContain(`;"'=HYPERLINK(""x"")\nlinha 2"\r\n`);
+    expect(csv).toContain(`;"texto; com separador"\r\n`);
+    // Card sem descrição: célula vazia no fim.
+    expect(csv).toMatch(/;c;.*;\r\n/);
+
+    // A tela não ganha a coluna.
+    const [linha] = (await listarTabela(estado(), AGORA)).linhas;
+    expect(linha).not.toHaveProperty("descricao");
   });
 
   it("cada lote reaplica os filtros: card que deixou de bater (ou foi apagado) no meio da exportação some", async () => {

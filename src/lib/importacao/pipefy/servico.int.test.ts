@@ -470,3 +470,20 @@ describe("import interrompido", () => {
     expect(await db.oportunidade.count()).toBe(2);
   });
 });
+
+describe("descrição do Pipefy", () => {
+  it("coluna “Descrição” vira a descrição do card; reimport atualiza, vazio não apaga", async () => {
+    const { admin } = await preparar();
+    const csv = (d: string) => `ID;Título;Fase atual;Descrição\n700001;Padaria;Primeiro Contato;${d}\n`;
+    const r1 = await importarConteudo(csv('"Quer loja\nonline"'), undefined, admin, AGORA);
+    if (!r1.ok) throw new Error(r1.erro);
+    expect((await card("700001")).descricao).toBe("Quer loja\nonline");
+
+    const r2 = await importarConteudo(csv("Quer loja e blog"), undefined, admin, AGORA);
+    if (!r2.ok) throw new Error(r2.erro);
+    expect((await card("700001")).descricao).toBe("Quer loja e blog");
+
+    await importarConteudo(csv(""), undefined, admin, AGORA);
+    expect((await card("700001")).descricao).toBe("Quer loja e blog");
+  });
+});

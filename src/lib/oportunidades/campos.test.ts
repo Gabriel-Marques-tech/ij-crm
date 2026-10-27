@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { inicioDoDia, interpretarCampo, validarTitulo } from "./campos";
+import { DESCRICAO_MAX, descricaoSchema, inicioDoDia, interpretarCampo, validarTitulo } from "./campos";
 
 describe("validarTitulo", () => {
   it("apara e colapsa espaços; vazio ou longo demais → null", () => {
@@ -83,5 +83,32 @@ describe("interpretarCampo", () => {
   it("responsável: id não vazio", () => {
     expect(interpretarCampo("responsavelId", "abc")).toEqual({ ok: true, valor: "abc" });
     expect(interpretarCampo("responsavelId", "").ok).toBe(false);
+  });
+});
+
+describe("descrição do card", () => {
+  it("zod: até 5000 caracteres; acima disso, erro em português", () => {
+    expect(DESCRICAO_MAX).toBe(5000);
+    expect(descricaoSchema.safeParse("x".repeat(5000)).success).toBe(true);
+    const r = descricaoSchema.safeParse("x".repeat(5001));
+    expect(r.success).toBe(false);
+    expect(r.error?.issues[0].message).toBe("Descrição: no máximo 5000 caracteres.");
+  });
+
+  it("vazio/só espaços vira null; quebras de linha internas ficam", () => {
+    expect(descricaoSchema.parse("   \n ")).toBeNull();
+    expect(descricaoSchema.parse(null)).toBeNull();
+    expect(descricaoSchema.parse(undefined)).toBeNull();
+    expect(descricaoSchema.parse("  linha 1\n\nlinha 2  ")).toBe("linha 1\n\nlinha 2");
+  });
+
+  it("é campo editável inline e usa o mesmo limite", () => {
+    expect(interpretarCampo("descricao", "a\nb")).toEqual({ ok: true, valor: "a\nb" });
+    expect(interpretarCampo("descricao", "")).toEqual({ ok: true, valor: null });
+    expect(interpretarCampo("descricao", "x".repeat(5001))).toEqual({ ok: false, erro: "Descrição: no máximo 5000 caracteres." });
+  });
+
+  it("não interpreta HTML: o texto é guardado como veio (a tela exibe como texto puro)", () => {
+    expect(interpretarCampo("descricao", "<b>oi</b> **x**")).toEqual({ ok: true, valor: "<b>oi</b> **x**" });
   });
 });

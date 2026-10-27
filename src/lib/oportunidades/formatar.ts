@@ -42,6 +42,11 @@ export function formatarValorCampo(campo: CampoEditavel, v: unknown, nomes: Read
       return /^\d{4}-\d{2}-\d{2}$/.test(String(v)) ? formatarDia(String(v)) : String(v);
     case "responsavelId":
       return nomes.get(String(v)) ?? "usuário removido";
+    case "descricao": {
+      // Até 5000 caracteres e multilinha: na Timeline vira um resumo de uma linha.
+      const t = String(v).replace(/\s+/g, " ").trim();
+      return t.length > 120 ? `${t.slice(0, 120)}…` : t;
+    }
     default:
       return String(v);
   }

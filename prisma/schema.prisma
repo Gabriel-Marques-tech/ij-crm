@@ -258,6 +258,8 @@ model Oportunidade {
   responsavelId         String     @map("responsavel_id")
   origem                Origem?
   dor                   String?
+  /// Texto livre do card (até 5000 caracteres, validado em `campos.ts`). Exibido como texto puro.
+  descricao             String?
   orcamentoPrevisto     Decimal?   @map("orcamento_previsto") @db.Decimal(14, 2)
   propostaUrl           String?    @map("proposta_url")
   cidade                String?

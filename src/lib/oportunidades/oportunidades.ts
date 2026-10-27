@@ -58,6 +58,7 @@ async function faseDestino(tx: Tx, faseId: string, pipelineId: string): Promise<
 export type CardDoQuadro = {
   id: string;
   titulo: string;
+  descricao: string | null;
   faseId: string;
   faseDesde: Date;
   revisar: boolean;
@@ -94,6 +95,7 @@ export async function listarQuadro(pipelineChave: string): Promise<Quadro | null
     select: {
       id: true,
       titulo: true,
+      descricao: true,
       faseId: true,
       faseDesde: true,
       revisar: true,
@@ -231,15 +233,16 @@ export async function registrarMovimento(
 }
 
 export async function criarCard(
-  dados: { pipelineId: string; faseId: string; titulo: string },
+  dados: { pipelineId: string; faseId: string; titulo: string; /** Já validada (`descricaoSchema`). */ descricao?: string | null },
   por: Ator,
 ): Promise<Resultado<{ id: string }>> {
   const titulo = validarTitulo(dados.titulo);
   if (!titulo) return { ok: false, erro: "TITULO_INVALIDO" };
+  const { descricao, ...resto } = dados;
   try {
     const id = await db.$transaction(async (tx) => {
       if (!(await travarPipelines(tx, [dados.pipelineId]))) throw new ErroDeRegra("PIPELINE_NAO_ENCONTRADO");
-      return criarCardTravado(tx, { ...dados, titulo, responsavelId: por.id, via: "UI" }, por);
+      return criarCardTravado(tx, { ...resto, titulo, responsavelId: por.id, via: "UI", campos: descricao ? { descricao } : undefined }, por);
     });
     return { ok: true, id };
   } catch (e) {

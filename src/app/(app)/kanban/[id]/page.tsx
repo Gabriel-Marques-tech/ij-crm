@@ -11,6 +11,7 @@ import { ROTULO_ORIGEM, UFS } from "@/lib/oportunidades/campos";
 import { formatarDataHora, formatarDinheiro, formatarDia } from "@/lib/oportunidades/formatar";
 import { listarResponsaveis, nomesDeUsuarios, obterCard } from "@/lib/oportunidades/oportunidades";
 import { CampoInline, RevisarSwitch } from "./campo-inline";
+import { DescricaoCard } from "./descricao-card";
 import { MoverFase } from "./mover-fase";
 import { NotaForm } from "./nota-form";
 import { ResultadoTerminal } from "./resultado-terminal";
@@ -168,6 +169,8 @@ export default async function CardPage({ params }: { params: Promise<{ id: strin
               </div>
             </div>
           </section>
+
+          <DescricaoCard cardId={card.id} valor={card.descricao} />
 
           <Vinculos cardId={card.id} />
 

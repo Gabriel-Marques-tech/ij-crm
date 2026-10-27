@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { exigirUsuario } from "@/lib/auth/atual";
 import { comTratamento, type Inesperado } from "@/lib/erros/registrar";
-import { ehCampoEditavel, interpretarCampo } from "@/lib/oportunidades/campos";
+import { descricaoSchema, ehCampoEditavel, interpretarCampo } from "@/lib/oportunidades/campos";
 import { adicionarNota, criarCard, editarCard, moverCard, type ErroOportunidade } from "@/lib/oportunidades/oportunidades";
 import { DETALHE_PERDA_MAX, type DadosTerminal } from "@/lib/oportunidades/terminal-regras";
 import { salvarVisualizacaoKanban } from "@/lib/preferencias/servico";
@@ -43,12 +43,15 @@ function revalidar(cardId?: string) {
   if (cardId) revalidatePath(`/kanban/${cardId}`);
 }
 
-export async function criarCardAction(pipelineId: string, faseId: string, titulo: string): Promise<EstadoKanban> {
+/** `descricao`: opcional (formulário do + no Kanban). */
+export async function criarCardAction(pipelineId: string, faseId: string, titulo: string, descricao?: string): Promise<EstadoKanban> {
   return comTratamento("kanban.criarCard", async (): Promise<EstadoKanban> => {
     const ator = await exigirUsuario();
     const p = z.object({ pipelineId: id, faseId: id, titulo: z.string().max(1000) }).safeParse({ pipelineId, faseId, titulo });
     if (!p.success) return { erro: "Dados inválidos." };
-    const r = await criarCard(p.data, ator);
+    const d = descricaoSchema.safeParse(descricao);
+    if (!d.success) return { erro: d.error.issues[0].message };
+    const r = await criarCard({ ...p.data, descricao: d.data }, ator);
     if (!r.ok) return { erro: MENSAGEM[r.erro] };
     revalidar();
     return { ok: true, id: r.id };

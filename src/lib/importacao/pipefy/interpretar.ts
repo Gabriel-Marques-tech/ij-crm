@@ -14,7 +14,7 @@
  */
 import type { Origem, TipoContatoPonto } from "@prisma/client";
 import { normalizarCnpj, normalizarEmail, normalizarTelefoneBr } from "@/lib/normalizacao";
-import { UFS, validarTitulo } from "@/lib/oportunidades/campos";
+import { DESCRICAO_MAX, UFS, validarTitulo } from "@/lib/oportunidades/campos";
 import { lerCsv } from "./csv";
 import { ALIASES_PADRAO, mapearCabecalho, type Aliases, type Campo, type ColunaHistorico } from "./colunas";
 import { lerData, lerLista, lerOrigem, lerValor, normalizarTexto } from "./valores";
@@ -45,6 +45,7 @@ export type CardPipefy = {
   cargo: string | null;
   origem: Origem | null;
   dor: string | null;
+  descricao: string | null;
   orcamento: string | null;
   valorFechado: string | null;
   motivoPerda: string | null;
@@ -261,6 +262,7 @@ export function interpretarCsv(texto: string, opts: { aliases?: Aliases; maxLinh
       cargo: texto("cargo"),
       origem,
       dor: texto("dor", DOR_MAX),
+      descricao: texto("descricao", DESCRICAO_MAX),
       orcamento: valor("orcamento"),
       valorFechado: valor("valorFechado"),
       motivoPerda: texto("motivoPerda", 500),

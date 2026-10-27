@@ -17,6 +17,8 @@ export type FaseCliente = {
 export type CardCliente = {
   id: string;
   titulo: string;
+  /** Texto puro; o card mostra uma prévia de 2 linhas. */
+  descricao: string | null;
   faseId: string;
   faseDesdeMs: number;
   revisar: boolean;
@@ -51,6 +53,7 @@ export function paraCliente(q: Quadro): { fases: FaseCliente[]; cards: CardClien
     cards: q.cards.map((c) => ({
       id: c.id,
       titulo: c.titulo,
+      descricao: c.descricao,
       faseId: c.faseId,
       faseDesdeMs: c.faseDesde.getTime(),
       revisar: c.revisar,
