@@ -8,7 +8,8 @@
  *   aparecem pela regra do Kanban (`nomeExibido`): mesclado → nome da
  *   principal se ela estiver viva, senão o próprio nome (`refNaTabela`).
  * - Ordenação só por colunas da lista branca, sempre com `id` como desempate
- *   (página estável: o mesmo card não aparece em duas páginas).
+ *   (página estável: o mesmo card não aparece em duas páginas). Empresa e
+ *   contato ordenam pelo nome EXIBIDO (`ordemPorNomeSql`, GAB-48).
  * - Faixas da próxima ação = `faixaProximaAcao` (Kanban e Minha Semana),
  *   traduzidas para intervalos de `proxima_acao_em` em dias civis de SP.
  */
@@ -104,6 +105,52 @@ async function idsDaBusca(termo: string, restrito?: string[]): Promise<string[]>
 }
 
 /**
+ * Chave de ordenação de empresa/contato = o texto da célula (`refNaTabela`)
+ * sem o sufixo "(excluída)": a expressão da busca (`nomeExibidoSql`) e, onde
+ * ela não conta (não mesclado e excluído), o próprio nome. Sem vínculo → NULL.
+ */
+function nomeNaCelulaSql(ref: string, principal: string): string {
+  return `COALESCE(${nomeExibidoSql(ref, principal)}, ${ref}.nome)`;
+}
+
+/**
+ * Colação da ordem por nome: `pt-BR-x-icu` (ICU, vem na imagem
+ * postgres:16-alpine de dev e prod). A colação padrão do banco (en_US.utf8
+ * sobre musl) compara bytes: "Zebra" < "abc" < "Ágil". Com a ICU a ordem é a
+ * de um leitor: acento e caixa só desempatam ("abc", "Ágil", "Alfa", "beta",
+ * "Zebra"), com o nome mostrado como está na célula.
+ */
+const COLACAO_NOMES = 'COLLATE "pt-BR-x-icu"';
+
+const REF_ORDEM = {
+  empresa: { tabela: "empresa", coluna: "empresa_id" },
+  contato: { tabela: "contato", coluna: "contato_id" },
+} as const;
+
+/**
+ * Ids do `where` na ordem pedida, todos (a página corta depois). Prisma não
+ * ordena por expressão: empresa/contato leem os ids filtrados e ordenam em
+ * SQL parametrizado por `nomeNaCelulaSql`, vazios por último nos dois
+ * sentidos, desempate por `id` (mesmo critério de `montarOrderBy`).
+ */
+async function idsOrdenados(where: Where, ordem: OrdemTabela): Promise<string[]> {
+  if (ordem.coluna !== "empresa" && ordem.coluna !== "contato") {
+    return (await db.oportunidade.findMany({ where, orderBy: montarOrderBy(ordem), select: { id: true } })).map((r) => r.id);
+  }
+  const ids = (await db.oportunidade.findMany({ where, select: { id: true } })).map((r) => r.id);
+  if (!ids.length) return [];
+  const { tabela, coluna } = REF_ORDEM[ordem.coluna];
+  const dir = ordem.dir === "asc" ? "ASC" : "DESC";
+  const linhas = await db.$queryRaw<{ id: string }[]>`
+    SELECT o.id FROM oportunidade o
+    LEFT JOIN ${Prisma.raw(tabela)} r ON r.id = o.${Prisma.raw(coluna)}
+    LEFT JOIN ${Prisma.raw(tabela)} rp ON rp.id = r.merged_into_id AND rp.deletado_em IS NULL
+    WHERE o.id = ANY(${ids})
+    ORDER BY ${Prisma.raw(`${nomeNaCelulaSql("r", "rp")} ${COLACAO_NOMES} ${dir} NULLS LAST`)}, o.id ASC`;
+  return linhas.map((l) => l.id);
+}
+
+/**
  * Filtros → `where` do Prisma. A busca não cabe no Prisma (unaccent): roda
  * antes em SQL e entra aqui como `id IN (...)`. Exportado para os testes.
  */
@@ -133,9 +180,8 @@ export async function montarWhere(f: FiltrosTabela, agora: Date, restrito?: stri
 
 /**
  * Lista branca coluna → ORDER BY. Campos anuláveis: vazios por último nos
- * dois sentidos. Relações opcionais (empresa/contato) seguem o padrão do
- * Postgres (vazios por último no asc, primeiro no desc): o Prisma não aceita
- * `nulls` em campo de relação.
+ * dois sentidos. Empresa/contato não passam por aqui (`idsOrdenados`, pelo
+ * nome exibido); a entrada deles é só o fallback pelo nome próprio.
  */
 export function montarOrderBy(o: OrdemTabela): OrderBy[] {
   const d = o.dir;
@@ -239,12 +285,21 @@ export type PaginaTabela = { linhas: LinhaTabela[]; total: number; pagina: numbe
 /** Uma página. Página além do fim cai na última (link velho não mostra vazio). */
 export async function listarTabela(e: EstadoTabela, agora: Date): Promise<PaginaTabela> {
   const where = await montarWhere(e.filtros, agora);
-  const total = await db.oportunidade.count({ where });
+  const porNome = e.ordem.coluna === "empresa" || e.ordem.coluna === "contato";
+  // Por nome: ids já ordenados (o total sai deles) e a página carregada por id.
+  const ordenados = porNome ? await idsOrdenados(where, e.ordem) : null;
+  const total = ordenados ? ordenados.length : await db.oportunidade.count({ where });
   const paginas = Math.max(1, Math.ceil(total / POR_PAGINA));
   const pagina = Math.min(e.pagina, paginas);
-  const brutas = total
-    ? await db.oportunidade.findMany({ where, orderBy: montarOrderBy(e.ordem), skip: (pagina - 1) * POR_PAGINA, take: POR_PAGINA, select: SELECAO })
-    : [];
+  const inicio = (pagina - 1) * POR_PAGINA;
+  let brutas: Bruta[] = [];
+  if (ordenados) {
+    const fatia = ordenados.slice(inicio, inicio + POR_PAGINA);
+    const porId = new Map((await db.oportunidade.findMany({ where: { id: { in: fatia } }, select: SELECAO })).map((b) => [b.id, b]));
+    brutas = fatia.map((id) => porId.get(id)).filter((b): b is Bruta => !!b);
+  } else if (total) {
+    brutas = await db.oportunidade.findMany({ where, orderBy: montarOrderBy(e.ordem), skip: inicio, take: POR_PAGINA, select: SELECAO });
+  }
   return { linhas: await paraLinhas(brutas, agora), total, pagina, paginas };
 }
 
@@ -305,7 +360,7 @@ function linhaParaCsv(l: LinhaTabela): string {
  * antes de começar a resposta e transformar falha em erro 500 com ref.
  */
 export async function* exportarCsv(f: FiltrosTabela, ordem: OrdemTabela, agora: Date, lote: number = LOTE_CSV): AsyncGenerator<string> {
-  const ids = (await db.oportunidade.findMany({ where: await montarWhere(f, agora), orderBy: montarOrderBy(ordem), select: { id: true } })).map((r) => r.id);
+  const ids = await idsOrdenados(await montarWhere(f, agora), ordem);
   yield BOM + linhaCsv(CABECALHO.map(celulaTexto));
   for (let i = 0; i < ids.length; i += lote) {
     const fatia = ids.slice(i, i + lote);
