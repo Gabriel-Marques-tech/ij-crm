@@ -53,9 +53,17 @@ export function sufixoVinculo(tipo: "empresa" | "contato", estado: "EXCLUIDO" | 
 }
 
 /**
- * Nome curto da empresa nas visões de card (Kanban, Minha Semana): mesclada →
- * nome da principal, mas só se ela estiver viva; senão, o próprio nome
- * (principal excluída nunca aparece como ativa). Merge tem 1 nível.
+ * Nome curto da empresa/contato nas visões de card (Kanban, Minha Semana,
+ * Tabela + CSV + busca da Tabela): mesclada → nome da principal, mas só se
+ * ela estiver viva; senão, o próprio nome (principal excluída nunca aparece
+ * como ativa). O merge vale antes do `deletadoEm` do próprio registro.
+ *
+ * INVARIANTE: merge tem 1 nível. `validarMerge` (`src/lib/lixeira/regras.ts`)
+ * recusa principal já mesclada e perdedor que tenha mesclados, então nunca
+ * existe cadeia A→B→C; por isso aqui (e no SQL da busca da Tabela) só se olha
+ * `mergedInto` direto. `descreverVinculos` segue cadeias por robustez, mas as
+ * visões de card não: se a invariante quebrar, elas exibem e buscam por B, de
+ * forma consistente (teste em `tabela.int.test.ts`).
  */
 export const SELECAO_NOME_EXIBIDO = { nome: true, mergedInto: { select: { nome: true, deletadoEm: true } } } as const;
 

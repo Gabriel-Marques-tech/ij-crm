@@ -6,7 +6,7 @@
  * - Card soft-deletado nunca aparece (`deletadoEm: null` em toda query).
  * - Empresa/contato excluídos ou mesclados vêm descritos por `vinculo.ts` e
  *   aparecem pela regra do Kanban (`nomeExibido`): mesclado → nome da
- *   principal se ela estiver viva, senão o próprio nome (`textoNaTabela`).
+ *   principal se ela estiver viva, senão o próprio nome (`refNaTabela`).
  * - Ordenação só por colunas da lista branca, sempre com `id` como desempate
  *   (página estável: o mesmo card não aparece em duas páginas).
  * - Faixas da próxima ação = `faixaProximaAcao` (Kanban e Minha Semana),
@@ -15,7 +15,7 @@
 import { Prisma, type Origem, type TipoTerminal } from "@prisma/client";
 import { db } from "@/lib/db";
 import { BUSCA_MAX, escaparLike } from "@/lib/entidades/busca";
-import { descreverVinculos, SELECAO_REF, textoVinculo, type Vinculo } from "@/lib/entidades/vinculo";
+import { nomeExibido, SELECAO_NOME_EXIBIDO, sufixoVinculo } from "@/lib/entidades/vinculo";
 import { diaEmFuso, diasNaFase, nivelAging, type NivelAging } from "@/lib/oportunidades/aging";
 import { inicioDoDia, ROTULO_ORIGEM } from "@/lib/oportunidades/campos";
 import { DIAS_SEMANA, somarDias } from "@/lib/oportunidades/proxima-acao";
@@ -76,23 +76,30 @@ function normalizarColuna(coluna: string): Prisma.Sql {
 
 /**
  * Ids que batem na busca: título, ou o nome EXIBIDO da empresa/contato
- * (`textoNaTabela`): vivo → o próprio; mesclado → o da principal viva, ou o
- * próprio se a principal morreu (merge tem 1 nível); excluído não conta.
+ * (`refNaTabela`/`nomeExibido`, mesma precedência, 1 nível de merge: ver
+ * invariante em `vinculo.ts`): mesclado → principal viva, senão o próprio
+ * (mesmo que ele esteja excluído); não mesclado e vivo → o próprio;
+ * não mesclado e excluído → não conta.
  * `%`, `_` e `\` do termo são literais (`escaparLike`, ESCAPE `\`).
  * `restrito` limita a um lote de ids (CSV).
  */
+/** `refNaTabela` em SQL (`principal` já filtrada por `deletado_em IS NULL` no JOIN). */
+function nomeExibidoSql(ref: string, principal: string): string {
+  return `CASE WHEN ${ref}.merged_into_id IS NOT NULL THEN COALESCE(${principal}.nome, ${ref}.nome) WHEN ${ref}.deletado_em IS NULL THEN ${ref}.nome END`;
+}
+
 async function idsDaBusca(termo: string, restrito?: string[]): Promise<string[]> {
   const padrao = `%${escaparLike(termo)}%`;
   const casa = (coluna: string) => Prisma.sql`${normalizarColuna(coluna)} LIKE public.unaccent(lower(${padrao})) ESCAPE ${"\\"}`;
   const linhas = await db.$queryRaw<{ id: string }[]>`
     SELECT o.id FROM oportunidade o
-    LEFT JOIN empresa e ON e.id = o.empresa_id AND e.deletado_em IS NULL
+    LEFT JOIN empresa e ON e.id = o.empresa_id
     LEFT JOIN empresa ep ON ep.id = e.merged_into_id AND ep.deletado_em IS NULL
-    LEFT JOIN contato c ON c.id = o.contato_id AND c.deletado_em IS NULL
+    LEFT JOIN contato c ON c.id = o.contato_id
     LEFT JOIN contato cp ON cp.id = c.merged_into_id AND cp.deletado_em IS NULL
     WHERE o.deletado_em IS NULL
       ${restrito ? Prisma.sql`AND o.id = ANY(${restrito})` : Prisma.empty}
-      AND (${casa("o.titulo")} OR ${casa("COALESCE(ep.nome, e.nome)")} OR ${casa("COALESCE(cp.nome, c.nome)")})`;
+      AND (${casa("o.titulo")} OR ${casa(nomeExibidoSql("e", "ep"))} OR ${casa(nomeExibidoSql("c", "cp"))})`;
   return linhas.map((l) => l.id);
 }
 
@@ -149,6 +156,11 @@ export function montarOrderBy(o: OrdemTabela): OrderBy[] {
   return [...porColuna[o.coluna], { id: "asc" }];
 }
 
+const SELECAO_REF_TABELA = { ...SELECAO_NOME_EXIBIDO, deletadoEm: true, mergedIntoId: true } as const;
+type RefBrutaTabela = { nome: string; deletadoEm: Date | null; mergedIntoId: string | null; mergedInto: { nome: string; deletadoEm: Date | null } | null };
+/** Empresa/contato já no texto final da célula; `excluido` só para o tom na tela. */
+export type RefTabela = { nome: string; excluido: boolean };
+
 const SELECAO = {
   id: true,
   titulo: true,
@@ -162,8 +174,8 @@ const SELECAO = {
   pipeline: { select: { chave: true, nome: true } },
   fase: { select: { nome: true, isTerminal: true, tipoTerminal: true, limiteDiasAlerta: true } },
   responsavel: { select: { id: true, nome: true } },
-  empresa: { select: SELECAO_REF },
-  contato: { select: SELECAO_REF },
+  empresa: { select: SELECAO_REF_TABELA },
+  contato: { select: SELECAO_REF_TABELA },
 } satisfies Prisma.OportunidadeSelect;
 
 export type LinhaTabela = {
@@ -171,8 +183,8 @@ export type LinhaTabela = {
   titulo: string;
   pipeline: { chave: string; nome: string };
   fase: { nome: string; isTerminal: boolean; tipoTerminal: TipoTerminal | null };
-  empresa: Vinculo | null;
-  contato: Vinculo | null;
+  empresa: RefTabela | null;
+  contato: RefTabela | null;
   responsavel: { id: string; nome: string };
   origem: Origem | null;
   revisar: boolean;
@@ -186,23 +198,20 @@ export type LinhaTabela = {
 };
 
 /**
- * Texto da célula de empresa/contato (tela e CSV), na regra do Kanban
- * (`nomeExibido`): mesclado → nome da principal se ela estiver viva, senão o
- * próprio nome. Excluído (sem merge) mantém o aviso "(excluída)".
+ * Empresa/contato na célula (tela e CSV). Mesclado (mesmo se também
+ * excluído) → `nomeExibido`, a regra do Kanban: principal viva, senão o
+ * próprio nome; 1 nível de merge. Só o não mesclado e excluído ganha o aviso
+ * "(excluída)". A busca (`nomeExibidoSql`) segue a mesma precedência.
  */
-export function textoNaTabela(tipo: "empresa" | "contato", v: Vinculo | null | undefined): string | null {
-  if (!v) return null;
-  if (v.estado === "MESCLADO") return v.destino?.nome ?? v.nome;
-  return textoVinculo(tipo, v);
+function refNaTabela(tipo: "empresa" | "contato", r: RefBrutaTabela | null): RefTabela | null {
+  if (!r) return null;
+  if (!r.mergedIntoId && r.deletadoEm) return { nome: `${r.nome} (${sufixoVinculo(tipo, "EXCLUIDO")})`, excluido: true };
+  return { nome: nomeExibido(r), excluido: false };
 }
 
 type Bruta = Prisma.OportunidadeGetPayload<{ select: typeof SELECAO }>;
 
 async function paraLinhas(brutas: Bruta[], agora: Date): Promise<LinhaTabela[]> {
-  const [empresas, contatos] = await Promise.all([
-    descreverVinculos("empresa", brutas.map((b) => b.empresa)),
-    descreverVinculos("contato", brutas.map((b) => b.contato)),
-  ]);
   return brutas.map((b) => {
     const dias = diasNaFase(new Date(Math.min(b.faseDesde.getTime(), agora.getTime())), agora);
     return {
@@ -210,8 +219,8 @@ async function paraLinhas(brutas: Bruta[], agora: Date): Promise<LinhaTabela[]> 
       titulo: b.titulo,
       pipeline: b.pipeline,
       fase: { nome: b.fase.nome, isTerminal: b.fase.isTerminal, tipoTerminal: b.fase.tipoTerminal },
-      empresa: b.empresa ? (empresas.get(b.empresa.id) ?? null) : null,
-      contato: b.contato ? (contatos.get(b.contato.id) ?? null) : null,
+      empresa: refNaTabela("empresa", b.empresa),
+      contato: refNaTabela("contato", b.contato),
       responsavel: b.responsavel,
       origem: b.origem,
       revisar: b.revisar,
@@ -269,8 +278,8 @@ function linhaParaCsv(l: LinhaTabela): string {
     celulaTexto(l.titulo),
     celulaTexto(l.pipeline.nome),
     celulaTexto(l.fase.nome),
-    celulaTexto(textoNaTabela("empresa", l.empresa)),
-    celulaTexto(textoNaTabela("contato", l.contato)),
+    celulaTexto(l.empresa?.nome),
+    celulaTexto(l.contato?.nome),
     celulaTexto(l.responsavel.nome),
     celulaTexto(l.origem ? ROTULO_ORIGEM[l.origem] : null),
     l.revisar ? "Sim" : "Não",

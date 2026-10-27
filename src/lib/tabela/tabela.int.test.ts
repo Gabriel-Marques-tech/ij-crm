@@ -4,7 +4,7 @@ import { dbTeste, limparBanco } from "@/test/db";
 import { invalidarCachePipelines } from "@/lib/fases/cache";
 import { inicioDoDia } from "@/lib/oportunidades/campos";
 import { ESTADO_PADRAO, FILTROS_TABELA_VAZIOS, type EstadoTabela, type FiltrosTabela } from "./params";
-import { exportarCsv, listarTabela, POR_PAGINA, textoNaTabela } from "./tabela";
+import { exportarCsv, listarTabela, POR_PAGINA } from "./tabela";
 
 const db = dbTeste();
 const sp = (iso: string) => new Date(`${iso}-03:00`);
@@ -208,13 +208,36 @@ describe("listarTabela", () => {
     expect(await busca("orfa")).toEqual(["v"]);
   });
 
-  it("empresa excluída/mesclada descrita via vinculo.ts", async () => {
+  it("empresa excluída marcada; mesclada exibida pela principal viva", async () => {
     const s = await semear();
     await card(s, "x", { empresaId: s.velha.id });
     await card(s, "y", { empresaId: s.dup.id });
     const r = await listarTabela(estado({}, { ordem: { coluna: "titulo", dir: "asc" } }), AGORA);
-    expect(r.linhas[0].empresa).toMatchObject({ estado: "EXCLUIDO", nome: "Velha SA" });
-    expect(r.linhas[1].empresa).toMatchObject({ estado: "MESCLADO", nome: "Acme Dup", destino: { id: s.acme.id, nome: "Acme Ltda" } });
+    expect(r.linhas[0].empresa).toEqual({ nome: "Velha SA (excluída)", excluido: true });
+    expect(r.linhas[1].empresa).toEqual({ nome: "Acme Ltda", excluido: false });
+  });
+
+  it("excluída E mesclada (estado hoje inalcançável): vale o merge, como `nomeExibido`", async () => {
+    const s = await semear();
+    const ambas = await db.empresa.create({ data: { nome: "Zumbi SA", deletadoEm: new Date(), mergedIntoId: s.acme.id } });
+    await card(s, "z", { empresaId: ambas.id });
+    const r = await listarTabela(estado({}), AGORA);
+    expect(r.linhas[0].empresa).toEqual({ nome: "Acme Ltda", excluido: false });
+    expect(await titulos(estado({ q: "acme" }))).toEqual(["z"]);
+    expect(await titulos(estado({ q: "zumbi" }))).toEqual([]);
+  });
+
+  it("merge tem 1 nível (validarMerge): cadeia A→B→C forçada no banco é exibida e buscada igual, por B", async () => {
+    const s = await semear();
+    const c = await db.empresa.create({ data: { nome: "Cume Final" } });
+    const b = await db.empresa.create({ data: { nome: "Beta Meio", mergedIntoId: c.id } });
+    const a = await db.empresa.create({ data: { nome: "Alfa Ponta", mergedIntoId: b.id } });
+    await card(s, "cadeia", { empresaId: a.id });
+    const exibido = (await listarTabela(estado({}), AGORA)).linhas[0].empresa?.nome;
+    expect(exibido).toBe("Beta Meio");
+    expect(await titulos(estado({ q: "beta meio" }))).toEqual(["cadeia"]);
+    expect(await titulos(estado({ q: "cume" }))).toEqual([]);
+    expect(await titulos(estado({ q: "alfa" }))).toEqual([]);
   });
 
   it("nome exibido como no Kanban: mesclada → principal viva; principal excluída → nome próprio", async () => {
@@ -226,7 +249,7 @@ describe("listarTabela", () => {
     await card(s, "b", { empresaId: orfa.id });
     await card(s, "c", { empresaId: s.velha.id });
     const r = await listarTabela(estado({}, { ordem: { coluna: "titulo", dir: "asc" } }), AGORA);
-    expect(r.linhas.map((l) => [textoNaTabela("empresa", l.empresa), textoNaTabela("contato", l.contato)])).toEqual([
+    expect(r.linhas.map((l) => [l.empresa?.nome ?? null, l.contato?.nome ?? null])).toEqual([
       ["Acme Ltda", "Maria 50% Silva"],
       ["Orfa Ltda", null],
       ["Velha SA (excluída)", null],
@@ -319,6 +342,15 @@ describe("exportarCsv", () => {
     for await (const p of gen) resto += p;
     const titulosCsv = resto.split("\r\n").filter(Boolean).map((l) => l.split(";")[1]);
     expect(titulosCsv).toEqual(["c0", "c2", "c3"]);
+  });
+
+  it("lotes + busca pelo nome exibido da mesclada: todas as linhas, na ordem, com o nome da principal", async () => {
+    const s = await semear();
+    for (let i = 0; i < 5; i++) await card(s, `m${i}`, { empresaId: s.dup.id });
+    await card(s, "fora", { empresaId: s.velha.id });
+    const t = await csvTexto(estado({ q: "acme ltda" }, { ordem: { coluna: "titulo", dir: "asc" } }), 2);
+    const linhas = t.slice(1).split("\r\n").filter(Boolean).slice(1).map((l) => l.split(";"));
+    expect(linhas.map((c) => [c[1], c[4]])).toEqual(["m0", "m1", "m2", "m3", "m4"].map((m) => [m, "Acme Ltda"]));
   });
 
   it("sem resultados → só cabeçalho", async () => {
