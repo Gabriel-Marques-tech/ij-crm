@@ -47,13 +47,16 @@ export type EscolhaVendedor = {
 };
 
 /**
- * `pedido` vem da URL (não confiável). Só GESTOR+ troca, e só para usuário
- * ativo; qualquer outra coisa cai na própria semana, sem erro.
+ * `pedido` vem da URL (não confiável). Só GESTOR+ e VISUALIZADOR trocam, e só
+ * para usuário ativo; qualquer outra coisa cai na própria semana, sem erro. O
+ * VISUALIZADOR não tem semana própria (nunca é responsável): sem pedido válido,
+ * abre na do primeiro da lista.
  */
 export async function resolverVendedor(ator: { id: string; papel: Papel }, pedido: string | undefined): Promise<EscolhaVendedor> {
-  const podeTrocar = temPapelMinimo(ator.papel, "GESTOR");
+  const podeTrocar = temPapelMinimo(ator.papel, "GESTOR") || ator.papel === "VISUALIZADOR";
   const opcoes = podeTrocar ? await listarResponsaveis() : [];
   const proprio = await db.usuario.findUniqueOrThrow({ where: { id: ator.id }, select: { id: true, nome: true } });
   const escolhido = podeTrocar && pedido ? opcoes.find((o) => o.id === pedido) : undefined;
-  return { alvo: escolhido ?? proprio, podeTrocar, opcoes };
+  const padrao = ator.papel === "VISUALIZADOR" ? opcoes[0] : undefined;
+  return { alvo: escolhido ?? padrao ?? proprio, podeTrocar, opcoes };
 }

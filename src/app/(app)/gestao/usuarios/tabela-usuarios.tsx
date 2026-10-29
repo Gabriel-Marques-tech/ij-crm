@@ -31,7 +31,7 @@ type Usuario = {
 
 type Ator = { id: string; papel: Papel };
 
-const ROTULO: Record<Papel, string> = { ADMIN: "Admin", GESTOR: "Gestor", VENDEDOR: "Vendedor" };
+const ROTULO: Record<Papel, string> = { ADMIN: "Admin", GESTOR: "Gestor", VENDEDOR: "Vendedor", VISUALIZADOR: "Visualizador" };
 
 export function TabelaUsuarios({ usuarios, ator }: { usuarios: Usuario[]; ator: Ator }) {
   const [editando, setEditando] = useState<Usuario | null>(null);

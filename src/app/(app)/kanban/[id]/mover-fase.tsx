@@ -16,6 +16,7 @@ export function MoverFase({
   fases,
   pipelineChave,
   fechamento,
+  somenteLeitura = false,
 }: {
   cardId: string;
   titulo: string;
@@ -24,6 +25,8 @@ export function MoverFase({
   pipelineChave: string;
   /** Último fechamento guardado: pré-preenche o diálogo. */
   fechamento: { valorFechado: string | null; motivoPerda: string | null };
+  /** VISUALIZADOR: select travado (o servidor recusa o movimento de qualquer jeito). */
+  somenteLeitura?: boolean;
 }) {
   const [pedido, setPedido] = useState<(PedidoTerminal & { faseId: string }) | null>(null);
   const [erro, setErro] = useState<FalhaUI | null>(null);
@@ -52,7 +55,7 @@ export function MoverFase({
       <select
         id="mover-fase"
         value={faseAtualId}
-        disabled={pendente}
+        disabled={pendente || somenteLeitura}
         onChange={(e) => escolher(e.target.value)}
         className="h-8 w-full rounded-lg border border-input bg-input/30 px-2.5 text-sm text-foreground outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
       >

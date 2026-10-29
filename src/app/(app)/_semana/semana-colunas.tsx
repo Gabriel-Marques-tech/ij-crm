@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Check } from "lucide-react";
+import { useSomenteLeitura } from "@/components/shell/somente-leitura";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { AcaoItem } from "@/lib/calendario/calendario";
 import type { DiaAgrupado } from "@/lib/calendario/semana";
@@ -38,5 +39,8 @@ function MarcarFeitaNoCard({ a, hoje }: { a: AcaoItem; hoje: string }) {
 
 /** Minha Semana em colunas (GAB-51, opção A): mesma grade do Calendário, empilhada no celular, com "marcar feita". */
 export function SemanaEmColunas({ dias, hoje, urgenteId = null }: { dias: DiaAgrupado<AcaoItem, PrazoItem>[]; hoje: string; urgenteId?: string | null }) {
-  return <GradeSemana dias={dias} hoje={hoje} layout="empilhar" urgenteId={urgenteId} extraDaAcao={(a) => <MarcarFeitaNoCard a={a} hoje={hoje} />} />;
+  const somenteLeitura = useSomenteLeitura();
+  return (
+    <GradeSemana dias={dias} hoje={hoje} layout="empilhar" urgenteId={urgenteId} extraDaAcao={somenteLeitura ? undefined : (a) => <MarcarFeitaNoCard a={a} hoje={hoje} />} />
+  );
 }

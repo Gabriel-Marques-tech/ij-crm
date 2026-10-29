@@ -86,17 +86,19 @@ export function GradeSemana({
                   {acoes.map((a) => (
                     <MiniCardAcao key={a.cardId} item={a} extra={extraDaAcao?.(a)} urgente={a.cardId === urgenteId} />
                   ))}
-                  <button
-                    type="button"
-                    onClick={() => novo(dia)}
-                    aria-label={`Novo prazo em ${r.ddmm}`}
-                    className={cn(
-                      "group flex flex-1 items-center justify-center rounded-md text-fg-faint outline-none hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-ring/50",
-                      empilhar ? "min-h-8" : "min-h-10",
-                    )}
-                  >
-                    <Plus className="size-3.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100" aria-hidden />
-                  </button>
+                  {novo ? (
+                    <button
+                      type="button"
+                      onClick={() => novo(dia)}
+                      aria-label={`Novo prazo em ${r.ddmm}`}
+                      className={cn(
+                        "group flex flex-1 items-center justify-center rounded-md text-fg-faint outline-none hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-ring/50",
+                        empilhar ? "min-h-8" : "min-h-10",
+                      )}
+                    >
+                      <Plus className="size-3.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100" aria-hidden />
+                    </button>
+                  ) : null}
                   {prazos.length ? (
                     <div className="space-y-0.5">
                       {prazos.map((p) => (

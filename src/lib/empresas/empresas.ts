@@ -1,5 +1,5 @@
 /**
- * Serviço de Empresas (GAB-31). Permissão é do chamador (`exigirUsuario`).
+ * Serviço de Empresas (GAB-31). Permissão é do chamador (`exigirEscrita`).
  *
  * CNPJ entra normalizado (alfanumérico, `normalizarCnpj`) e é único quando
  * presente: repetir um CNPJ devolve `CNPJ_DUPLICADO` com a empresa dona.

@@ -6,7 +6,7 @@
  */
 import { Prisma, type OrigemTransicao, type Papel, type PrismaClient } from "@prisma/client";
 import { db } from "@/lib/db";
-import { temPapelMinimo } from "@/lib/auth/papeis";
+import { QUEM_ATUA, temPapelMinimo } from "@/lib/auth/papeis";
 import { obterConfiguracao, salvarConfiguracao } from "@/lib/configuracao/servico";
 import { calcularRanking, cobreJanelaFeed, janelaFeed, montarFeed, type DadosRanking, type Intervalo, type ItemFeed, type LinhaRanking, type Participante, type Ranking } from "./calculo";
 import { CONFIG_RANKING, type ConfigRanking } from "./config";
@@ -141,7 +141,8 @@ export async function carregarDados({ inicio, fim }: Intervalo, cliente: Consult
 
 /**
  * Quem aparece: usuários ATIVOS com papel VENDEDOR, mais gestores/admins
- * ativos que são responsáveis por algum card vivo de Vendas. `inativos`:
+ * ativos que são responsáveis por algum card vivo de Vendas. VISUALIZADOR
+ * ativo nunca aparece (`QUEM_ATUA`), nem com card. `inativos`:
  * desativados — saem da lista, mas o que fizeram conta na linha "Time".
  * Uma consulta só.
  */
@@ -150,7 +151,7 @@ export async function listarParticipantes(): Promise<{ participantes: Participan
     where: {
       OR: [
         { ativo: false },
-        { ativo: true, OR: [{ papel: "VENDEDOR" }, { oportunidades: { some: { deletadoEm: null, pipeline: { chave: QUADRO_VENDAS } } } }] },
+        { ativo: true, ...QUEM_ATUA, OR: [{ papel: "VENDEDOR" }, { oportunidades: { some: { deletadoEm: null, pipeline: { chave: QUADRO_VENDAS } } } }] },
       ],
     },
     orderBy: { nome: "asc" },
@@ -168,9 +169,13 @@ export async function obterConfigRanking(): Promise<ConfigRanking> {
 
 type Ator = { id: string; papel: Papel };
 
-/** Gestor/admin sempre veem tudo; vendedor, só se o gestor deixou. */
+/**
+ * Gestor/admin e VISUALIZADOR sempre veem tudo (o visualizador não está no
+ * ranking, então "só a própria linha" não faria sentido); vendedor, só se o
+ * gestor deixou.
+ */
 export function podeVerRanking(ator: Ator, config: ConfigRanking): boolean {
-  return temPapelMinimo(ator.papel, "GESTOR") || config.mostrarAosVendedores;
+  return temPapelMinimo(ator.papel, "GESTOR") || ator.papel === "VISUALIZADOR" || config.mostrarAosVendedores;
 }
 
 /** Linha do próprio usuário sem a posição (com o ranking escondido, nem ela vaza). */

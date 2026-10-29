@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { podeAtribuirPapel, podeGerarRedefinicao, temPapelMinimo } from "./papeis";
+import { PAPEIS, podeAtribuirPapel, podeEscrever, podeGerarRedefinicao, temPapelMinimo } from "./papeis";
 
 describe("temPapelMinimo", () => {
   it("ordem VENDEDOR < GESTOR < ADMIN", () => {
@@ -8,14 +8,33 @@ describe("temPapelMinimo", () => {
     expect(temPapelMinimo("VENDEDOR", "GESTOR")).toBe(false);
     expect(temPapelMinimo("GESTOR", "ADMIN")).toBe(false);
   });
+
+  it("VISUALIZADOR fica abaixo do vendedor", () => {
+    expect(temPapelMinimo("VISUALIZADOR", "VENDEDOR")).toBe(false);
+    expect(temPapelMinimo("VISUALIZADOR", "VISUALIZADOR")).toBe(true);
+    expect(temPapelMinimo("VENDEDOR", "VISUALIZADOR")).toBe(true);
+    expect(PAPEIS).toEqual(["VISUALIZADOR", "VENDEDOR", "GESTOR", "ADMIN"]);
+  });
+});
+
+describe("podeEscrever", () => {
+  it("todo papel menos VISUALIZADOR", () => {
+    expect(podeEscrever("VISUALIZADOR")).toBe(false);
+    expect(podeEscrever("VENDEDOR")).toBe(true);
+    expect(podeEscrever("GESTOR")).toBe(true);
+    expect(podeEscrever("ADMIN")).toBe(true);
+  });
 });
 
 describe("podeAtribuirPapel", () => {
-  it("vendedor não convida ninguém", () => {
+  it("vendedor e visualizador não convidam ninguém", () => {
     expect(podeAtribuirPapel("VENDEDOR", "VENDEDOR")).toBe(false);
+    expect(podeAtribuirPapel("VENDEDOR", "VISUALIZADOR")).toBe(false);
+    expect(podeAtribuirPapel("VISUALIZADOR", "VISUALIZADOR")).toBe(false);
   });
 
   it("gestor convida até gestor, nunca admin", () => {
+    expect(podeAtribuirPapel("GESTOR", "VISUALIZADOR")).toBe(true);
     expect(podeAtribuirPapel("GESTOR", "VENDEDOR")).toBe(true);
     expect(podeAtribuirPapel("GESTOR", "GESTOR")).toBe(true);
     expect(podeAtribuirPapel("GESTOR", "ADMIN")).toBe(false);
@@ -24,12 +43,14 @@ describe("podeAtribuirPapel", () => {
   it("admin atribui qualquer papel", () => {
     expect(podeAtribuirPapel("ADMIN", "ADMIN")).toBe(true);
     expect(podeAtribuirPapel("ADMIN", "VENDEDOR")).toBe(true);
+    expect(podeAtribuirPapel("ADMIN", "VISUALIZADOR")).toBe(true);
   });
 });
 
 describe("podeGerarRedefinicao (GAB-43: papel estritamente inferior; admin redefine qualquer um)", () => {
-  it("gestor só para vendedor", () => {
+  it("gestor só para vendedor e visualizador", () => {
     expect(podeGerarRedefinicao("GESTOR", "VENDEDOR")).toBe(true);
+    expect(podeGerarRedefinicao("GESTOR", "VISUALIZADOR")).toBe(true);
     expect(podeGerarRedefinicao("GESTOR", "GESTOR")).toBe(false);
     expect(podeGerarRedefinicao("GESTOR", "ADMIN")).toBe(false);
   });
@@ -38,9 +59,12 @@ describe("podeGerarRedefinicao (GAB-43: papel estritamente inferior; admin redef
     expect(podeGerarRedefinicao("ADMIN", "VENDEDOR")).toBe(true);
     expect(podeGerarRedefinicao("ADMIN", "GESTOR")).toBe(true);
     expect(podeGerarRedefinicao("ADMIN", "ADMIN")).toBe(true);
+    expect(podeGerarRedefinicao("ADMIN", "VISUALIZADOR")).toBe(true);
   });
 
-  it("vendedor para ninguém", () => {
+  it("vendedor e visualizador para ninguém", () => {
     expect(podeGerarRedefinicao("VENDEDOR", "VENDEDOR")).toBe(false);
+    expect(podeGerarRedefinicao("VENDEDOR", "VISUALIZADOR")).toBe(false);
+    expect(podeGerarRedefinicao("VISUALIZADOR", "VISUALIZADOR")).toBe(false);
   });
 });

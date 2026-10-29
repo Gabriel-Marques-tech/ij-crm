@@ -1,6 +1,6 @@
 /**
- * Serviço de Contatos (GAB-31). Permissão é do chamador (`exigirUsuario`):
- * pela matriz de papéis (§4.5) qualquer usuário ativo cria/edita/vincula.
+ * Serviço de Contatos (GAB-31). Permissão é do chamador (`exigirEscrita`):
+ * pela matriz de papéis (§4.5) qualquer usuário ativo que escreve (não VISUALIZADOR) cria/edita/vincula.
  *
  * Pontos de contato (telefone/email) **acumulam**: entram normalizados
  * (`normalizarPonto`) e são únicos no sistema por `(tipo, valor_normalizado)`.

@@ -23,7 +23,7 @@ export type ErroMerge = "MESMO_REGISTRO" | "PRINCIPAL_INVALIDO" | "PERDEDOR_INVA
 
 export type FalhaLixeira = { erro: ErroLixeira; fase?: { id: string; nome: string }; mesclados?: number };
 
-/** Soft-delete de card: qualquer usuário. Restaurar (cards, contatos, empresas) e excluir contato/empresa: gestor+. */
+/** Soft-delete de card: qualquer usuário que escreve (action: `exigirEscrita`). Restaurar (cards, contatos, empresas) e excluir contato/empresa: gestor+. */
 export const podeRestaurar = (papel: Papel) => temPapelMinimo(papel, "GESTOR");
 export const podeMesclar = (papel: Papel) => temPapelMinimo(papel, "GESTOR");
 export const podeExcluirEntidade = (papel: Papel) => temPapelMinimo(papel, "GESTOR");

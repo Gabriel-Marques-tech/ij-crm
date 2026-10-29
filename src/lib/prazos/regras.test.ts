@@ -8,6 +8,11 @@ describe("podeMexerNoPrazo", () => {
     expect(podeMexerNoPrazo({ id: "g", papel: "GESTOR" }, "outro")).toBe(true);
     expect(podeMexerNoPrazo({ id: "a", papel: "ADMIN" }, "outro")).toBe(true);
   });
+
+  it("visualizador em nenhum, nem no próprio", () => {
+    expect(podeMexerNoPrazo({ id: "x", papel: "VISUALIZADOR" }, "x")).toBe(false);
+    expect(podeMexerNoPrazo({ id: "x", papel: "VISUALIZADOR" }, "outro")).toBe(false);
+  });
 });
 
 describe("validarPrazo", () => {

@@ -7,7 +7,7 @@ import { criarCard, moverCard } from "@/lib/oportunidades/oportunidades";
 import { obterConfiguracao } from "@/lib/configuracao/servico";
 import { CONFIG_RANKING, CONFIG_RANKING_PADRAO } from "./config";
 import { resolverPeriodo } from "./periodo";
-import { carregarDados, carregarRanking, carregarTop3, listarParticipantes, obterConfigRanking, salvarConfigRanking } from "./servico";
+import { carregarDados, carregarRanking, carregarTop3, listarParticipantes, obterConfigRanking, podeVerRanking, salvarConfigRanking } from "./servico";
 
 const db = dbTeste();
 
@@ -133,6 +133,15 @@ describe("ranking a partir do histórico real (criar, mover, marcar feita, ganha
     await db.oportunidade.update({ where: { id: c }, data: { deletadoEm: new Date() } });
     expect((await listarParticipantes()).participantes.map((p) => p.nome)).toEqual(["Ana Vendas", "Bruno Lima"]);
   });
+
+  it("participantes: VISUALIZADOR ativo nunca entra, nem sendo responsável de card vivo de Vendas", async () => {
+    const s = await semear();
+    const vera = await db.usuario.create({ data: { nome: "Vera Visualizadora", email: "vera@ij.test", papel: "VISUALIZADOR" } });
+    // Ex-vendedor rebaixado: ainda dono de um card.
+    await db.oportunidade.create({ data: { titulo: "Antigo", pipelineId: s.vendas.id, faseId: fase(s, "primeiro_contato"), responsavelId: vera.id, criadoVia: "UI" } });
+    const { participantes } = await listarParticipantes();
+    expect(participantes.map((p) => p.nome)).toEqual(["Ana Vendas", "Bruno Lima"]);
+  });
 });
 
 describe("visibilidade e configuração", () => {
@@ -161,6 +170,30 @@ describe("visibilidade e configuração", () => {
     const gest = await carregarRanking(s.gil, periodo, agora);
     expect(gest.modo).toBe("completo");
     expect((await carregarTop3(s.gil, agora)).modo).toBe("completo");
+  });
+
+  it("VISUALIZADOR vê o ranking completo mesmo escondido dos vendedores, sem linha própria; não mexe nos pesos", async () => {
+    const s = await semear();
+    const vera = await db.usuario.create({ data: { nome: "Vera Visualizadora", email: "vera@ij.test", papel: "VISUALIZADOR" } });
+    const a = await novoCard(s, s.ana, "da Ana");
+    await ok(moverCard(a, fase(s, "em_negociacao"), s.ana));
+    await ok(salvarConfigRanking({ ...CONFIG_RANKING_PADRAO, mostrarAosVendedores: false }, s.gil, null));
+    const config = await obterConfigRanking();
+    expect(podeVerRanking(vera, config)).toBe(true);
+    expect(podeVerRanking(s.ana, config)).toBe(false);
+
+    const agora = new Date();
+    const v = await carregarRanking(vera, resolverPeriodo("semana", undefined, agora), agora);
+    if (v.modo !== "completo") throw new Error("modo");
+    expect(v.eu).toBeNull();
+    expect(v.ranking.linhas.map((l) => l.usuario.nome)).toEqual(expect.arrayContaining(["Ana Vendas", "Bruno Lima"]));
+    expect(v.ranking.linhas.some((l) => l.usuario.id === vera.id)).toBe(false);
+    expect(v.feed.some((i) => i.usuario.id === s.ana.id)).toBe(true);
+
+    const top = await carregarTop3(vera, agora);
+    expect(top).toMatchObject({ modo: "completo", eu: null });
+
+    expect(await salvarConfigRanking(CONFIG_RANKING_PADRAO, vera, null)).toEqual({ ok: false, erro: "SEM_PERMISSAO" });
   });
 
   it("pesos: só GESTOR+, validados; inválido não grava; leitura sem linha = padrão", async () => {

@@ -4,6 +4,7 @@ import type { Papel } from "@prisma/client";
 import { podeAtribuirPapel } from "@/lib/auth/papeis";
 
 const OPCOES: { valor: Papel; rotulo: string }[] = [
+  { valor: "VISUALIZADOR", rotulo: "Visualizador (somente leitura)" },
   { valor: "VENDEDOR", rotulo: "Vendedor" },
   { valor: "GESTOR", rotulo: "Gestor" },
   { valor: "ADMIN", rotulo: "Admin" },

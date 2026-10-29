@@ -23,7 +23,8 @@ class Recusa extends Error {
   }
 }
 
-// Sem checagem de dono/papel de propósito: a matriz do §4.5 deixa todo papel editar card e próxima ação.
+// Sem checagem de dono de propósito: a matriz do §4.5 deixa todo papel que escreve editar card e
+// próxima ação (VISUALIZADOR é barrado na action, `exigirEscrita`).
 export async function marcarAcaoFeita(
   id: string,
   esperado: AcaoEsperada,

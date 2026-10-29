@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { exigirUsuario } from "@/lib/auth/atual";
+import { exigirEscrita, exigirUsuario } from "@/lib/auth/atual";
 import { comTratamento, type Inesperado } from "@/lib/erros/registrar";
 import { ehCampoContato } from "@/lib/entidades/campos";
 import { mensagemFalhaContato, type EstadoEntidade } from "@/lib/entidades/mensagens";
@@ -35,7 +35,7 @@ const NovoContato = z.object({
 
 export async function criarContatoAction(dados: z.input<typeof NovoContato>): Promise<EstadoEntidade> {
   return comTratamento("contatos.criar", async (): Promise<EstadoEntidade> => {
-    await exigirUsuario();
+    await exigirEscrita();
     const p = NovoContato.safeParse(dados);
     if (!p.success) return { erro: "Dados inválidos." };
     const r = await criarContato({ nome: p.data.nome, empresaId: p.data.empresaId, pontos: [p.data.telefone ?? "", p.data.email ?? ""] });
@@ -47,7 +47,7 @@ export async function criarContatoAction(dados: z.input<typeof NovoContato>): Pr
 
 export async function editarContatoCampoAction(contatoId: string, campo: string, bruto: string): Promise<EstadoEntidade> {
   return comTratamento("contatos.editarCampo", async (): Promise<EstadoEntidade> => {
-    await exigirUsuario();
+    await exigirEscrita();
     if (!id.safeParse(contatoId).success || !ehCampoContato(campo) || !texto.safeParse(bruto).success) return { erro: "Dados inválidos." };
     const r = await editarContato(contatoId, campo, bruto);
     if (!r.ok) return mensagemFalhaContato(r);
@@ -59,7 +59,7 @@ export async function editarContatoCampoAction(contatoId: string, campo: string,
 
 export async function definirEmpresaDoContatoAction(contatoId: string, empresaId: string | null): Promise<EstadoEntidade> {
   return comTratamento("contatos.definirEmpresa", async (): Promise<EstadoEntidade> => {
-    await exigirUsuario();
+    await exigirEscrita();
     if (!id.safeParse(contatoId).success || (empresaId !== null && !id.safeParse(empresaId).success)) return { erro: "Dados inválidos." };
     const r = await definirEmpresaDoContato(contatoId, empresaId);
     if (!r.ok) return mensagemFalhaContato(r);
@@ -70,7 +70,7 @@ export async function definirEmpresaDoContatoAction(contatoId: string, empresaId
 
 export async function adicionarPontoAction(contatoId: string, tipo: string, bruto: string): Promise<EstadoEntidade> {
   return comTratamento("contatos.adicionarPonto", async (): Promise<EstadoEntidade> => {
-    await exigirUsuario();
+    await exigirEscrita();
     if (!id.safeParse(contatoId).success || (tipo !== "TELEFONE" && tipo !== "EMAIL") || typeof bruto !== "string" || bruto.length > 200) {
       return { erro: "Dados inválidos." };
     }
@@ -83,7 +83,7 @@ export async function adicionarPontoAction(contatoId: string, tipo: string, brut
 
 export async function removerPontoAction(contatoId: string, pontoId: string): Promise<EstadoEntidade> {
   return comTratamento("contatos.removerPonto", async (): Promise<EstadoEntidade> => {
-    await exigirUsuario();
+    await exigirEscrita();
     if (!id.safeParse(contatoId).success || !id.safeParse(pontoId).success) return { erro: "Dados inválidos." };
     const r = await removerPonto(contatoId, pontoId);
     if (!r.ok) return mensagemFalhaContato(r);

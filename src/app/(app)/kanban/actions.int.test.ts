@@ -4,11 +4,22 @@ import { dbTeste, limparBanco } from "@/test/db";
 import { invalidarCachePipelines } from "@/lib/fases/cache";
 
 const { exigirUsuario } = vi.hoisted(() => ({ exigirUsuario: vi.fn() }));
-vi.mock("@/lib/auth/atual", () => ({ exigirUsuario }));
+vi.mock("@/lib/auth/atual", async () => {
+  const { podeEscrever } = await import("@/lib/auth/papeis");
+  return {
+    exigirUsuario,
+    // Mesma regra do real (`exigirPapel("VENDEDOR")`): VISUALIZADOR → redirect /403.
+    exigirEscrita: async () => {
+      const u = await exigirUsuario();
+      if (!podeEscrever(u.papel)) throw Object.assign(new Error("NEXT_REDIRECT"), { digest: "NEXT_REDIRECT;replace;/403;307;" });
+      return u;
+    },
+  };
+});
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
-import { listarQuadro, obterCard } from "@/lib/oportunidades/oportunidades";
-import { criarCardAction, editarCampoAction } from "./actions";
+import { adicionarNota, criarCard, editarCard, listarQuadro, listarResponsaveis, moverCard, obterCard } from "@/lib/oportunidades/oportunidades";
+import { adicionarNotaAction, criarCardAction, editarCampoAction, moverCardAction } from "./actions";
 
 const db = dbTeste();
 
@@ -96,5 +107,47 @@ describe("descrição do card (actions)", () => {
 
     expect(await criarCardAction(p.id, fase.id, "Longa", "x".repeat(5001))).toEqual({ erro: "Descrição: no máximo 5000 caracteres." });
     expect(await db.oportunidade.count()).toBe(2);
+  });
+});
+
+describe("papel VISUALIZADOR (somente leitura)", () => {
+  async function comVisualizador() {
+    const base = await semear();
+    const vera = await db.usuario.create({ data: { nome: "Vera Visualizadora", email: "vera@ij.test", papel: "VISUALIZADOR" } });
+    const c = await db.oportunidade.create({ data: { titulo: "Padaria", pipelineId: base.p.id, faseId: base.fase.id, responsavelId: base.u.id, criadoVia: "UI" } });
+    return { ...base, vera, c };
+  }
+
+  it("actions: criar, editar, mover e comentar → /403, nada gravado", async () => {
+    const { p, fase, vera, c } = await comVisualizador();
+    const outra = await db.fase.create({ data: { pipelineId: p.id, chave: "proposta", nome: "Proposta", ordem: 1 } });
+    exigirUsuario.mockResolvedValue({ id: vera.id, papel: "VISUALIZADOR" });
+    const proibido = { digest: "NEXT_REDIRECT;replace;/403;307;" };
+    await expect(criarCardAction(p.id, fase.id, "Do visualizador")).rejects.toMatchObject(proibido);
+    await expect(editarCampoAction(c.id, "titulo", "Mudou")).rejects.toMatchObject(proibido);
+    await expect(moverCardAction(c.id, outra.id)).rejects.toMatchObject(proibido);
+    await expect(adicionarNotaAction(c.id, "oi")).rejects.toMatchObject(proibido);
+
+    expect(await db.oportunidade.count()).toBe(1);
+    const card = await db.oportunidade.findUniqueOrThrow({ where: { id: c.id } });
+    expect([card.titulo, card.faseId]).toEqual(["Padaria", fase.id]);
+    expect(await db.timeline.count()).toBe(0);
+  });
+
+  it("serviço também recusa (SEM_PERMISSAO) quando o ator traz papel VISUALIZADOR", async () => {
+    const { p, fase, vera, c } = await comVisualizador();
+    const ator = { id: vera.id, papel: "VISUALIZADOR" as const };
+    expect(await criarCard({ pipelineId: p.id, faseId: fase.id, titulo: "x" }, ator)).toEqual({ ok: false, erro: "SEM_PERMISSAO" });
+    expect(await editarCard(c.id, { titulo: "x" }, ator)).toEqual({ ok: false, erro: "SEM_PERMISSAO" });
+    expect(await moverCard(c.id, fase.id, ator)).toEqual({ ok: false, erro: "SEM_PERMISSAO" });
+    expect(await adicionarNota(c.id, "oi", ator)).toEqual({ ok: false, erro: "SEM_PERMISSAO" });
+    expect(await db.timeline.count()).toBe(0);
+  });
+
+  it("não aparece entre os responsáveis e não pode virar responsável de card", async () => {
+    const { u, vera, c } = await comVisualizador();
+    expect((await listarResponsaveis()).map((r) => r.id)).toEqual([u.id]);
+    expect(await editarCampoAction(c.id, "responsavelId", vera.id)).toEqual({ erro: "Responsável inválido ou inativo." });
+    expect((await db.oportunidade.findUniqueOrThrow({ where: { id: c.id } })).responsavelId).toBe(u.id);
   });
 });

@@ -116,6 +116,16 @@ describe("resolverVendedor (filtro de vendedor)", () => {
       expect(r.alvo.id).toBe(s.gestora.id);
     }
   });
+
+  it("VISUALIZADOR troca de semana, não está nas opções e, sem pedido válido, abre na do primeiro da lista", async () => {
+    const s = await semear();
+    const vera = await db.usuario.create({ data: { nome: "Vera Visualizadora", email: "vera@ij.test", papel: "VISUALIZADOR" } });
+    const r = await resolverVendedor({ id: vera.id, papel: "VISUALIZADOR" }, s.bruno.id);
+    expect(r.alvo).toEqual({ id: s.bruno.id, nome: "Bruno Lima" });
+    expect(r.podeTrocar).toBe(true);
+    expect(r.opcoes.map((o) => o.nome)).toEqual(["Alice Admin", "Ana Vendas", "Bruno Lima", "Gil Gestora"]);
+    for (const pedido of [vera.id, undefined]) expect((await resolverVendedor({ id: vera.id, papel: "VISUALIZADOR" }, pedido)).alvo.nome).toBe("Alice Admin");
+  });
 });
 
 describe("marcarAcaoFeita", () => {

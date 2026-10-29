@@ -2,6 +2,7 @@ import Link from "next/link";
 import { cn } from "cn";
 import { PageHeader } from "@/components/shell/page-header";
 import { exigirUsuario } from "@/lib/auth/atual";
+import { podeEscrever } from "@/lib/auth/papeis";
 import { listarPipelines } from "@/lib/fases/fases";
 import { listarQuadro, listarResponsaveis } from "@/lib/oportunidades/oportunidades";
 import { visualizacaoKanban } from "@/lib/preferencias/preferencias";
@@ -22,6 +23,7 @@ function agoraDoRequest(): number {
 
 export default async function KanbanPage({ searchParams }: { searchParams: Promise<{ quadro?: string }> }) {
   const usuario = await exigirUsuario();
+  const leitura = !podeEscrever(usuario.papel);
   const { quadro: chave = "vendas" } = await searchParams;
   const [pipelines, quadro, responsaveis, preferencias] = await Promise.all([
     listarPipelines(),
@@ -38,7 +40,11 @@ export default async function KanbanPage({ searchParams }: { searchParams: Promi
       <PageHeader
         eyebrow={`kanban · ${quadro?.pipeline.chave ?? chave}`}
         title={quadro?.pipeline.nome ?? "Kanban"}
-        description="Arraste os cards entre as fases (ou foque um card e use espaço + setas). Clique no título para abrir o detalhe."
+        description={
+          leitura
+            ? "Acesso de visualização: clique no título para abrir o detalhe."
+            : "Arraste os cards entre as fases (ou foque um card e use espaço + setas). Clique no título para abrir o detalhe."
+        }
       />
       {pipelines.length > 1 ? (
         <nav aria-label="Quadros" className="-mt-4 mb-4 flex shrink-0 gap-1">
@@ -65,6 +71,7 @@ export default async function KanbanPage({ searchParams }: { searchParams: Promi
           agoraMs={agoraDoRequest()}
           responsaveis={responsaveis}
           meuId={usuario.id}
+          somenteLeitura={leitura}
           pipelineChave={quadro.pipeline.chave}
           visualizacao={visualizacaoKanban(preferencias, quadro.pipeline.chave, quadro.fases.map((f) => f.chave))}
           {...paraCliente(quadro)}

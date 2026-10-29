@@ -30,8 +30,33 @@ async function chamar(fn: () => Promise<EstadoEntidade>, acao: string): Promise<
 /**
  * Empresa e Contato do card (GAB-31). Autocomplete por nome só exibe; o
  * vínculo é a escolha explícita. Cada troca vira Timeline CAMPO_ALTERADO.
+ * `somenteLeitura` (VISUALIZADOR): só os links, sem busca/trocar/criar.
  */
-export function VinculosCliente({ cardId, empresa, contato }: { cardId: string; empresa: Ref; contato: Ref }) {
+export function VinculosCliente({ cardId, empresa, contato, somenteLeitura = false }: { cardId: string; empresa: Ref; contato: Ref; somenteLeitura?: boolean }) {
+  if (somenteLeitura) {
+    return (
+      <section className="rounded-xl border border-border bg-surface p-4">
+        <h2 className="mb-4 text-sm font-medium">Empresa e contato</h2>
+        <div className="grid gap-4 sm:grid-cols-2">
+          {([["empresa", "Empresa", empresa, Building2], ["contato", "Contato", contato, Contact]] as const).map(([tipo, rotulo, v, Icone]) => (
+            <div key={tipo}>
+              <p className="eyebrow mb-1">{rotulo}</p>
+              {v ? (
+                <span className="flex items-center gap-2 text-sm">
+                  <Icone className="size-3.5 shrink-0 text-fg-mute" aria-hidden />
+                  <span className="min-w-0 truncate">
+                    <VinculoLink tipo={tipo} vinculo={v} />
+                  </span>
+                </span>
+              ) : (
+                <p className="text-sm text-fg-faint">—</p>
+              )}
+            </div>
+          ))}
+        </div>
+      </section>
+    );
+  }
   return (
     <section className="rounded-xl border border-border bg-surface p-4">
       <h2 className="mb-4 text-sm font-medium">Empresa e contato</h2>

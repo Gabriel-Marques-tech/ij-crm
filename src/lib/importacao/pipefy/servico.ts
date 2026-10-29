@@ -9,6 +9,7 @@
  * o hash — o que é aplicado é exatamente o que o gestor viu.
  */
 import { createHash, randomBytes } from "node:crypto";
+import { QUEM_ATUA } from "@/lib/auth/papeis";
 import { db } from "@/lib/db";
 import { resolverContatos } from "@/lib/contatos/match";
 import { PIPELINE_PROJETOS, PIPELINE_VENDAS } from "@/lib/oportunidades/terminal-regras";
@@ -91,7 +92,7 @@ export async function calcularPrevia(
       o,
     ]),
   );
-  const usuarios = await db.usuario.findMany({ where: { ativo: true }, select: { id: true, nome: true, email: true } });
+  const usuarios = await db.usuario.findMany({ where: { ativo: true, ...QUEM_ATUA }, select: { id: true, nome: true, email: true } });
 
   // Pontos de contato que caem num contato excluído (lote: uma query + resolução de merges).
   const valores = [...new Set(interp.cards.flatMap((c) => c.pontos.map((p) => p.valorNormalizado)))];

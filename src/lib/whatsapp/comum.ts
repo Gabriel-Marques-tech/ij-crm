@@ -4,6 +4,7 @@
  * responsável. Tudo determinístico; nada aqui confia em id vindo da LLM.
  */
 import type { Origem, Prisma } from "@prisma/client";
+import { QUEM_ATUA } from "@/lib/auth/papeis";
 import { resolverDataRelativa } from "@/lib/llm/datas";
 import type { Extracao } from "@/lib/llm/prompts/extracao.v2";
 import { lerValorInformal } from "@/lib/llm/valores";
@@ -156,7 +157,8 @@ export function interpretarCamposExtracao(ex: Extracao, recebidaEm: Date, motivo
 
 /**
  * Remetente (ativo) e responsável: `responsavel_nome` só troca com match
- * exato (sem acento/caixa) do nome completo de UM usuário ativo.
+ * exato (sem acento/caixa) do nome completo de UM usuário ativo. VISUALIZADOR
+ * não é remetente nem responsável (`QUEM_ATUA`).
  */
 export async function remetenteEResponsavel(
   tx: Tx,
@@ -164,11 +166,11 @@ export async function remetenteEResponsavel(
   remetenteUsuarioId: string,
   motivos: string[],
 ): Promise<{ remetente: { id: string; nome: string }; responsavel: { id: string; nome: string } | null }> {
-  const remetente = await tx.usuario.findFirst({ where: { id: remetenteUsuarioId, ativo: true }, select: { id: true, nome: true } });
+  const remetente = await tx.usuario.findFirst({ where: { id: remetenteUsuarioId, ativo: true, ...QUEM_ATUA }, select: { id: true, nome: true } });
   if (!remetente) throw new ErroDeRegra("RESPONSAVEL_INVALIDO");
   if (!ex.responsavel_nome) return { remetente, responsavel: null };
   const alvo = nomeComparavel(ex.responsavel_nome);
-  const ativos = await tx.usuario.findMany({ where: { ativo: true }, select: { id: true, nome: true } });
+  const ativos = await tx.usuario.findMany({ where: { ativo: true, ...QUEM_ATUA }, select: { id: true, nome: true } });
   const iguais = ativos.filter((u) => nomeComparavel(u.nome) === alvo);
   if (iguais.length === 1) return { remetente, responsavel: iguais[0] };
   motivos.push("responsável indicado não encontrado");

@@ -8,7 +8,7 @@
  * desconhecido NUNCA tem conteúdo guardado e o telefone/LID sai mascarado.
  */
 import type { Papel, Prisma, StatusMensagem } from "@prisma/client";
-import { podeAtribuirPapel } from "@/lib/auth/papeis";
+import { podeAtribuirPapel, QUEM_ATUA } from "@/lib/auth/papeis";
 import { db } from "@/lib/db";
 import { travarPipelines } from "@/lib/fases/fases";
 import { ErroDeRegra, type ErroOportunidade } from "@/lib/oportunidades/erros";
@@ -145,7 +145,7 @@ export async function carregarPainel(): Promise<Painel> {
   };
 }
 
-/** Opções dos diálogos: fases abertas de Vendas (criar card) e usuários ativos (vincular remetente). */
+/** Opções dos diálogos: fases abertas de Vendas (criar card) e usuários ativos que atuam em card (vincular remetente). */
 export async function opcoesDoPainel(): Promise<{ fases: { id: string; nome: string }[]; usuarios: { id: string; nome: string }[] }> {
   const [fases, usuarios] = await Promise.all([
     db.fase.findMany({
@@ -153,7 +153,7 @@ export async function opcoesDoPainel(): Promise<{ fases: { id: string; nome: str
       orderBy: [{ ordem: "asc" }, { criadoEm: "asc" }],
       select: { id: true, nome: true },
     }),
-    db.usuario.findMany({ where: { ativo: true }, orderBy: { nome: "asc" }, select: { id: true, nome: true } }),
+    db.usuario.findMany({ where: { ativo: true, ...QUEM_ATUA }, orderBy: { nome: "asc" }, select: { id: true, nome: true } }),
   ]);
   return { fases, usuarios };
 }
@@ -211,7 +211,7 @@ export async function resolverManualmente(
         if (!fase) throw new ErroDeRegra("FASE_NAO_ENCONTRADA");
         if (!(await travarPipelines(tx, [fase.pipelineId]))) throw new ErroDeRegra("PIPELINE_NAO_ENCONTRADO");
         const vendedor = m.remetente_usuario_id
-          ? await tx.usuario.findFirst({ where: { id: m.remetente_usuario_id, ativo: true }, select: { id: true } })
+          ? await tx.usuario.findFirst({ where: { id: m.remetente_usuario_id, ativo: true, ...QUEM_ATUA }, select: { id: true } })
           : null;
         id = await criarCardTravado(
           tx,

@@ -36,7 +36,7 @@ export default async function ContatoPage({ params }: { params: Promise<{ id: st
 
       <header className="mb-6 rounded-xl border border-border bg-surface p-4">
         <p className="eyebrow mb-1">contato{empresa?.estado === "ATIVO" ? ` · ${empresa.nome}` : ""}</p>
-        <CampoEditavel id="contato-nome" rotulo="Nome" valor={c.nome} salvar={salvar("nome")} className="[&_button]:text-xl [&_button]:font-semibold [&>label]:sr-only" />
+        <CampoEditavel id="contato-nome" rotulo="Nome" valor={c.nome} salvar={salvar("nome")} className="[&_button]:text-xl [&_button]:font-semibold [&>p]:text-xl [&>p]:font-semibold [&>label]:sr-only" />
       </header>
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">

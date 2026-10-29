@@ -50,6 +50,8 @@ type Props = {
   pipelineChave: string;
   /** Preferência salva do usuário para este quadro (chaves de fase já filtradas). */
   visualizacao: VisualizacaoKanban;
+  /** VISUALIZADOR (decidido no servidor): sem arrasto e sem "+". As actions recusam de qualquer jeito. */
+  somenteLeitura?: boolean;
 };
 
 const idColuna = (faseId: string) => `fase:${faseId}`;
@@ -57,7 +59,7 @@ const idColuna = (faseId: string) => `fase:${faseId}`;
 /** Abrir/recolher coluna à mão salva depois de uma pausa (vários cliques = um request). */
 const ATRASO_SALVAR_COLUNAS_MS = 800;
 
-export function QuadroKanban({ pipelineId, fases, cards: cardsServidor, agoraMs, responsaveis, meuId, pipelineChave, visualizacao }: Props) {
+export function QuadroKanban({ pipelineId, fases, cards: cardsServidor, agoraMs, responsaveis, meuId, pipelineChave, visualizacao, somenteLeitura = false }: Props) {
   // Estado otimista: parte do servidor e é re-sincronizado quando chegam props novas (revalidate).
   const [base, setBase] = useState(cardsServidor);
   const [cards, setCards] = useState(cardsServidor);
@@ -280,7 +282,7 @@ export function QuadroKanban({ pipelineId, fases, cards: cardsServidor, agoraMs,
                   </Button>
                 ),
               }
-            : { titulo: "Este quadro ainda não tem cards", texto: "Use o + de uma fase para criar o primeiro." })}
+            : { titulo: "Este quadro ainda não tem cards", texto: somenteLeitura ? "Nada para ver aqui por enquanto." : "Use o + de uma fase para criar o primeiro." })}
         />
       ) : null}
       <DndContext
@@ -314,7 +316,7 @@ export function QuadroKanban({ pipelineId, fases, cards: cardsServidor, agoraMs,
                 total={daFase.length}
                 onExpandir={() => alternarExpandida(f.id)}
                 onNovo={
-                  f.isTerminal
+                  f.isTerminal || somenteLeitura
                     ? undefined
                     : () => {
                         setCriarEm(f.id);
@@ -329,6 +331,7 @@ export function QuadroKanban({ pipelineId, fases, cards: cardsServidor, agoraMs,
                 cards={daFase}
                 agoraMs={agoraMs}
                 pipelineId={pipelineId}
+                somenteLeitura={somenteLeitura}
                 criandoInicial={criarEm === f.id}
                 onCriado={(id) => {
                   setCriarEm(null);
@@ -364,6 +367,7 @@ function Coluna({
   cards,
   agoraMs,
   pipelineId,
+  somenteLeitura,
   criandoInicial,
   onCriado,
   onRecolher,
@@ -372,6 +376,7 @@ function Coluna({
   cards: CardCliente[];
   agoraMs: number;
   pipelineId: string;
+  somenteLeitura: boolean;
   criandoInicial: boolean;
   /** Fim do formulário de novo card; `id` quando criou. */
   onCriado: (id?: string) => void;
@@ -404,7 +409,7 @@ function Coluna({
           </Button>
         ) : null}
         {/* Terminal não recebe card novo: ganho/perdido só por movimento (passa pelo gancho de terminal). */}
-        {!fase.isTerminal ? (
+        {!fase.isTerminal && !somenteLeitura ? (
           <Button variant="ghost" size="icon-xs" aria-label={`Novo card em ${fase.nome}`} title="Novo card" onClick={() => setCriando(true)}>
             <Plus />
           </Button>
@@ -415,12 +420,14 @@ function Coluna({
       <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overscroll-contain px-2 pb-2">
         {criando ? <NovoCard pipelineId={pipelineId} faseId={fase.id} onFim={fimCriar} /> : null}
         <SortableContext id={idColuna(fase.id)} items={cards.map((c) => c.id)} strategy={verticalListSortingStrategy}>
-          {cards.map((c) => (
-            <CardArrastavel key={c.id} card={c} fase={fase} agoraMs={agoraMs} />
-          ))}
+          {cards.map((c) =>
+            somenteLeitura ? <CardVisual key={c.id} card={c} fase={fase} agoraMs={agoraMs} /> : <CardArrastavel key={c.id} card={c} fase={fase} agoraMs={agoraMs} />,
+          )}
         </SortableContext>
         {/* Sem mascote: só o aviso do quadro todo vazio tem (um, não um por coluna). */}
-        {cards.length === 0 && !criando ? <p className="px-2 py-4 text-center text-xs text-fg-faint">Nenhum card nesta fase · Solte um card aqui.</p> : null}
+        {cards.length === 0 && !criando ? (
+          <p className="px-2 py-4 text-center text-xs text-fg-faint">{somenteLeitura ? "Nenhum card nesta fase." : "Nenhum card nesta fase · Solte um card aqui."}</p>
+        ) : null}
       </div>
     </section>
   );

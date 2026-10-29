@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { exigirUsuario } from "@/lib/auth/atual";
+import { exigirEscrita, exigirUsuario } from "@/lib/auth/atual";
 import { comTratamento, type Inesperado } from "@/lib/erros/registrar";
 import { descricaoSchema, ehCampoEditavel, interpretarCampo } from "@/lib/oportunidades/campos";
 import { adicionarNota, criarCard, editarCard, moverCard, type ErroOportunidade } from "@/lib/oportunidades/oportunidades";
@@ -27,6 +27,7 @@ const MENSAGEM: Record<ErroOportunidade, string> = {
   MOTIVO_PERDA_OBRIGATORIO: "Escolha o motivo da perda.",
   MOTIVO_PERDA_INVALIDO: "Motivo da perda inválido.",
   MOTIVO_PERDA_DETALHE_OBRIGATORIO: "Em “Outro”, descreva o motivo da perda.",
+  SEM_PERMISSAO: "Seu acesso é só de visualização.",
   MOTIVO_PERDA_DETALHE_LONGO: `O detalhe do motivo pode ter até ${DETALHE_PERDA_MAX} caracteres.`,
 };
 
@@ -46,7 +47,7 @@ function revalidar(cardId?: string) {
 /** `descricao`: opcional (formulário do + no Kanban). */
 export async function criarCardAction(pipelineId: string, faseId: string, titulo: string, descricao?: string): Promise<EstadoKanban> {
   return comTratamento("kanban.criarCard", async (): Promise<EstadoKanban> => {
-    const ator = await exigirUsuario();
+    const ator = await exigirEscrita();
     const p = z.object({ pipelineId: id, faseId: id, titulo: z.string().max(1000) }).safeParse({ pipelineId, faseId, titulo });
     if (!p.success) return { erro: "Dados inválidos." };
     const d = descricaoSchema.safeParse(descricao);
@@ -67,7 +68,7 @@ const dadosTerminal = z
 /** `dados`: o que o diálogo de ganho/perdido coletou (ver `terminal-regras.ts`). */
 export async function moverCardAction(cardId: string, paraFaseId: string, dados?: DadosTerminal): Promise<EstadoKanban> {
   return comTratamento("kanban.moverCard", async (): Promise<EstadoKanban> => {
-    const ator = await exigirUsuario();
+    const ator = await exigirEscrita();
     if (!id.safeParse(cardId).success || !id.safeParse(paraFaseId).success) return { erro: "Dados inválidos." };
     const d = dadosTerminal.optional().safeParse(dados);
     if (!d.success) return { erro: "Dados inválidos." };
@@ -80,7 +81,7 @@ export async function moverCardAction(cardId: string, paraFaseId: string, dados?
 
 export async function editarCampoAction(cardId: string, campo: string, bruto: string): Promise<EstadoKanban> {
   return comTratamento("kanban.editarCampo", async (): Promise<EstadoKanban> => {
-    const ator = await exigirUsuario();
+    const ator = await exigirEscrita();
     if (!id.safeParse(cardId).success || !ehCampoEditavel(campo) || typeof bruto !== "string" || bruto.length > 10_000) {
       return { erro: "Dados inválidos." };
     }
@@ -95,7 +96,7 @@ export async function editarCampoAction(cardId: string, campo: string, bruto: st
 
 export async function adicionarNotaAction(cardId: string, texto: string): Promise<EstadoKanban> {
   return comTratamento("kanban.adicionarNota", async (): Promise<EstadoKanban> => {
-    const ator = await exigirUsuario();
+    const ator = await exigirEscrita();
     if (!id.safeParse(cardId).success || typeof texto !== "string") return { erro: "Dados inválidos." };
     const r = await adicionarNota(cardId, texto, ator);
     if (!r.ok) return { erro: MENSAGEM[r.erro] };

@@ -117,7 +117,8 @@ export default async function RankingPage({ searchParams }: { searchParams: Prom
         <div className="grid gap-6 lg:grid-cols-[1fr_20rem]">
           <ListaRanking linhas={ranking.linhas} euId={ator.id} />
           <aside className="space-y-6">
-            <MeusPontos eu={eu} pesos={visao.config.pesos} posicao={eu?.posicao} />
+            {/* VISUALIZADOR não pontua (nem está no ranking): sem "Meus pontos". */}
+            {ator.papel === "VISUALIZADOR" ? null : <MeusPontos eu={eu} pesos={visao.config.pesos} posicao={eu?.posicao} />}
             <FeedRanking itens={visao.feed} vazio="Nenhum ganho nem avanço de fase nos últimos 7 dias." />
           </aside>
         </div>

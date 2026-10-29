@@ -4,20 +4,21 @@ import { PageHeader } from "@/components/shell/page-header";
 import { FormBusca } from "@/components/entidades/form-busca";
 import { VinculoLink } from "@/components/entidades/vinculo-link";
 import { exigirUsuario } from "@/lib/auth/atual";
+import { podeEscrever } from "@/lib/auth/papeis";
 import { listarContatos } from "@/lib/contatos/contatos";
 import { NovoContato } from "./novo-contato";
 
 export const metadata = { title: "Contatos" };
 
 export default async function ContatosPage({ searchParams }: { searchParams: Promise<{ q?: string | string[] }> }) {
-  await exigirUsuario();
+  const eu = await exigirUsuario();
   const { q } = await searchParams;
   const busca = (Array.isArray(q) ? q[0] : q)?.slice(0, 200) ?? "";
   const contatos = await listarContatos(busca);
 
   return (
     <>
-      <PageHeader eyebrow="base · contatos" title="Contatos" description="Pessoas, com telefones e emails normalizados — cada um pertence a um só contato." actions={<NovoContato />} />
+      <PageHeader eyebrow="base · contatos" title="Contatos" description="Pessoas, com telefones e emails normalizados — cada um pertence a um só contato." actions={podeEscrever(eu.papel) ? <NovoContato /> : undefined} />
       <FormBusca valor={busca} rotulo="Buscar contatos" placeholder="nome, telefone ou email" />
       {contatos.length === 0 ? (
         <p className="rounded-xl border border-dashed border-border-strong bg-surface/40 p-8 text-center text-sm text-fg-faint">

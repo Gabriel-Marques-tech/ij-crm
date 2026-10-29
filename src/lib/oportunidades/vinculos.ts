@@ -1,6 +1,6 @@
 /**
  * Vínculo explícito de Empresa e Contato a um card (GAB-31). Permissão é do
- * chamador (`exigirUsuario`): qualquer usuário edita card (§4.5).
+ * chamador (`exigirEscrita`): qualquer usuário que escreve edita card (§4.5).
  *
  * Trava a linha do card (`FOR UPDATE`, como `editarCard`) para o "antes" da
  * Timeline ser o vínculo que de fato foi trocado. Cada troca grava

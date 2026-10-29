@@ -8,7 +8,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { exigirPapel, exigirUsuario } from "@/lib/auth/atual";
+import { exigirEscrita, exigirPapel } from "@/lib/auth/atual";
 import { comTratamento, type Inesperado } from "@/lib/erros/registrar";
 import { apagarCardDefinitivo, excluirCard, restaurarCard, type ResultadoLixeira } from "@/lib/lixeira/cards";
 import { apagarEntidadeDefinitivo, excluirEntidade, restaurarEntidade } from "@/lib/lixeira/entidades";
@@ -36,7 +36,7 @@ function responder(r: ResultadoLixeira<object>): EstadoLixeira {
 /** Sucesso → redireciona para o quadro (o detalhe do card deixa de existir para as visões). */
 export async function excluirCardAction(cardId: string, quadro: string): Promise<EstadoLixeira> {
   return comTratamento("lixeira.excluirCard", async (): Promise<EstadoLixeira> => {
-    const ator = await exigirUsuario();
+    const ator = await exigirEscrita();
     if (!id.safeParse(cardId).success || !/^[a-z0-9_]{1,64}$/.test(quadro)) return { erro: "Dados inválidos." };
     const r = responder(await excluirCard(cardId, ator));
     if ("ok" in r && r.ok) redirect(`/kanban?quadro=${quadro}`);

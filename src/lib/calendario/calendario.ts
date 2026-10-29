@@ -109,12 +109,15 @@ export type Visao = {
 
 /**
  * `?ver=time` ou `?pessoa=<id>` (da URL, não confiável). Todo mundo vê o time
- * todo; o padrão é a própria agenda. Pessoa inativa/inexistente → "Meu".
+ * todo; o padrão é a própria agenda (VISUALIZADOR: o time). Pessoa
+ * inativa/inexistente → "Meu".
  */
 export async function resolverVisao(ator: Ator, params: { ver?: string; pessoa?: string }): Promise<Visao> {
   const opcoes = await listarResponsaveis();
   if (params.ver === "time") return { modo: "time", pessoa: null, opcoes, filtro: "time" };
   const pessoa = params.pessoa && params.pessoa !== ator.id ? opcoes.find((o) => o.id === params.pessoa) : undefined;
   if (pessoa) return { modo: "pessoa", pessoa, opcoes, filtro: { responsavelIds: [pessoa.id] } };
+  // VISUALIZADOR não tem agenda própria (nunca é responsável): o padrão dele é o time.
+  if (ator.papel === "VISUALIZADOR") return { modo: "time", pessoa: null, opcoes, filtro: "time" };
   return { modo: "meu", pessoa: null, opcoes, filtro: { responsavelIds: [ator.id] } };
 }

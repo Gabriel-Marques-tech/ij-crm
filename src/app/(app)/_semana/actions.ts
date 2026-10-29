@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { exigirUsuario } from "@/lib/auth/atual";
+import { exigirEscrita } from "@/lib/auth/atual";
 import { comTratamento, type Inesperado } from "@/lib/erros/registrar";
 import { definirProximaAcao, marcarAcaoFeita, type ErroFeita } from "@/lib/oportunidades/feita";
 import { validarProximaEscolha } from "@/lib/semana/agrupar";
@@ -38,7 +38,7 @@ function revalidar(cardId: string) {
  */
 export async function marcarFeitaAction(cardId: string, esperado: Esperado, escolha: Escolha): Promise<EstadoSemana> {
   return comTratamento("semana.marcarFeita", async (): Promise<EstadoSemana> => {
-    const ator = await exigirUsuario();
+    const ator = await exigirEscrita();
     const e = esperadoSchema.safeParse(esperado);
     const c = escolhaSchema.safeParse(escolha);
     if (!id.safeParse(cardId).success || !e.success || !c.success) return { erro: "Dados inválidos." };
@@ -59,7 +59,7 @@ export async function marcarFeitaAction(cardId: string, esperado: Esperado, esco
 /** Card sem próxima ação: define ação + data juntas (um patch, uma transação). */
 export async function definirProximaAction(cardId: string, proximaAcao: string, diaBruto: string): Promise<EstadoSemana> {
   return comTratamento("semana.definirProxima", async (): Promise<EstadoSemana> => {
-    const ator = await exigirUsuario();
+    const ator = await exigirEscrita();
     if (!id.safeParse(cardId).success || typeof proximaAcao !== "string" || typeof diaBruto !== "string" || proximaAcao.length > 1000 || diaBruto.length > 20) {
       return { erro: "Dados inválidos." };
     }

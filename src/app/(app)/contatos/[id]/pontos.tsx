@@ -6,6 +6,7 @@ import type { TipoContatoPonto } from "@prisma/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MensagemErro } from "@/components/erros/mensagem-erro";
+import { useSomenteLeitura } from "@/components/shell/somente-leitura";
 import { LinkDuplicado } from "@/components/entidades/link-duplicado";
 import { FALHA_CONEXAO, falhaDe, type FalhaUI } from "@/lib/erros/cliente";
 import type { Duplicado } from "@/lib/entidades/mensagens";
@@ -13,13 +14,14 @@ import { adicionarPontoAction, removerPontoAction } from "../actions";
 
 type Ponto = { id: string; tipo: TipoContatoPonto; valorNormalizado: string; valorOriginal: string };
 
-/** Telefones e emails do contato: acumulam (adicionar/remover), sempre normalizados no servidor. */
+/** Telefones e emails do contato: acumulam (adicionar/remover), sempre normalizados no servidor. VISUALIZADOR só vê a lista. */
 export function Pontos({ contatoId, pontos }: { contatoId: string; pontos: Ponto[] }) {
   const [tipo, setTipo] = useState<TipoContatoPonto>("TELEFONE");
   const [valor, setValor] = useState("");
   const [erro, setErro] = useState<FalhaUI | null>(null);
   const [duplicado, setDuplicado] = useState<Duplicado | null>(null);
   const [pendente, startTransition] = useTransition();
+  const somenteLeitura = useSomenteLeitura();
 
   function adicionar(e: React.FormEvent) {
     e.preventDefault();
@@ -57,41 +59,45 @@ export function Pontos({ contatoId, pontos }: { contatoId: string; pontos: Ponto
             {p.tipo === "TELEFONE" ? <Phone className="size-3.5 text-fg-mute" aria-label="Telefone" /> : <Mail className="size-3.5 text-fg-mute" aria-label="Email" />}
             <span className="font-mono tabular text-foreground">{p.valorNormalizado}</span>
             {p.valorOriginal !== p.valorNormalizado ? <span className="truncate font-mono text-[11px] text-fg-faint" title="como foi digitado">{p.valorOriginal}</span> : null}
-            <Button type="button" variant="ghost" size="icon-xs" className="ml-auto" disabled={pendente} onClick={() => remover(p.id)} aria-label={`Remover ${p.valorNormalizado}`}>
-              <X />
-            </Button>
+            {somenteLeitura ? null : (
+              <Button type="button" variant="ghost" size="icon-xs" className="ml-auto" disabled={pendente} onClick={() => remover(p.id)} aria-label={`Remover ${p.valorNormalizado}`}>
+                <X />
+              </Button>
+            )}
           </li>
         ))}
       </ul>
-      <form onSubmit={adicionar} className="flex flex-wrap gap-2">
-        <label htmlFor="ponto-tipo" className="sr-only">
-          Tipo
-        </label>
-        <select
-          id="ponto-tipo"
-          value={tipo}
-          onChange={(e) => setTipo(e.target.value as TipoContatoPonto)}
-          className="h-8 rounded-lg border border-input bg-input/30 px-2 text-sm text-foreground outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-        >
-          <option value="TELEFONE">Telefone</option>
-          <option value="EMAIL">Email</option>
-        </select>
-        <label htmlFor="ponto-valor" className="sr-only">
-          {tipo === "TELEFONE" ? "Telefone" : "Email"}
-        </label>
-        <Input
-          id="ponto-valor"
-          className="w-auto min-w-48 flex-1"
-          inputMode={tipo === "TELEFONE" ? "tel" : "email"}
-          value={valor}
-          maxLength={200}
-          placeholder={tipo === "TELEFONE" ? "11 99999-8888" : "nome@empresa.com.br"}
-          onChange={(e) => setValor(e.target.value)}
-        />
-        <Button type="submit" size="sm" className="h-8" disabled={pendente || !valor.trim()}>
-          Adicionar
-        </Button>
-      </form>
+      {somenteLeitura ? null : (
+        <form onSubmit={adicionar} className="flex flex-wrap gap-2">
+          <label htmlFor="ponto-tipo" className="sr-only">
+            Tipo
+          </label>
+          <select
+            id="ponto-tipo"
+            value={tipo}
+            onChange={(e) => setTipo(e.target.value as TipoContatoPonto)}
+            className="h-8 rounded-lg border border-input bg-input/30 px-2 text-sm text-foreground outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+          >
+            <option value="TELEFONE">Telefone</option>
+            <option value="EMAIL">Email</option>
+          </select>
+          <label htmlFor="ponto-valor" className="sr-only">
+            {tipo === "TELEFONE" ? "Telefone" : "Email"}
+          </label>
+          <Input
+            id="ponto-valor"
+            className="w-auto min-w-48 flex-1"
+            inputMode={tipo === "TELEFONE" ? "tel" : "email"}
+            value={valor}
+            maxLength={200}
+            placeholder={tipo === "TELEFONE" ? "11 99999-8888" : "nome@empresa.com.br"}
+            onChange={(e) => setValor(e.target.value)}
+          />
+          <Button type="submit" size="sm" className="h-8" disabled={pendente || !valor.trim()}>
+            Adicionar
+          </Button>
+        </form>
+      )}
       <MensagemErro falha={erro} />
           <LinkDuplicado duplicado={duplicado} />
     </div>
