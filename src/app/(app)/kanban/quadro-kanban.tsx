@@ -9,7 +9,6 @@ import {
   MeasuringStrategy,
   MouseSensor,
   TouchSensor,
-  closestCorners,
   useDroppable,
   useSensor,
   useSensors,
@@ -32,6 +31,7 @@ import { DESCRICAO_MAX } from "@/lib/oportunidades/descricao";
 import { dialogoTerminal, type DadosTerminal } from "@/lib/oportunidades/terminal-regras";
 import { criarCardAction, moverCardAction, salvarVisualizacaoKanbanAction } from "./actions";
 import { CardVisual } from "./card-visual";
+import { colisaoQuadro } from "./colisao";
 import { colunasAbertas, proximoAlvo } from "./colunas";
 import { FILTROS_VAZIOS, escreverFiltros, filtrarCards, lerFiltros, type Filtros } from "./filtros";
 import { desfazerMovimento } from "./otimista";
@@ -286,7 +286,7 @@ export function QuadroKanban({ pipelineId, fases, cards: cardsServidor, agoraMs,
       <DndContext
         id={`kanban-${pipelineId}`}
         sensors={sensors}
-        collisionDetection={closestCorners}
+        collisionDetection={colisaoQuadro}
         // Colunas recolhidas abrem quando o arrasto começa: re-mede os alvos.
         measuring={{ droppable: { strategy: MeasuringStrategy.Always } }}
         onDragStart={onDragStart}
