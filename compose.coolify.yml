@@ -1,0 +1,264 @@
+# Coolify: complemento de compose.prod.yml para app + Evolution.
+# PostgreSQL do CRM já existe como recurso separado; DATABASE_URL é preservada.
+# O proxy/HTTPS pertence ao Coolify. Nenhum serviço publica portas na VPS.
+# Configuração e primeiro deploy: docs/coolify.md.
+# Migrations rodam antes do app; seed e criação de admin continuam manuais.
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+# Postgres para poucos usuários: poucas conexões e buffers pequenos. Os bancos
+# são minúsculos (MBs); o resto do cache fica com o page cache do kernel.
+x-postgres-leve: &postgres-leve
+  image: postgres:16-alpine
+  restart: unless-stopped
+  logging: *logging
+
+x-app-image: &app-build
+  context: .
+  dockerfile: Dockerfile
+
+services:
+  app:
+    image: ${APP_IMAGE:-ghcr.io/gabriel-marques-tech/ij-crm-app}:${APP_TAG:-latest}
+    build:
+      <<: *app-build
+      target: runtime
+    restart: unless-stopped
+    logging: *logging
+    mem_limit: ${APP_MEM_LIMIT:-512m}
+    environment: &app-env
+      NODE_ENV: production
+      # Heap do V8 bem abaixo do mem_limit: o resto é código, buffers e o `node`
+      # do healthcheck. Sem isto o Node dimensiona o heap pela RAM do host e só
+      # coleta lixo tarde (medido: 1,3 GB depois de ~600 requests).
+      NODE_OPTIONS: --max-old-space-size=${APP_HEAP_MB:-256}
+      # Preserve a URL completa (host, credenciais, banco e parâmetros do pool)
+      # do PostgreSQL já cadastrado no Coolify, em vez de criar outro banco.
+      DATABASE_URL: ${DATABASE_URL:?mantenha a URL interna do PostgreSQL existente}
+      APP_URL: ${APP_URL:?defina a URL publica do CRM}
+      EVOLUTION_API_URL: ${EVOLUTION_API_URL:-http://evolution:8080}
+      EVOLUTION_API_KEY: ${EVOLUTION_API_KEY:?defina EVOLUTION_API_KEY no .env}
+      EVOLUTION_INSTANCE: ${EVOLUTION_INSTANCE:-ij-crm}
+      EVOLUTION_WEBHOOK_SECRET: ${EVOLUTION_WEBHOOK_SECRET:?defina EVOLUTION_WEBHOOK_SECRET no .env}
+      GRUPO_JID: ${GRUPO_JID:-}
+      # Safe mode: só "true" libera envio real. Só o .env da VPS define true.
+      NOTIFICATIONS_ENABLED: ${NOTIFICATIONS_ENABLED:-false}
+      EVOLUTION_TIMEOUT_ENVIO_MS: ${EVOLUTION_TIMEOUT_ENVIO_MS:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      # Vazio = padrão do provedor (gpt-6.1-sol / claude-haiku-5-5 / gemini-3.8-flash).
+      LLM_EXTRACAO_MODELO: ${LLM_EXTRACAO_MODELO:-}
+      LLM_PROVEDOR: ${LLM_PROVEDOR:-openai}
+      LLM_LIMIAR_CONFIANCA: ${LLM_LIMIAR_CONFIANCA:-0.7}
+      # Sem #crm (GAB-39): vazio = modelo da extração; limiares do classificador e para agir sem tag.
+      LLM_CLASSIFICACAO_MODELO: ${LLM_CLASSIFICACAO_MODELO:-}
+      LLM_LIMIAR_CLASSIFICADOR: ${LLM_LIMIAR_CLASSIFICADOR:-0.7}
+      LLM_LIMIAR_SEM_TAG: ${LLM_LIMIAR_SEM_TAG:-0.85}
+      # GAB-46: aviso de sem crédito na LLM. Vazio = desligado.
+      ALERTA_OPS_JID: ${ALERTA_OPS_JID:-}
+      # Único controle de acesso a /api/cron/* (header x-cron-secret, GAB-41).
+      CRON_SECRET: ${CRON_SECRET:?defina CRON_SECRET no .env}
+    networks: [coolify, rede-whatsapp]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+
+  migrate:
+    image: ${OPS_IMAGE:-ghcr.io/gabriel-marques-tech/ij-crm-ops}:${APP_TAG:-latest}
+    build:
+      <<: *app-build
+      target: ops
+    restart: "no"
+    # Extensão do Coolify: sair com código 0 é o estado esperado deste serviço.
+    exclude_from_hc: true
+    logging: *logging
+    mem_limit: ${MIGRATE_MEM_LIMIT:-512m}
+    environment: *app-env
+    networks: [coolify]
+    command: ["./node_modules/.bin/prisma", "migrate", "deploy"]
+
+  llm-smoke:
+    image: ${OPS_IMAGE:-ghcr.io/gabriel-marques-tech/ij-crm-ops}:${APP_TAG:-latest}
+    build:
+      <<: *app-build
+      target: ops
+    profiles: ["ops"]
+    logging: *logging
+    mem_limit: ${MIGRATE_MEM_LIMIT:-512m}
+    environment: *app-env
+    networks: [coolify]
+    command: ["tsx", "scripts/smoke-llm.ts"]
+
+  evolution:
+    image: evoapicloud/evolution-api:v2.3.7
+    restart: unless-stopped
+    logging: *logging
+    mem_limit: ${EVOLUTION_MEM_LIMIT:-512m}
+    environment:
+      SERVER_URL: http://evolution:8080
+      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY:?defina EVOLUTION_API_KEY no .env}
+      # false: o token da instância não vai no corpo do webhook nem no fetchInstances.
+      # O webhook autentica só pelo header x-webhook-secret (webhook.headers da instância).
+      AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES: "false"
+      DATABASE_PROVIDER: postgresql
+      DATABASE_CONNECTION_URI: postgresql://evolution:${EVOLUTION_DB_PASSWORD:?defina EVOLUTION_DB_PASSWORD no .env}@evolution-db:5432/evolution?schema=public&connection_limit=${EVOLUTION_DB_POOL:-5}
+      DATABASE_CONNECTION_CLIENT_NAME: ij-crm
+      DATABASE_SAVE_DATA_INSTANCE: "true"
+      # Design §2: conteúdo que não é venda não fica em lugar nenhum — nem no banco da Evolution.
+      DATABASE_SAVE_DATA_NEW_MESSAGE: "false"
+      DATABASE_SAVE_MESSAGE_UPDATE: "false"
+      DATABASE_SAVE_DATA_CONTACTS: "false"
+      DATABASE_SAVE_DATA_CHATS: "false"
+      DATABASE_SAVE_DATA_LABELS: "false"
+      DATABASE_SAVE_DATA_HISTORIC: "false"
+      DATABASE_SAVE_IS_ON_WHATSAPP: "false"
+      CACHE_REDIS_ENABLED: "true"
+      CACHE_REDIS_URI: redis://:${EVOLUTION_REDIS_PASSWORD:?defina EVOLUTION_REDIS_PASSWORD no .env}@evolution-redis:6379/1
+      CACHE_REDIS_PREFIX_KEY: evolution
+      # false: `creds` ficam só no evolution-db (Redis guarda as chaves Signal de qualquer jeito).
+      CACHE_REDIS_SAVE_INSTANCES: "false"
+      CACHE_LOCAL_ENABLED: "false"
+      # Webhook é configurado POR INSTÂNCIA (runbook §5); o global fica desligado.
+      WEBHOOK_GLOBAL_ENABLED: "false"
+      WEBHOOK_EVENTS_MESSAGES_UPSERT: "true"
+      # Re-tentativas: 5xx/timeout re-tentam; 4xx não (app devolve 4xx só para erro definitivo).
+      WEBHOOK_REQUEST_TIMEOUT_MS: "30000"
+      WEBHOOK_RETRY_MAX_ATTEMPTS: "5"
+      WEBHOOK_RETRY_INITIAL_DELAY_SECONDS: "5"
+      WEBHOOK_RETRY_USE_EXPONENTIAL_BACKOFF: "true"
+      WEBHOOK_RETRY_MAX_DELAY_SECONDS: "120"
+      WEBHOOK_RETRY_JITTER_FACTOR: "0.2"
+      WEBHOOK_RETRY_NON_RETRYABLE_STATUS_CODES: "400,401,403,404,422"
+      CONFIG_SESSION_PHONE_CLIENT: IJ CRM
+      CONFIG_SESSION_PHONE_NAME: Chrome
+      DEL_INSTANCE: "false"
+      QRCODE_LIMIT: "30"
+      LANGUAGE: pt-BR
+      # Sem INFO/LOG/VERBOSE/WEBHOOKS: na v2.3.7 o corpo da mensagem é logado em
+      # VERBOSE (messageRaw) e o payload do webhook em WEBHOOKS.
+      LOG_LEVEL: ERROR,WARN
+      LOG_BAILEYS: error
+      LOG_COLOR: "false"
+      # Heap do V8 abaixo do mem_limit (o boot roda `prisma migrate` + `generate` antes da API).
+      NODE_OPTIONS: --max-old-space-size=${EVOLUTION_HEAP_MB:-256}
+      # Integrações que o CRM não usa, desligadas explicitamente. Nomes conferidos
+      # no dist/main.js da imagem v2.3.7: todas são `=== "true"` (desligadas por
+      # padrão), exceto a telemetria, LIGADA por padrão e que manda dados para fora.
+      # PROVIDER = servidor externo de auth-state; com false as credenciais do
+      # Baileys seguem no Redis/banco como hoje (não desliga o canal WhatsApp).
+      TELEMETRY_ENABLED: "false"
+      PROMETHEUS_METRICS: "false"
+      CHATWOOT_ENABLED: "false"
+      TYPEBOT_ENABLED: "false"
+      OPENAI_ENABLED: "false"
+      DIFY_ENABLED: "false"
+      N8N_ENABLED: "false"
+      EVOAI_ENABLED: "false"
+      FLOWISE_ENABLED: "false"
+      S3_ENABLED: "false"
+      RABBITMQ_ENABLED: "false"
+      SQS_ENABLED: "false"
+      NATS_ENABLED: "false"
+      KAFKA_ENABLED: "false"
+      PUSHER_ENABLED: "false"
+      WEBSOCKET_ENABLED: "false"
+      PROVIDER_ENABLED: "false"
+    volumes:
+      - evolution_instances:/evolution/instances
+    networks: [evolution-saida, rede-whatsapp, rede-evolution]
+    depends_on:
+      evolution-db:
+        condition: service_healthy
+      evolution-redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/"]
+      interval: 15s
+      timeout: 5s
+      start_period: 60s
+      retries: 5
+
+  evolution-db:
+    <<: *postgres-leve
+    mem_limit: ${EVOLUTION_DB_MEM_LIMIT:-192m}
+    # Só config da instância e credenciais do Baileys: menor ainda que o db do CRM.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=${EVOLUTION_DB_SHARED_BUFFERS:-32MB}
+      - -c
+      - max_connections=${EVOLUTION_DB_MAX_CONNECTIONS:-20}
+      - -c
+      - work_mem=${EVOLUTION_DB_WORK_MEM:-2MB}
+      - -c
+      - maintenance_work_mem=16MB
+      - -c
+      - effective_cache_size=${EVOLUTION_DB_EFFECTIVE_CACHE_SIZE:-128MB}
+      - -c
+      - max_parallel_workers_per_gather=0
+    environment:
+      POSTGRES_USER: evolution
+      POSTGRES_PASSWORD: ${EVOLUTION_DB_PASSWORD:?defina EVOLUTION_DB_PASSWORD no .env}
+      POSTGRES_DB: evolution
+    volumes:
+      - evolution_db_data:/var/lib/postgresql/data
+    networks: [rede-evolution]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U evolution -d evolution"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  evolution-redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    logging: *logging
+    mem_limit: ${REDIS_MEM_LIMIT:-96m}
+    # AOF: guarda as chaves Signal do Baileys (ver comentário da `evolution`).
+    # Sem `maxmemory`: com teto + noeviction o Redis passaria a recusar escrita
+    # (a Evolution quebraria do mesmo jeito), e com LRU apagaria chaves Signal e
+    # derrubaria a sessão do WhatsApp em silêncio. Os dados reais cabem em poucos
+    # MB; o mem_limit só segura um vazamento. Conferir `docker stats` (runbook §11).
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --requirepass
+      - ${EVOLUTION_REDIS_PASSWORD:?defina EVOLUTION_REDIS_PASSWORD no .env}
+    environment:
+      # redis-cli do healthcheck autentica por esta variável.
+      REDISCLI_AUTH: ${EVOLUTION_REDIS_PASSWORD}
+    volumes:
+      - evolution_redis_data:/data
+    networks: [rede-evolution]
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+networks:
+  coolify:
+    external: true
+    name: ${COOLIFY_DATABASE_NETWORK:-coolify}
+  rede-whatsapp:
+    internal: true
+  rede-evolution:
+    internal: true
+  evolution-saida:
+
+volumes:
+  evolution_instances:
+  evolution_db_data:
+  evolution_redis_data:
