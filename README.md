@@ -4,6 +4,11 @@ CRM interno da Inteli Júnior. Substitui o Pipefy: Kanban de vendas + leads entr
 pelo grupo de WhatsApp (Evolution API + LLM). Design completo em
 [`docs/superpowers/specs/2026-10-24-ij-crm-design.md`](docs/superpowers/specs/2026-10-24-ij-crm-design.md).
 
+**Deploy no Coolify:** use [`compose.coolify.yml`](compose.coolify.yml) e o
+[guia de configuração](docs/coolify.md). Esse arquivo reutiliza o PostgreSQL
+existente e aplica migrations antes de iniciar o app, sem Caddy nem portas
+publicadas na VPS. O deploy standalone/AWS com `compose.prod.yml` continua igual.
+
 ## Setup (3 comandos)
 
 ```bash

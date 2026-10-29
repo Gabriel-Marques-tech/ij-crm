@@ -1,4 +1,4 @@
-# Checagens de PR que não precisam de banco nem Docker:
+# Checagens de PR que não precisam de banco nem daemon Docker:
 #   - migrations novas destrutivas sem `-- destrutiva-ok: <motivo>` (expand/contract,
 #     scripts/checar-migrations.sh; o mesmo check barra o build da main em imagens.yml);
 #   - testes dos scripts de deploy (stubs, sem Docker).
@@ -14,6 +14,14 @@ permissions:
   contents: read
 
 jobs:
+  compose-coolify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Validar Compose do Coolify
+        run: python3 scripts/teste-compose-coolify.py
+
   deploy-e-migrations:
     runs-on: ubuntu-latest
     timeout-minutes: 10
