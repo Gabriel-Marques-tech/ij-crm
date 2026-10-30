@@ -366,7 +366,7 @@ describe("mover para terminal pelo WhatsApp", () => {
     // Para o WhatsApp o card ganho é uma venda FECHADA no Ganho (como na v1): mensagem nova reabre em Vendas.
     const r2 = await enviar("#crm o Gustavo quer outro projeto", (p) => {
       const linha = p.usuario.split("\n").find((l) => l.startsWith(`- id=${id} `))!;
-      expect(linha).toContain('fase="Contrato assinado" (fechado)');
+      expect(linha).toContain('fase="Contrato assinado" (fechada)');
       return saida({ intencao: "ATUALIZAR", oportunidade_id: id });
     });
     expect(r2.r).toMatchObject({ tipo: "PROCESSADA" });
