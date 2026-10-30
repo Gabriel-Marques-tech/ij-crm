@@ -151,6 +151,10 @@ export async function obterCard(id: string) {
       // Cards de projetos da v1 unidos a este pela migração do ciclo único (GAB-81):
       // a Timeline herdada cita os ids deles — para a UI, são este mesmo card.
       absorvidos: { select: { id: true } },
+      // Venda ↔ card de projetos da v1 que ficaram SEPARADOS (pares não unidos, GAB-81):
+      // links da Timeline. A UI só linka os vivos e não absorvidos.
+      vendaOrigem: { select: { id: true, titulo: true, deletadoEm: true, absorvidoPorId: true, pipeline: { select: { chave: true } } } },
+      cardProjetos: { select: { id: true, titulo: true, deletadoEm: true, absorvidoPorId: true, pipeline: { select: { chave: true } } } },
       timeline: {
         orderBy: [{ em: "asc" }, { id: "asc" }],
         include: { usuario: { select: { id: true, nome: true } } },

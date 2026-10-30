@@ -84,10 +84,24 @@ function Descricao({
       );
     case "VINCULO_PROJETO":
       if (p.evento === "ciclo_unico_nao_unido") {
+        const outro = typeof p.projetoId === "string" ? p.projetoId : p.vendaId;
         return (
           <>
-            manteve separados, no ciclo único, a venda e o card de projetos da v1: a venda tinha saído do ganho
-            {typeof p.vendaFase === "string" ? <> (estava em “{p.vendaFase}”)</> : null}
+            manteve separados, no ciclo único, a venda e o card de projetos da v1 (a venda tinha saído do ganho
+            {typeof p.vendaFase === "string" ? <>: estava em “{p.vendaFase}”</> : null}); o outro card é{" "}
+            <LinkCard id={outro} relacionados={relacionados} rotulo={typeof p.projetoId === "string" ? "projeto" : "venda"} />
+          </>
+        );
+      }
+      if (p.evento === "reganho_projeto_existente") {
+        return typeof p.projetoId === "string" ? (
+          <>
+            ganhou de novo e seguiu para o Handoff como card próprio; o projeto da venda anterior já existe:{" "}
+            <LinkCard id={p.projetoId} relacionados={relacionados} rotulo="projeto" />
+          </>
+        ) : (
+          <>
+            a venda <LinkCard id={p.vendaId} relacionados={relacionados} rotulo="venda" /> foi ganha de novo e seguiu para o Handoff como card próprio
           </>
         );
       }
