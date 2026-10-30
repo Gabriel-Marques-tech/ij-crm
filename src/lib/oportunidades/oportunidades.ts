@@ -1,7 +1,8 @@
 /**
  * Serviço de oportunidades do Kanban (GAB-29): criar card, mover, editar
- * inline, notas e leitura. Permissão é do chamador (`exigirUsuario`): pela
- * matriz de papéis (§4.5) qualquer usuário cria/edita/move.
+ * inline, notas e leitura. Permissão é do chamador (`exigirEscrita`): pela
+ * matriz de papéis (§4.5) qualquer usuário que escreve cria/edita/move. O
+ * serviço ainda recusa VISUALIZADOR (`SEM_PERMISSAO`) quando o ator traz papel.
  *
  * Concorrência: criar e mover tomam o lock de pipeline da Gestão de fases
  * (`travarPipelines`, ordem fixa por id) e releem a fase destino DEPOIS do
@@ -13,7 +14,8 @@
  * Todo acesso filtra `deletadoEm: null`: card soft-deletado não aparece, não
  * move e não edita.
  */
-import type { Fase, Origem, OrigemTransicao, Prisma, TipoTerminal, TipoTimeline } from "@prisma/client";
+import type { Fase, Origem, OrigemTransicao, Papel, Prisma, TipoTerminal, TipoTimeline } from "@prisma/client";
+import { podeEscrever, QUEM_ATUA } from "@/lib/auth/papeis";
 import { db } from "@/lib/db";
 import { SELECAO_NOME_EXIBIDO, nomeExibido } from "@/lib/entidades/vinculo";
 import { listarPipelines, travarPipelines } from "@/lib/fases/fases";
@@ -32,7 +34,13 @@ export type { ErroOportunidade } from "./erros";
 export type Resultado<T = object> = ({ ok: true } & T) | { ok: false; erro: ErroOportunidade };
 
 type Tx = Prisma.TransactionClient;
-type Ator = { id: string };
+/** `papel` opcional: import/WhatsApp agem em nome de alguém sem sessão. Veio → é conferido. */
+type Ator = { id: string; papel?: Papel };
+
+/** Defesa em profundidade (a action já chamou `exigirEscrita`): VISUALIZADOR não escreve. */
+function soLeitura(por: Ator): boolean {
+  return por.papel !== undefined && !podeEscrever(por.papel);
+}
 
 function traduzir<T>(e: unknown): Resultado<T> {
   if (e instanceof ErroDeRegra) return { ok: false, erro: e.erro };
@@ -156,9 +164,9 @@ export async function obterCard(id: string) {
 
 export type DetalheCard = NonNullable<Awaited<ReturnType<typeof obterCard>>>;
 
-/** Quem pode ser responsável: usuários ativos. */
+/** Quem pode ser responsável: usuários ativos que atuam em card (sem VISUALIZADOR). */
 export async function listarResponsaveis() {
-  return db.usuario.findMany({ where: { ativo: true }, orderBy: { nome: "asc" }, select: { id: true, nome: true } });
+  return db.usuario.findMany({ where: { ativo: true, ...QUEM_ATUA }, orderBy: { nome: "asc" }, select: { id: true, nome: true } });
 }
 
 /** id → nome, inclusive inativos (a Timeline cita quem já saiu). */
@@ -252,6 +260,7 @@ export async function criarCard(
   dados: { pipelineId: string; faseId: string; titulo: string; /** Já validada (`descricaoSchema`). */ descricao?: string | null },
   por: Ator,
 ): Promise<Resultado<{ id: string }>> {
+  if (soLeitura(por)) return { ok: false, erro: "SEM_PERMISSAO" };
   const titulo = validarTitulo(dados.titulo);
   if (!titulo) return { ok: false, erro: "TITULO_INVALIDO" };
   const { descricao, ...resto } = dados;
@@ -320,6 +329,7 @@ export async function moverCard(
   por: Ator,
   opts: { dadosTerminal?: DadosTerminal } = {},
 ): Promise<Resultado<{ mudou: boolean; terminal: TipoTerminal | null }>> {
+  if (soLeitura(por)) return { ok: false, erro: "SEM_PERMISSAO" };
   const tentar = () => moverUmaVez(id, paraFaseId, por, opts);
   try {
     return await tentar();
@@ -397,6 +407,7 @@ function serializar(campo: CampoEditavel, v: unknown): string | boolean | null {
  * Valores já vêm interpretados (`interpretarCampo`); aqui só regras de banco.
  */
 export async function editarCard(id: string, patch: PatchCard, por: Ator): Promise<Resultado<{ alterados: CampoEditavel[] }>> {
+  if (soLeitura(por)) return { ok: false, erro: "SEM_PERMISSAO" };
   if ("titulo" in patch && (typeof patch.titulo !== "string" || !validarTitulo(patch.titulo))) {
     return { ok: false, erro: "TITULO_INVALIDO" };
   }
@@ -432,8 +443,8 @@ export async function aplicarPatch(tx: Tx, id: string, patch: PatchCard, por: At
   for (const { campo } of mudancas) {
     const v = patch[campo] ?? null;
     if (campo === "responsavelId") {
-      const u = await tx.usuario.findUnique({ where: { id: String(v) }, select: { ativo: true } });
-      if (!u?.ativo) throw new ErroDeRegra("RESPONSAVEL_INVALIDO");
+      const u = await tx.usuario.findUnique({ where: { id: String(v) }, select: { ativo: true, papel: true } });
+      if (!u?.ativo || u.papel === "VISUALIZADOR") throw new ErroDeRegra("RESPONSAVEL_INVALIDO");
       data.responsavelId = String(v);
     } else if (campo === "titulo") {
       data.titulo = validarTitulo(String(v))!;
@@ -468,6 +479,7 @@ export async function aplicarPatch(tx: Tx, id: string, patch: PatchCard, por: At
 export const NOTA_MAX = 5000;
 
 export async function adicionarNota(id: string, texto: string, por: Ator): Promise<Resultado> {
+  if (soLeitura(por)) return { ok: false, erro: "SEM_PERMISSAO" };
   const t = texto.trim();
   if (t.length === 0 || t.length > NOTA_MAX) return { ok: false, erro: "NOTA_INVALIDA" };
   const op = await db.oportunidade.findFirst({ where: { id, deletadoEm: null }, select: { id: true } });

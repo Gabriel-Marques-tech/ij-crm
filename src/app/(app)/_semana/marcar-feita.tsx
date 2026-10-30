@@ -6,6 +6,7 @@ import { cn } from "cn";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MensagemErro } from "@/components/erros/mensagem-erro";
+import { useSomenteLeitura } from "@/components/shell/somente-leitura";
 import { executarAcao, type FalhaUI } from "@/lib/erros/cliente";
 import { definirProximaAction, marcarFeitaAction, type Esperado } from "./actions";
 
@@ -13,7 +14,7 @@ import { definirProximaAction, marcarFeitaAction, type Esperado } from "./action
  * "Marcar feita" inline: abre o campo da próxima ação + data no mesmo lugar.
  * O card só fica sem próxima ação se o usuário clicar em "Deixar sem" — não
  * existe caminho que esvazie sem essa escolha. Modo `definir`: card que já
- * está sem próxima ação ganha uma (sem NOTA de feito).
+ * está sem próxima ação ganha uma (sem NOTA de feito). Some para o VISUALIZADOR.
  */
 export function MarcarFeita({
   cardId,
@@ -45,6 +46,7 @@ export function MarcarFeita({
   const [erro, setErro] = useState<FalhaUI | null>(null);
   const [pendente, startTransition] = useTransition();
   const base = useId();
+  const somenteLeitura = useSomenteLeitura();
 
   function enviar(tipo: "nova" | "nenhuma") {
     startTransition(async () => {
@@ -60,6 +62,8 @@ export function MarcarFeita({
       if (!falha) fechar();
     });
   }
+
+  if (somenteLeitura) return null;
 
   if (!aberto) {
     return (

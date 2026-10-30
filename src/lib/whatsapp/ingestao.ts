@@ -19,6 +19,7 @@
  * 5s, e um retry da Evolution não pode cobrar a LLM duas vezes.
  */
 import { Prisma } from "@prisma/client";
+import { QUEM_ATUA } from "@/lib/auth/papeis";
 import { db } from "@/lib/db";
 import { contarDescartada } from "./contadores";
 import { mascararJid, mascararTelefone } from "./mascarar";
@@ -52,12 +53,13 @@ type Resolucao = { tipo: "OK"; usuarioId: string } | { tipo: "DESCONHECIDO" } | 
 /**
  * LID tem prioridade; telefone é o segundo caminho. Se os dois vierem e
  * apontarem para usuários ativos DIFERENTES, ninguém é escolhido: é conflito
- * de cadastro para o admin resolver, não para o bot adivinhar.
+ * de cadastro para o admin resolver, não para o bot adivinhar. VISUALIZADOR
+ * (somente leitura) nunca é remetente: a mensagem dele cai como desconhecida.
  */
 async function resolverRemetente(tx: Tx, r: Remetente): Promise<Resolucao> {
-  const porLid = r.lid ? await tx.usuario.findFirst({ where: { ativo: true, whatsappLid: r.lid }, select: { id: true } }) : null;
+  const porLid = r.lid ? await tx.usuario.findFirst({ where: { ativo: true, ...QUEM_ATUA, whatsappLid: r.lid }, select: { id: true } }) : null;
   const porTelefone = r.telefone
-    ? await tx.usuario.findFirst({ where: { ativo: true, telefoneWhatsapp: r.telefone }, select: { id: true } })
+    ? await tx.usuario.findFirst({ where: { ativo: true, ...QUEM_ATUA, telefoneWhatsapp: r.telefone }, select: { id: true } })
     : null;
   if (porLid && porTelefone && porLid.id !== porTelefone.id) return { tipo: "CONFLITO" };
   const usuario = porLid ?? porTelefone;

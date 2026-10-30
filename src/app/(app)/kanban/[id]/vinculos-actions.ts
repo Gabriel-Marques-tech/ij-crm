@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { exigirUsuario } from "@/lib/auth/atual";
+import { exigirEscrita } from "@/lib/auth/atual";
 import { comTratamento } from "@/lib/erros/registrar";
 import { criarContato } from "@/lib/contatos/contatos";
 import { criarEmpresa } from "@/lib/empresas/empresas";
@@ -22,7 +22,7 @@ function revalidar(cardId: string) {
 /** Vincula (`alvoId`) ou desvincula (`null`) empresa/contato do card. */
 export async function vincularAction(cardId: string, campo: string, alvoId: string | null): Promise<EstadoEntidade> {
   return comTratamento("kanban.vincular", async (): Promise<EstadoEntidade> => {
-    const ator = await exigirUsuario();
+    const ator = await exigirEscrita();
     if (!id.safeParse(cardId).success || !ehCampoVinculo(campo) || (alvoId !== null && !id.safeParse(alvoId).success)) return { erro: "Dados inválidos." };
     const r = await vincularAoCard(cardId, campo, alvoId, ator);
     if (!r.ok) return { erro: MENSAGEM_VINCULO[r.erro] };
@@ -34,7 +34,7 @@ export async function vincularAction(cardId: string, campo: string, alvoId: stri
 /** "Criar empresa X" no autocomplete do card: cria só com o nome e vincula. */
 export async function criarEVincularEmpresaAction(cardId: string, nome: string): Promise<EstadoEntidade> {
   return comTratamento("kanban.criarEmpresa", async (): Promise<EstadoEntidade> => {
-    const ator = await exigirUsuario();
+    const ator = await exigirEscrita();
     if (!id.safeParse(cardId).success || typeof nome !== "string" || nome.length > 1000) return { erro: "Dados inválidos." };
     const card = await db.oportunidade.findFirst({ where: { id: cardId, deletadoEm: null }, select: { id: true } });
     if (!card) return { erro: MENSAGEM_VINCULO.CARD_NAO_ENCONTRADO };
@@ -63,7 +63,7 @@ const NovoContato = z.object({
  */
 export async function criarEVincularContatoAction(cardId: string, dados: z.input<typeof NovoContato>): Promise<EstadoEntidade> {
   return comTratamento("kanban.criarContato", async (): Promise<EstadoEntidade> => {
-    const ator = await exigirUsuario();
+    const ator = await exigirEscrita();
     const p = NovoContato.safeParse(dados);
     if (!id.safeParse(cardId).success || !p.success) return { erro: "Dados inválidos." };
     const card = await db.oportunidade.findFirst({ where: { id: cardId, deletadoEm: null }, select: { empresaId: true } });

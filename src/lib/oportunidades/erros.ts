@@ -13,6 +13,8 @@ export type ErroOportunidade =
   | "RESPONSAVEL_INVALIDO"
   | "NOTA_INVALIDA"
   | "FASE_INICIAL_PROJETOS_INDISPONIVEL"
+  /** Ator VISUALIZADOR (somente leitura). */
+  | "SEM_PERMISSAO"
   | ErroDadosTerminal;
 
 /** Lançado dentro da transação: aborta (rollback) e vira `{ ok: false, erro }`. */

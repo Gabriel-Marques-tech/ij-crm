@@ -4,10 +4,11 @@ import { useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { cn } from "cn";
+import { useSomenteLeitura } from "@/components/shell/somente-leitura";
 
 const ABA = "rounded-md px-3 py-1 font-mono text-xs uppercase tracking-eyebrow transition-colors";
 
-/** Meu | Time | Pessoa ▾ (padrão "Meu"). Mantém o período na URL. */
+/** Meu | Time | Pessoa ▾ (padrão "Meu"; VISUALIZADOR não tem "Meu", o padrão dele é o time). Mantém o período na URL. */
 export function SeletorVisao({
   modo,
   pessoaId,
@@ -24,6 +25,7 @@ export function SeletorVisao({
 }) {
   const router = useRouter();
   const [pendente, startTransition] = useTransition();
+  const somenteLeitura = useSomenteLeitura();
   const href = (extra: Record<string, string>) => {
     const q = new URLSearchParams({ ...extra, ...periodo });
     const s = q.toString();
@@ -31,9 +33,11 @@ export function SeletorVisao({
   };
   return (
     <nav aria-label="De quem" className="flex items-center rounded-lg border border-border bg-surface p-0.5">
-      <Link href={href({})} aria-current={modo === "meu" ? "page" : undefined} className={cn(ABA, modo === "meu" ? "bg-surface-strong text-foreground" : "text-fg-mute hover:text-foreground")}>
-        Meu
-      </Link>
+      {somenteLeitura ? null : (
+        <Link href={href({})} aria-current={modo === "meu" ? "page" : undefined} className={cn(ABA, modo === "meu" ? "bg-surface-strong text-foreground" : "text-fg-mute hover:text-foreground")}>
+          Meu
+        </Link>
+      )}
       <Link href={href({ ver: "time" })} aria-current={modo === "time" ? "page" : undefined} className={cn(ABA, modo === "time" ? "bg-surface-strong text-foreground" : "text-fg-mute hover:text-foreground")}>
         Time
       </Link>

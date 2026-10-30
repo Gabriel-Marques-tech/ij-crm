@@ -6,6 +6,7 @@
  * `PRAZO` na Timeline dele, na mesma transação.
  */
 import type { Papel, Prisma } from "@prisma/client";
+import { QUEM_ATUA } from "@/lib/auth/papeis";
 import { db } from "@/lib/db";
 import { diaDoPrazo, instanteDoPrazo } from "@/lib/calendario/semana";
 import { estadoPrazo, podeMexerNoPrazo, validarPrazo, type EstadoPrazo } from "./regras";
@@ -37,7 +38,7 @@ function traduzir(e: unknown): { ok: false; erro: ErroPrazo; mensagem?: string }
 const VIVO: Prisma.PrazoWhereInput = { deletadoEm: null, OR: [{ oportunidadeId: null }, { oportunidade: { deletadoEm: null } }] };
 
 async function exigirResponsavelAtivo(tx: Tx, id: string) {
-  const u = await tx.usuario.findFirst({ where: { id, ativo: true }, select: { id: true } });
+  const u = await tx.usuario.findFirst({ where: { id, ativo: true, ...QUEM_ATUA }, select: { id: true } });
   if (!u) throw new Recusa("RESPONSAVEL_INVALIDO");
 }
 

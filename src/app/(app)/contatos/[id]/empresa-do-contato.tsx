@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { Building2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MensagemErro } from "@/components/erros/mensagem-erro";
+import { useSomenteLeitura } from "@/components/shell/somente-leitura";
 import { BuscaEntidade } from "@/components/entidades/busca-entidade";
 import { VinculoLink } from "@/components/entidades/vinculo-link";
 import type { Vinculo } from "@/lib/entidades/vinculo";
@@ -16,6 +17,7 @@ export function EmpresaDoContato({ contatoId, empresa }: { contatoId: string; em
   const [trocando, setTrocando] = useState(false);
   const [erro, setErro] = useState<FalhaUI | null>(null);
   const [pendente, startTransition] = useTransition();
+  const somenteLeitura = useSomenteLeitura();
 
   function definir(empresaId: string | null) {
     startTransition(async () => {
@@ -28,7 +30,18 @@ export function EmpresaDoContato({ contatoId, empresa }: { contatoId: string; em
   return (
     <div>
       <p className="eyebrow mb-1">Empresa</p>
-      {empresa && !trocando ? (
+      {somenteLeitura ? (
+        empresa ? (
+          <span className="flex items-center gap-2 text-sm">
+            <Building2 className="size-3.5 text-fg-mute" aria-hidden />
+            <span className="min-w-0 truncate">
+              <VinculoLink tipo="empresa" vinculo={empresa} />
+            </span>
+          </span>
+        ) : (
+          <p className="text-sm text-fg-faint">—</p>
+        )
+      ) : empresa && !trocando ? (
         <div className="flex items-center gap-2">
           <Building2 className="size-3.5 text-fg-mute" aria-hidden />
           <span className="min-w-0 truncate text-sm">

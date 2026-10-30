@@ -44,3 +44,13 @@ export async function exigirPapel(minimo: Papel): Promise<UsuarioSessao> {
   if (!temPapelMinimo(u.papel, minimo)) redirect("/403");
   return u;
 }
+
+/**
+ * Toda server action/rota que ESCREVE no CRM chama isto em vez de
+ * `exigirUsuario`: VISUALIZADOR (somente leitura) → /403, mesmo chamando a
+ * action direto. Ler e mexer na própria conta (/perfil, preferências de
+ * visualização) seguem com `exigirUsuario`.
+ */
+export async function exigirEscrita(): Promise<UsuarioSessao> {
+  return exigirPapel("VENDEDOR");
+}

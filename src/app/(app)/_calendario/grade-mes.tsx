@@ -101,7 +101,7 @@ export function GradeMes({
                 >
                   {r.numero}
                 </span>
-                {dentro ? (
+                {dentro && novo ? (
                   <button
                     type="button"
                     onClick={() => novo(dia)}
@@ -174,7 +174,7 @@ export function GradeMes({
                     {aberto ? "Recolher" : `+${resto} ${resto === 1 ? "item" : "itens"}`}
                   </button>
                 ) : null}
-                {dentro ? (
+                {dentro && novo ? (
                   <button
                     type="button"
                     tabIndex={-1}

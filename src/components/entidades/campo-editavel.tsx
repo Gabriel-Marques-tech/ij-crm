@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { cn } from "cn";
 import { Input } from "@/components/ui/input";
 import { MensagemErro } from "@/components/erros/mensagem-erro";
+import { useSomenteLeitura } from "@/components/shell/somente-leitura";
 import { executarAcao, type FalhaUI, type RespostaAcao } from "@/lib/erros/cliente";
 
 const CAMPO_CLASSE =
@@ -13,6 +14,7 @@ const CAMPO_CLASSE =
  * Campo editável inline de Empresa/Contato (mesmo comportamento do
  * `CampoInline` do card): clique edita; Enter/blur salva; Esc cancela.
  * `salvar` é uma server action já ligada ao registro e ao campo (`.bind`).
+ * VISUALIZADOR (`useSomenteLeitura`): só mostra o valor.
  */
 export function CampoEditavel({
   id,
@@ -41,6 +43,7 @@ export function CampoEditavel({
   const [rascunho, setRascunho] = useState(valor);
   const [erro, setErro] = useState<FalhaUI | null>(null);
   const [pendente, startTransition] = useTransition();
+  const somenteLeitura = useSomenteLeitura();
 
   function gravar(novo: string) {
     if (novo === valor) {
@@ -73,13 +76,19 @@ export function CampoEditavel({
   let controle: React.ReactNode;
   if (tipo === "select") {
     controle = (
-      <select id={id} value={valor} disabled={pendente} onChange={(e) => gravar(e.target.value)} className={cn(CAMPO_CLASSE, "h-8 py-0")}>
+      <select id={id} value={valor} disabled={pendente || somenteLeitura} onChange={(e) => gravar(e.target.value)} className={cn(CAMPO_CLASSE, "h-8 py-0")}>
         {opcoes?.map((o) => (
           <option key={o.valor} value={o.valor}>
             {o.rotulo}
           </option>
         ))}
       </select>
+    );
+  } else if (somenteLeitura) {
+    controle = (
+      <p id={id} className={cn("py-1 text-sm whitespace-pre-wrap", valor === "" ? "text-fg-faint" : "text-foreground", mono && "font-mono tabular")}>
+        {valor === "" ? "—" : (exibicao ?? valor)}
+      </p>
     );
   } else if (!editando) {
     controle = (

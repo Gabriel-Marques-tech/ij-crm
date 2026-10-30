@@ -14,6 +14,7 @@
  *   traduzidas para intervalos de `proxima_acao_em` em dias civis de SP.
  */
 import { Prisma, type Origem, type TipoTerminal } from "@prisma/client";
+import { QUEM_ATUA } from "@/lib/auth/papeis";
 import { db } from "@/lib/db";
 import { BUSCA_MAX, escaparLike } from "@/lib/entidades/busca";
 import { nomeExibido, SELECAO_NOME_EXIBIDO, sufixoVinculo } from "@/lib/entidades/vinculo";
@@ -348,9 +349,12 @@ export async function listarTabela(e: EstadoTabela, agora: Date): Promise<Pagina
   return { linhas: await paraLinhas(brutas, agora), total, pagina, paginas };
 }
 
-/** Responsáveis possíveis no filtro: todos, inclusive inativos (ativos primeiro). */
+/**
+ * Responsáveis possíveis no filtro: todos, inclusive inativos (ativos primeiro).
+ * VISUALIZADOR só entra se ainda é dono de algum card (ex.: ex-vendedor rebaixado).
+ */
 export async function listarPessoas() {
-  return db.usuario.findMany({ orderBy: [{ ativo: "desc" }, { nome: "asc" }], select: { id: true, nome: true, ativo: true } });
+  return db.usuario.findMany({ where: { OR: [QUEM_ATUA, { oportunidades: { some: {} } }] }, orderBy: [{ ativo: "desc" }, { nome: "asc" }], select: { id: true, nome: true, ativo: true } });
 }
 
 // ---------------------------------------------------------------- CSV

@@ -14,7 +14,7 @@ import { Sessoes } from "./sessoes";
 
 export const metadata = { title: "Meu perfil" };
 
-const ROTULO = { ADMIN: "Admin", GESTOR: "Gestor", VENDEDOR: "Vendedor" } as const;
+const ROTULO = { ADMIN: "Admin", GESTOR: "Gestor", VENDEDOR: "Vendedor", VISUALIZADOR: "Visualizador" } as const;
 
 export default async function PerfilPage() {
   const eu = await exigirUsuario();

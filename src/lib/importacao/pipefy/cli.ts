@@ -10,6 +10,7 @@
  * `--motivo-perda`: motivo (preco, timing, concorrente, sem_resposta, outro) para
  * cards em PERDIDO sem "Motivo da perda" no CSV; sem ele, esses cards são pulados.
  */
+import { temPapelMinimo } from "@/lib/auth/papeis";
 import { db } from "@/lib/db";
 import { mensagemSegura } from "@/lib/erros/registrar";
 import { normalizarEmail } from "@/lib/normalizacao";
@@ -74,7 +75,7 @@ async function quemImporta(email: string | undefined) {
   const where = normalizado ? { email: normalizado } : { papel: "ADMIN" as const, ativo: true };
   const u = await db.usuario.findFirst({ where, orderBy: { criadoEm: "asc" }, select: { id: true, email: true, papel: true, ativo: true } });
   if (!u) return { ok: false as const, erro: email ? `Usuário ${email} não encontrado.` : "Nenhum ADMIN ativo. Use --usuario <email>." };
-  if (!u.ativo || u.papel === "VENDEDOR") return { ok: false as const, erro: `${u.email} precisa ser ADMIN ou GESTOR ativo.` };
+  if (!u.ativo || !temPapelMinimo(u.papel, "GESTOR")) return { ok: false as const, erro: `${u.email} precisa ser ADMIN ou GESTOR ativo.` };
   return { ok: true as const, usuario: u };
 }
 

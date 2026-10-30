@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { MensagemErro } from "@/components/erros/mensagem-erro";
+import { useSomenteLeitura } from "@/components/shell/somente-leitura";
 import { executarAcao, type FalhaUI } from "@/lib/erros/cliente";
 import { diaBR } from "@/lib/calendario/rotulos";
 import type { PrazoItem } from "@/lib/prazos/prazos";
@@ -16,7 +17,8 @@ type Pessoa = { id: string; nome: string };
 
 type Alvo = { tipo: "novo"; dia: string; cardId: string | null } | { tipo: "prazo"; prazo: PrazoItem };
 
-type Ctx = { novo: (dia: string, cardId?: string | null) => void; abrir: (p: PrazoItem) => void };
+/** `novo` null = somente leitura (VISUALIZADOR): quem chama esconde o "+". */
+type Ctx = { novo: ((dia: string, cardId?: string | null) => void) | null; abrir: (p: PrazoItem) => void };
 
 const EditorCtx = createContext<Ctx | null>(null);
 
@@ -29,8 +31,8 @@ export function useEditorPrazo(): Ctx {
 /**
  * Editor de prazo (GAB-51): um diálogo por página, aberto pela grade, pela
  * agenda, pelo "+ Prazo" ou pelo bloco Prazos do card. Vendedor só escolhe a
- * si como responsável; gestor/admin escolhe qualquer ativo. O servidor confere
- * tudo de novo (`podeMexerNoPrazo`).
+ * si como responsável; gestor/admin escolhe qualquer ativo; VISUALIZADOR
+ * (`useSomenteLeitura`) não cria. O servidor confere tudo de novo (`podeMexerNoPrazo`).
  */
 export function PrazosProvider({
   eu,
@@ -48,8 +50,9 @@ export function PrazosProvider({
   children: ReactNode;
 }) {
   const [alvo, setAlvo] = useState<Alvo | null>(null);
+  const somenteLeitura = useSomenteLeitura();
   const ctx: Ctx = {
-    novo: (dia, cardId = null) => setAlvo({ tipo: "novo", dia, cardId }),
+    novo: somenteLeitura ? null : (dia, cardId = null) => setAlvo({ tipo: "novo", dia, cardId }),
     abrir: (prazo) => setAlvo({ tipo: "prazo", prazo }),
   };
   return (
@@ -245,9 +248,10 @@ function CardDoPrazo({ card }: { card: { id: string; titulo: string } }) {
   );
 }
 
-/** "+ Prazo" do cabeçalho: abre o editor no dia sugerido. */
+/** "+ Prazo" do cabeçalho: abre o editor no dia sugerido. Some em somente leitura. */
 export function BotaoNovoPrazo({ dia, cardId = null, rotulo = "Prazo", variant = "default" }: { dia: string; cardId?: string | null; rotulo?: string; variant?: "default" | "outline" }) {
   const { novo } = useEditorPrazo();
+  if (!novo) return null;
   return (
     <Button type="button" size="sm" variant={variant} onClick={() => novo(dia, cardId)}>
       <Plus data-icon="inline-start" /> {rotulo}

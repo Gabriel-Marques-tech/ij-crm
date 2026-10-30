@@ -63,7 +63,7 @@ async function aguardarDepois() {
   await Promise.all(tarefasDepois.splice(0));
 }
 
-async function vendedor(extra: { nome?: string; telefoneWhatsapp?: string | null; whatsappLid?: string; ativo?: boolean } = {}) {
+async function vendedor(extra: { nome?: string; telefoneWhatsapp?: string | null; whatsappLid?: string; ativo?: boolean; papel?: "VISUALIZADOR" } = {}) {
   return dbT.usuario.create({
     data: {
       nome: "João",
@@ -276,6 +276,13 @@ describe("POST /api/webhooks/evolution — ingestão", () => {
     expect(aviso).toContain("remetente ambíguo");
     expect(aviso).not.toContain("123456789012345");
     expect(aviso).not.toContain("5511999998888");
+  });
+
+  it("VISUALIZADOR (somente leitura) nunca é remetente: mesmo com telefone cadastrado, cai como desconhecido", async () => {
+    await vendedor({ papel: "VISUALIZADOR" });
+    const r = await postar("texto-grupo");
+    expect(r.json).toMatchObject({ remetenteDesconhecido: true });
+    expect(await contagens()).toMatchObject({ inbox: 1, brutas: 0, desconhecidos: 1 });
   });
 
   it("LID e telefone apontando para o MESMO usuário → ok", async () => {

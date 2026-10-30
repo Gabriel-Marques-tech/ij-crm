@@ -11,9 +11,9 @@ import { editarCampoAction } from "../actions";
  * Bloco "Descrição" do card: texto puro (React escapa; sem HTML/markdown),
  * quebras de linha preservadas. Clique edita num textarea; salva pela mesma
  * action dos campos inline (Timeline CAMPO_ALTERADO no servidor).
- * Ctrl/Cmd+Enter salva, Esc cancela.
+ * Ctrl/Cmd+Enter salva, Esc cancela. `somenteLeitura` (VISUALIZADOR): só o texto.
  */
-export function DescricaoCard({ cardId, valor }: { cardId: string; valor: string | null }) {
+export function DescricaoCard({ cardId, valor, somenteLeitura = false }: { cardId: string; valor: string | null; somenteLeitura?: boolean }) {
   const atual = valor ?? "";
   const [editando, setEditando] = useState(false);
   const [rascunho, setRascunho] = useState(atual);
@@ -44,7 +44,11 @@ export function DescricaoCard({ cardId, valor }: { cardId: string; valor: string
   return (
     <section className="rounded-xl border border-border bg-surface p-4">
       <h2 className="mb-3 text-sm font-medium">Descrição</h2>
-      {editando ? (
+      {somenteLeitura ? (
+        <p data-testid="descricao-texto" className="text-sm break-words whitespace-pre-wrap">
+          {atual ? <span className="text-foreground">{atual}</span> : <span className="text-fg-faint">Sem descrição</span>}
+        </p>
+      ) : editando ? (
         <>
           <textarea
             aria-label="Descrição"

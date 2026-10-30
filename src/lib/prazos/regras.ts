@@ -3,13 +3,17 @@
  * (`./prazos.ts` chama `podeMexerNoPrazo` em toda escrita): a UI só esconde.
  */
 import type { Papel } from "@prisma/client";
-import { temPapelMinimo } from "@/lib/auth/papeis";
+import { podeEscrever, temPapelMinimo } from "@/lib/auth/papeis";
 import { inicioDoDia } from "@/lib/oportunidades/campos";
 
 export const TITULO_PRAZO_MAX = 200;
 
-/** Vendedor cria/edita/conclui/exclui só prazo em que é o responsável; gestor/admin, de qualquer um. */
+/**
+ * Vendedor cria/edita/conclui/exclui só prazo em que é o responsável;
+ * gestor/admin, de qualquer um; VISUALIZADOR, de nenhum (nem do próprio).
+ */
 export function podeMexerNoPrazo(ator: { id: string; papel: Papel }, responsavelId: string): boolean {
+  if (!podeEscrever(ator.papel)) return false;
   return temPapelMinimo(ator.papel, "GESTOR") || ator.id === responsavelId;
 }
 

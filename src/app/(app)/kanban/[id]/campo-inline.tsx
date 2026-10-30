@@ -18,6 +18,7 @@ const CAMPO_CLASSE =
 /**
  * Campo editável inline: mostra o valor; clique (ou Enter) edita; Enter/blur
  * salva, Esc cancela. Cada salvamento vira uma Timeline CAMPO_ALTERADO no servidor.
+ * `somenteLeitura` (VISUALIZADOR): só mostra; o servidor recusa a escrita de qualquer jeito.
  */
 export function CampoInline({
   cardId,
@@ -29,6 +30,7 @@ export function CampoInline({
   opcoes,
   placeholder = "adicionar",
   className,
+  somenteLeitura = false,
 }: {
   cardId: string;
   campo: CampoEditavel;
@@ -41,6 +43,7 @@ export function CampoInline({
   opcoes?: { valor: string; rotulo: string }[];
   placeholder?: string;
   className?: string;
+  somenteLeitura?: boolean;
 }) {
   const [editando, setEditando] = useState(false);
   const [rascunho, setRascunho] = useState(valor);
@@ -87,7 +90,7 @@ export function CampoInline({
       <select
         id={idCampo}
         value={valor}
-        disabled={pendente}
+        disabled={pendente || somenteLeitura}
         onChange={(e) => salvar(e.target.value)}
         className={cn(CAMPO_CLASSE, "h-8 py-0")}
       >
@@ -97,6 +100,15 @@ export function CampoInline({
           </option>
         ))}
       </select>
+    );
+  } else if (somenteLeitura) {
+    controle = (
+      <p
+        id={idCampo}
+        className={cn("py-1 text-sm whitespace-pre-wrap", valor === "" ? "text-fg-faint" : "text-foreground", (tipo === "dinheiro" || tipo === "data") && "font-mono tabular")}
+      >
+        {valor === "" ? "—" : (exibicao ?? valor)}
+      </p>
     );
   } else if (!editando) {
     const vazio = valor === "";
@@ -164,7 +176,7 @@ export function CampoInline({
   );
 }
 
-export function RevisarSwitch({ cardId, valor }: { cardId: string; valor: boolean }) {
+export function RevisarSwitch({ cardId, valor, somenteLeitura = false }: { cardId: string; valor: boolean; somenteLeitura?: boolean }) {
   const [erro, setErro] = useState<FalhaUI | null>(null);
   const [pendente, startTransition] = useTransition();
   return (
@@ -172,7 +184,7 @@ export function RevisarSwitch({ cardId, valor }: { cardId: string; valor: boolea
       <label className="flex items-center gap-2 text-sm">
         <Switch
           checked={valor}
-          disabled={pendente}
+          disabled={pendente || somenteLeitura}
           onCheckedChange={(v) =>
             startTransition(async () => {
               setErro(await executarAcao(() => editarCampoAction(cardId, "revisar", v ? "true" : "false"), "salvar revisar"));

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { PageHeader } from "@/components/shell/page-header";
 import { FormBusca } from "@/components/entidades/form-busca";
 import { exigirUsuario } from "@/lib/auth/atual";
+import { podeEscrever } from "@/lib/auth/papeis";
 import { listarEmpresas } from "@/lib/empresas/empresas";
 import { formatarCnpj } from "@/lib/normalizacao";
 import { NovaEmpresa } from "./nova-empresa";
@@ -9,14 +10,14 @@ import { NovaEmpresa } from "./nova-empresa";
 export const metadata = { title: "Empresas" };
 
 export default async function EmpresasPage({ searchParams }: { searchParams: Promise<{ q?: string | string[] }> }) {
-  await exigirUsuario();
+  const eu = await exigirUsuario();
   const { q } = await searchParams;
   const busca = (Array.isArray(q) ? q[0] : q)?.slice(0, 200) ?? "";
   const empresas = await listarEmpresas(busca);
 
   return (
     <>
-      <PageHeader eyebrow="base · empresas" title="Empresas" description="Clientes e prospects. CNPJ e domínio normalizados identificam a empresa sem ambiguidade." actions={<NovaEmpresa />} />
+      <PageHeader eyebrow="base · empresas" title="Empresas" description="Clientes e prospects. CNPJ e domínio normalizados identificam a empresa sem ambiguidade." actions={podeEscrever(eu.papel) ? <NovaEmpresa /> : undefined} />
       <FormBusca valor={busca} rotulo="Buscar empresas" placeholder="nome, CNPJ ou domínio (ex.: acme.com.br)" />
       {empresas.length === 0 ? (
         <p className="rounded-xl border border-dashed border-border-strong bg-surface/40 p-8 text-center text-sm text-fg-faint">

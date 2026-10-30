@@ -41,6 +41,7 @@
  * ao registro que já existe.
  */
 import type { Fase, Oportunidade, Origem, Prisma } from "@prisma/client";
+import { QUEM_ATUA } from "@/lib/auth/papeis";
 import { db } from "@/lib/db";
 import { travarPipelines } from "@/lib/fases/fases";
 import { resolverContatos, resolverEmpresas } from "@/lib/contatos/match";
@@ -696,7 +697,7 @@ export async function aplicarCards(
   const vendasId = pipelines.find((p) => p.chave === PIPELINE_VENDAS)?.id;
   const projetosId = pipelines.find((p) => p.chave === PIPELINE_PROJETOS)?.id;
   if (!vendasId || !projetosId) throw new ErroImport("Quadros Vendas/Projetos não encontrados. Rode o seed.");
-  const usuarios = await db.usuario.findMany({ where: { ativo: true }, select: { id: true, nome: true, email: true } });
+  const usuarios = await db.usuario.findMany({ where: { ativo: true, ...QUEM_ATUA }, select: { id: true, nome: true, email: true } });
   const admin = await db.usuario.findUniqueOrThrow({ where: { id: opts.admin.id }, select: { id: true, nome: true } });
   const empresasPorNome: Ctx["empresasPorNome"] = new Map();
   const homonimas = new Map<string, EmpresaRef[]>();

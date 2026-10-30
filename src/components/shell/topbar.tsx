@@ -7,7 +7,7 @@ import type { UsuarioSessao } from "@/lib/auth/sessao";
 import { SimboloIJ } from "@/components/marca/marca";
 import type { DestinoInicio } from "@/lib/preferencias/preferencias";
 
-const ROTULO_PAPEL = { ADMIN: "admin", GESTOR: "gestor", VENDEDOR: "vendedor" } as const;
+const ROTULO_PAPEL = { ADMIN: "admin", GESTOR: "gestor", VENDEDOR: "vendedor", VISUALIZADOR: "visualizador" } as const;
 
 export function Topbar({ usuario, inicio }: { usuario: UsuarioSessao; inicio: DestinoInicio }) {
   return (

@@ -19,6 +19,9 @@ enum Papel {
   ADMIN
   GESTOR
   VENDEDOR
+  // Somente leitura (outras áreas): vê Kanban/Tabela/Calendário/Semana/Contatos/
+  // Empresas/Ranking, não escreve nada nem é responsável de card.
+  VISUALIZADOR
 }
 
 enum TipoContatoPonto {

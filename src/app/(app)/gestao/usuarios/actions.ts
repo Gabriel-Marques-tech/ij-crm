@@ -22,7 +22,7 @@ const MENSAGEM: Record<ErroUsuario, string> = {
 
 export type EstadoConvite = { erro?: string; link?: string; expiraEm?: string } | undefined;
 
-const papelSchema = z.enum(["ADMIN", "GESTOR", "VENDEDOR"]);
+const papelSchema = z.enum(["ADMIN", "GESTOR", "VENDEDOR", "VISUALIZADOR"]);
 
 const conviteSchema = z.object({
   nome: z.string().trim().min(2, "Nome muito curto."),

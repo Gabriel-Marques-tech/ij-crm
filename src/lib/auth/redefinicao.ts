@@ -15,7 +15,7 @@ import type { Papel } from "@prisma/client";
 import { db } from "@/lib/db";
 import { normalizarEmail } from "@/lib/normalizacao";
 import { hashToken } from "./convite";
-import { podeGerarRedefinicao } from "./papeis";
+import { PAPEIS, podeGerarRedefinicao } from "./papeis";
 import { gerarHashSenha, senhaAtendeRegras } from "./senha";
 
 export const REDEFINICAO_VALIDADE_MS = 60 * 60 * 1000;
@@ -90,7 +90,7 @@ export async function gerarLinkRedefinicao(
   const expiraEm = new Date(agora.getTime() + REDEFINICAO_VALIDADE_MS);
   // `papel` no where: só grava se o alvo AINDA tem um papel que o ator pode
   // redefinir (promovido no meio → o gestor não ganha o link).
-  const papeisPermitidos = (["VENDEDOR", "GESTOR", "ADMIN"] as const).filter((p) => podeGerarRedefinicao(por.papel, p));
+  const papeisPermitidos = PAPEIS.filter((p) => podeGerarRedefinicao(por.papel, p));
   const r = await db.usuario.updateMany({
     where: { id: alvo.id, papel: { in: [...papeisPermitidos] }, ativo: true, senhaHash: { not: null } },
     data: { redefinicaoTokenHash: hashToken(token), redefinicaoExpiraEm: expiraEm, redefinicaoPedidaEm: null },
