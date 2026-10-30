@@ -145,7 +145,7 @@ export async function atualizarUsuario(
   dados: { nome?: string; telefone?: string | null; papel?: Papel; ativo?: boolean; area?: Area | null; cargos?: readonly Cargo[] },
   por: Ator,
 ): Promise<Resultado> {
-  const alvo = await db.usuario.findUnique({ where: { id: usuarioId }, select: { id: true, papel: true, area: true, cargos: true } });
+  const alvo = await db.usuario.findUnique({ where: { id: usuarioId }, select: { id: true, papel: true, ativo: true, area: true, cargos: true } });
   if (!alvo) return { ok: false, erro: "USUARIO_NAO_ENCONTRADO" };
   const ehEu = alvo.id === por.id;
 
@@ -153,23 +153,28 @@ export async function atualizarUsuario(
   // Área omitida = mantém a atual, EXCETO quando o papel muda para gestor/admin:
   // aí o lado só existe se vier explícito (nunca herda a área/GP de vendedor).
   // Cargos omitidos = mantém, a não ser que o lado mude (GP de um lado não vira
-  // GP do outro sem a gestão dizer).
+  // GP do outro sem a gestão dizer) ou o papel vire gestor/admin (GP também só
+  // explícito: VENDEDOR(VENDAS,[GP]) → GESTOR com área VENDAS e sem cargos = VENDAS[]).
   const papelFinal = dados.papel ?? alvo.papel;
   const mexeLado = dados.papel !== undefined || dados.area !== undefined || dados.cargos !== undefined;
   const viraLivre = dados.papel !== undefined && dados.papel !== alvo.papel && regraDeArea(dados.papel).tipo === "livre";
   let lado: Lado = { area: alvo.area, cargos: alvo.cargos };
   if (mexeLado) {
     const areaPedida = dados.area !== undefined ? dados.area : viraLivre ? null : alvo.area;
-    const tentativa = resolverAreaCargos(papelFinal, areaPedida, dados.cargos ?? alvo.cargos);
+    const cargosPedidos = dados.cargos ?? (viraLivre ? [] : alvo.cargos);
+    const tentativa = resolverAreaCargos(papelFinal, areaPedida, cargosPedidos);
     lado = dados.cargos === undefined && tentativa.area !== alvo.area ? { area: tentativa.area, cargos: [] } : tentativa;
   }
   const ladoMudou = !mesmoLado(lado, { area: alvo.area, cargos: alvo.cargos });
 
   // Exceção (review do PR #47): ADMIN define o próprio lado/cargo — senão o
   // único admin que atua em vendas fica travado (gestor não edita admin).
-  // A mudança vai para a auditoria com `por` = o próprio usuário.
-  const adminNoProprioLado = ehEu && por.papel === "ADMIN" && dados.papel === undefined && dados.ativo === undefined;
-  const soPerfil = dados.papel === undefined && dados.ativo === undefined && (!ladoMudou || adminNoProprioLado);
+  // A mudança vai para a auditoria com `por` = o próprio usuário. Papel/ativo
+  // reenviados IGUAIS ao atual contam como ausentes; diferentes seguem bloqueados.
+  const papelMantido = dados.papel === undefined || dados.papel === alvo.papel;
+  const ativoMantido = dados.ativo === undefined || dados.ativo === alvo.ativo;
+  const adminNoProprioLado = ehEu && alvo.papel === "ADMIN" && por.papel === "ADMIN" && papelMantido && ativoMantido;
+  const soPerfil = (dados.papel === undefined && dados.ativo === undefined && !ladoMudou) || adminNoProprioLado;
   // Qualquer um edita o próprio nome/telefone. Fora isso: mexer em alguém exige
   // poder atribuir o papel ATUAL dele (gestor não toca admin) e, se houver
   // mudança de papel, o papel NOVO também; e ninguém se rebaixa/desativa.

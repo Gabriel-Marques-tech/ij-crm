@@ -398,6 +398,26 @@ describe("área e cargos (GAB-82)", () => {
       expect(await atualizarUsuario(a.id, { ativo: false }, a)).toEqual({ ok: false, erro: "NAO_PODE_ALTERAR_A_SI" });
     });
 
+    it("revisão de segurança: promoção a GESTOR com área explícita e cargos omitidos não herda o GP", async () => {
+      const a = await admin();
+      const v = await db.usuario.create({ data: { nome: "V", email: "v@ij.test", papel: "VENDEDOR", area: "VENDAS", cargos: ["GP"] } });
+      expect(await atualizarUsuario(v.id, { papel: "GESTOR", area: "VENDAS" }, a)).toEqual({ ok: true });
+      expect(await ladoDb(v.id)).toEqual({ papel: "GESTOR", area: "VENDAS", cargos: [] });
+    });
+
+    it("revisão de segurança: admin em si mesmo com papel/ativo iguais ao atual mantém a exceção; diferentes seguem bloqueados", async () => {
+      const a = await admin();
+      expect(await atualizarUsuario(a.id, { papel: "ADMIN", ativo: true, area: "VENDAS", cargos: ["GP"] }, a)).toEqual({ ok: true });
+      expect(await ladoDb(a.id)).toEqual({ papel: "ADMIN", area: "VENDAS", cargos: ["GP"] });
+      expect(await atualizarUsuario(a.id, { papel: "GESTOR", area: null, cargos: [] }, a)).toEqual({ ok: false, erro: "NAO_PODE_ALTERAR_A_SI" });
+      expect(await atualizarUsuario(a.id, { ativo: false, area: null }, a)).toEqual({ ok: false, erro: "NAO_PODE_ALTERAR_A_SI" });
+      expect(await db.usuario.findUniqueOrThrow({ where: { id: a.id }, select: { papel: true, ativo: true, area: true } })).toEqual({
+        papel: "ADMIN",
+        ativo: true,
+        area: "VENDAS",
+      });
+    });
+
     it("gestor não define o próprio lado nem o de um admin", async () => {
       const a = await admin();
       const g = await gestor();
