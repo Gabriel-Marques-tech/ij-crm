@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import { dbTeste, limparBanco } from "@/test/db";
+import { ehGpDoLado, ladoDe } from "./areas";
 import { gerarHashSenha } from "./senha";
 import { aceitarConvite, atualizarUsuario, autenticar, criarConvite, listarUsuarios, reemitirConvite } from "./usuarios";
 import { criarSessao, encerrarSessao, obterUsuarioDaSessao } from "./sessao";
@@ -342,6 +343,67 @@ describe("área e cargos (GAB-82)", () => {
     const p = await db.usuario.create({ data: { nome: "P", email: "p@ij.test", papel: "PROJETOS", area: "PROJETOS" } });
     expect(await atualizarUsuario(p.id, { nome: "Paula" }, p)).toEqual({ ok: true });
     expect(await atualizarUsuario(p.id, { papel: "GESTOR" }, p)).toEqual({ ok: false, erro: "PAPEL_NAO_PERMITIDO" });
+  });
+
+  describe("review PR #47: gestor/admin só têm lado quando escolhido explicitamente", () => {
+    const ladoDb = (id: string) => db.usuario.findUniqueOrThrow({ where: { id }, select: { papel: true, area: true, cargos: true } });
+
+    it("convite de gestor ou admin sem área → sem lado e sem cargo", async () => {
+      const a = await admin();
+      const g = await criarConvite({ nome: "G", email: "g2@ij.test", papel: "GESTOR", cargos: ["GP"] }, a);
+      const ad = await criarConvite({ nome: "A", email: "a2@ij.test", papel: "ADMIN" }, a);
+      if (!g.ok || !ad.ok) throw new Error("setup");
+      expect(await ladoDb(g.usuarioId)).toMatchObject({ area: null, cargos: [] });
+      expect(await ladoDb(ad.usuarioId)).toMatchObject({ area: null, cargos: [] });
+    });
+
+    it("promoção VENDEDOR(GP) → GESTOR sem área no pedido → área null e cargos []", async () => {
+      const a = await admin();
+      const v = await db.usuario.create({ data: { nome: "V", email: "v@ij.test", papel: "VENDEDOR", area: "VENDAS", cargos: ["GP"] } });
+      expect(await atualizarUsuario(v.id, { papel: "GESTOR" }, a)).toEqual({ ok: true });
+      const u = await ladoDb(v.id);
+      expect(u).toEqual({ papel: "GESTOR", area: null, cargos: [] });
+      expect(ehGpDoLado(u, "VENDAS")).toBe(false);
+      expect(auditoria()).toContainEqual(`[auditoria] usuario.lado_alterado usuario=${v.id} por=${a.id} de=VENDAS[GP] para=nenhuma[]`);
+    });
+
+    it("promoção a GESTOR com área VENDAS + GP explícitos → respeita; GP só se marcado", async () => {
+      const a = await admin();
+      const v = await db.usuario.create({ data: { nome: "V", email: "v@ij.test", papel: "VENDEDOR", area: "VENDAS", cargos: ["GP"] } });
+      const w = await db.usuario.create({ data: { nome: "W", email: "w@ij.test", papel: "VENDEDOR", area: "VENDAS", cargos: ["GP"] } });
+      expect(await atualizarUsuario(v.id, { papel: "GESTOR", area: "VENDAS", cargos: ["GP"] }, a)).toEqual({ ok: true });
+      expect(await atualizarUsuario(w.id, { papel: "GESTOR", area: "VENDAS", cargos: [] }, a)).toEqual({ ok: true });
+      const gv = await ladoDb(v.id);
+      expect(gv).toEqual({ papel: "GESTOR", area: "VENDAS", cargos: ["GP"] });
+      expect(ladoDe(gv)).toBe("VENDAS");
+      expect(ehGpDoLado(gv, "VENDAS")).toBe(true);
+      expect(ehGpDoLado(gv, "PROJETOS")).toBe(false);
+      expect(await ladoDb(w.id)).toEqual({ papel: "GESTOR", area: "VENDAS", cargos: [] });
+    });
+
+    it("admin pode ter lado vendas: definido por outro admin ou por ele mesmo (sem deadlock do único admin), com auditoria", async () => {
+      const a = await admin();
+      const b = await db.usuario.create({ data: { nome: "B", email: "b@ij.test", papel: "ADMIN" } });
+      expect(await atualizarUsuario(b.id, { area: "VENDAS", cargos: ["GP"] }, a)).toEqual({ ok: true });
+      expect(ehGpDoLado(await ladoDb(b.id), "VENDAS")).toBe(true);
+
+      // único admin atuando como vendedor: define o próprio lado
+      expect(await atualizarUsuario(a.id, { area: "VENDAS", cargos: [] }, a)).toEqual({ ok: true });
+      const ua = await ladoDb(a.id);
+      expect(ua).toEqual({ papel: "ADMIN", area: "VENDAS", cargos: [] });
+      expect(ladoDe(ua)).toBe("VENDAS");
+      expect(auditoria()).toContainEqual(`[auditoria] usuario.lado_alterado usuario=${a.id} por=${a.id} proprio=1 de=nenhuma[] para=VENDAS[]`);
+      // a exceção é só de lado: admin continua sem poder mudar o próprio papel nem se desativar
+      expect(await atualizarUsuario(a.id, { papel: "GESTOR" }, a)).toEqual({ ok: false, erro: "NAO_PODE_ALTERAR_A_SI" });
+      expect(await atualizarUsuario(a.id, { ativo: false }, a)).toEqual({ ok: false, erro: "NAO_PODE_ALTERAR_A_SI" });
+    });
+
+    it("gestor não define o próprio lado nem o de um admin", async () => {
+      const a = await admin();
+      const g = await gestor();
+      expect(await atualizarUsuario(g.id, { area: "VENDAS" }, g)).toEqual({ ok: false, erro: "NAO_PODE_ALTERAR_A_SI" });
+      expect(await atualizarUsuario(a.id, { area: "VENDAS" }, g)).toEqual({ ok: false, erro: "PAPEL_NAO_PERMITIDO" });
+    });
   });
 
   it("listarUsuarios traz área e cargos", async () => {

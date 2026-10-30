@@ -12,18 +12,23 @@ const CLASSE_SELECT =
 /**
  * Papel + área + cargos (GAB-82), no convite e na edição. A área acompanha o
  * papel (vendedor → vendas, projetos → projetos, visualizador → nenhuma); só
- * gestor/admin escolhem. O servidor reaplica a mesma regra (lib/auth/areas).
+ * gestor/admin escolhem, e só explicitamente: começam em "Nenhuma" e, ao
+ * trocar para gestor/admin vindo de papel com área fixa, a área e o GP zeram.
+ * O servidor reaplica a mesma regra (lib/auth/areas, usuarios.ts).
+ * `mostrarPapel=false`: admin editando a si mesmo — só lado/cargo, sem papel.
  */
 export function CamposPapelLado({
   papelAtor,
   papel: papelInicial,
   area: areaInicial,
   cargos: cargosIniciais,
+  mostrarPapel = true,
 }: {
   papelAtor: Papel;
   papel: Papel;
   area: Area | null;
   cargos: readonly Cargo[];
+  mostrarPapel?: boolean;
 }) {
   const [papel, setPapel] = useState<Papel>(papelInicial);
   const [areaLivre, setAreaLivre] = useState<Area | null>(areaInicial);
@@ -32,12 +37,23 @@ export function CamposPapelLado({
   const regra = regraDeArea(papel);
   const efetivo = resolverAreaCargos(papel, areaLivre, cargos);
 
+  function trocarPapel(novo: Papel) {
+    // Lado de gestor/admin só por escolha explícita: não herda a área fixa do papel anterior.
+    if (regraDeArea(novo).tipo === "livre" && regraDeArea(papel).tipo !== "livre") {
+      setAreaLivre(null);
+      setCargos([]);
+    }
+    setPapel(novo);
+  }
+
   return (
     <>
-      <div className="space-y-1.5">
-        <Label htmlFor="papel">Papel</Label>
-        <SelectPapel name="papel" papelAtor={papelAtor} defaultValue={papelInicial} onChange={setPapel} />
-      </div>
+      {mostrarPapel ? (
+        <div className="space-y-1.5">
+          <Label htmlFor="papel">Papel</Label>
+          <SelectPapel name="papel" papelAtor={papelAtor} defaultValue={papelInicial} onChange={trocarPapel} />
+        </div>
+      ) : null}
       <input type="hidden" name="ladoNoForm" value="1" />
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">

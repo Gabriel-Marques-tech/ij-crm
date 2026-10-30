@@ -234,7 +234,12 @@ function EditarForm({ usuario, ator, onSalvo }: { usuario: Usuario; ator: Ator; 
         <Input id="telefone" name="telefone" defaultValue={usuario.telefoneWhatsapp ?? ""} placeholder="11 99999-8888" inputMode="tel" />
         <p className="text-xs text-fg-faint">Deixe vazio para remover. É este número que liga a pessoa às mensagens do grupo.</p>
       </div>
-      {!souEu ? <CamposPapelLado papelAtor={ator.papel} papel={usuario.papel} area={usuario.area} cargos={usuario.cargos} /> : null}
+      {!souEu ? (
+        <CamposPapelLado papelAtor={ator.papel} papel={usuario.papel} area={usuario.area} cargos={usuario.cargos} />
+      ) : ator.papel === "ADMIN" ? (
+        // Admin define o próprio lado (ex.: admin que atua em vendas); fica na auditoria. Ver usuarios.ts.
+        <CamposPapelLado papelAtor={ator.papel} papel={usuario.papel} area={usuario.area} cargos={usuario.cargos} mostrarPapel={false} />
+      ) : null}
       {estado?.erro ? (
         <p role="alert" className="text-sm text-danger">
           {estado.erro}

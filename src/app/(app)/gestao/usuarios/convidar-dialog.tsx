@@ -57,7 +57,7 @@ function CorpoConvite({ papelAtor, onFechar }: { papelAtor: Papel; onFechar: () 
         <Label htmlFor="telefone">WhatsApp (DDD + número)</Label>
         <Input id="telefone" name="telefone" placeholder="11 99999-8888" inputMode="tel" />
       </div>
-      <CamposPapelLado papelAtor={papelAtor} papel="VENDEDOR" area="VENDAS" cargos={[]} />
+      <CamposPapelLado papelAtor={papelAtor} papel="VENDEDOR" area={null} cargos={[]} />
       {estado?.erro ? (
         <p role="alert" className="text-sm text-danger">
           {estado.erro}

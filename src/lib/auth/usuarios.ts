@@ -1,7 +1,7 @@
 import type { Area, Cargo, Papel, Usuario } from "@prisma/client";
 import { db } from "@/lib/db";
 import { normalizarEmail, normalizarTelefoneBr } from "@/lib/normalizacao";
-import { resolverAreaCargos } from "./areas";
+import { regraDeArea, resolverAreaCargos } from "./areas";
 import { conviteEstaValido, gerarConvite, hashToken } from "./convite";
 import { podeAtribuirPapel } from "./papeis";
 import { gerarHashSenha, senhaAtendeRegras, verificarSenha } from "./senha";
@@ -150,25 +150,33 @@ export async function atualizarUsuario(
   const ehEu = alvo.id === por.id;
 
   // GAB-82: lado/cargos se recalculam quando papel, área ou cargos vêm no pedido.
-  // Área omitida = mantém a atual; cargos omitidos = mantém, a não ser que o lado
-  // mude (GP de um lado não vira GP do outro sem a gestão dizer).
+  // Área omitida = mantém a atual, EXCETO quando o papel muda para gestor/admin:
+  // aí o lado só existe se vier explícito (nunca herda a área/GP de vendedor).
+  // Cargos omitidos = mantém, a não ser que o lado mude (GP de um lado não vira
+  // GP do outro sem a gestão dizer).
   const papelFinal = dados.papel ?? alvo.papel;
   const mexeLado = dados.papel !== undefined || dados.area !== undefined || dados.cargos !== undefined;
+  const viraLivre = dados.papel !== undefined && dados.papel !== alvo.papel && regraDeArea(dados.papel).tipo === "livre";
   let lado: Lado = { area: alvo.area, cargos: alvo.cargos };
   if (mexeLado) {
-    const tentativa = resolverAreaCargos(papelFinal, dados.area !== undefined ? dados.area : alvo.area, dados.cargos ?? alvo.cargos);
+    const areaPedida = dados.area !== undefined ? dados.area : viraLivre ? null : alvo.area;
+    const tentativa = resolverAreaCargos(papelFinal, areaPedida, dados.cargos ?? alvo.cargos);
     lado = dados.cargos === undefined && tentativa.area !== alvo.area ? { area: tentativa.area, cargos: [] } : tentativa;
   }
   const ladoMudou = !mesmoLado(lado, { area: alvo.area, cargos: alvo.cargos });
 
-  const soPerfil = dados.papel === undefined && dados.ativo === undefined && !ladoMudou;
+  // Exceção (review do PR #47): ADMIN define o próprio lado/cargo — senão o
+  // único admin que atua em vendas fica travado (gestor não edita admin).
+  // A mudança vai para a auditoria com `por` = o próprio usuário.
+  const adminNoProprioLado = ehEu && por.papel === "ADMIN" && dados.papel === undefined && dados.ativo === undefined;
+  const soPerfil = dados.papel === undefined && dados.ativo === undefined && (!ladoMudou || adminNoProprioLado);
   // Qualquer um edita o próprio nome/telefone. Fora isso: mexer em alguém exige
   // poder atribuir o papel ATUAL dele (gestor não toca admin) e, se houver
   // mudança de papel, o papel NOVO também; e ninguém se rebaixa/desativa.
   if (!(ehEu && soPerfil)) {
     if (!podeAtribuirPapel(por.papel, alvo.papel)) return { ok: false, erro: "PAPEL_NAO_PERMITIDO" };
     if (dados.papel !== undefined && !podeAtribuirPapel(por.papel, dados.papel)) return { ok: false, erro: "PAPEL_NAO_PERMITIDO" };
-    // Cargo dá poder (GP age pelo lado): ninguém mexe no próprio lado/cargo também.
+    // Cargo dá poder (GP age pelo lado): fora o admin (acima), ninguém mexe no próprio lado/cargo.
     if (ehEu && (dados.ativo === false || (dados.papel !== undefined && dados.papel !== por.papel) || ladoMudou)) {
       return { ok: false, erro: "NAO_PODE_ALTERAR_A_SI" };
     }
@@ -204,7 +212,7 @@ export async function atualizarUsuario(
   }
   if (ladoMudou) {
     console.info(
-      `[auditoria] usuario.lado_alterado usuario=${usuarioId} por=${por.id} de=${formatarLado({ area: alvo.area, cargos: alvo.cargos })} para=${formatarLado(lado)}`,
+      `[auditoria] usuario.lado_alterado usuario=${usuarioId} por=${por.id}${ehEu ? " proprio=1" : ""} de=${formatarLado({ area: alvo.area, cargos: alvo.cargos })} para=${formatarLado(lado)}`,
     );
   }
   return { ok: true };
