@@ -66,9 +66,9 @@ export const JSON_SCHEMA_EXTRACAO = {
     intencao: {
       type: "string",
       enum: [...INTENCOES],
-      description: "CRIAR = lead/projeto novo; ATUALIZAR = novidade sobre um card que já existe; IGNORAR = não é sobre venda.",
+      description: "CRIAR = lead/oportunidade nova; ATUALIZAR = novidade sobre um card que já existe; IGNORAR = não é sobre venda.",
     },
-    oportunidade_id: textoOuNulo("id de um projeto candidato do contexto, só em ATUALIZAR. Nunca invente ids."),
+    oportunidade_id: textoOuNulo("id de uma oportunidade candidata do contexto, só em ATUALIZAR. Nunca invente ids."),
     contato: {
       type: "object",
       additionalProperties: false,

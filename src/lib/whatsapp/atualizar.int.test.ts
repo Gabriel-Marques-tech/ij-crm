@@ -268,7 +268,7 @@ describe("mensagens picadas", () => {
     await dbT.timeline.updateMany({ where: { projetoId: id }, data: { em: new Date(RECEBIDA_EM.getTime() - 60 * MIN) } });
     const antes = await dbT.projeto.count();
     const r = await enviar("#crm ela voltou a falar comigo", () => saida({ intencao: "ATUALIZAR", oportunidade_id: id }));
-    expect(r.prompt).toMatch(new RegExp(`- id=${id} .*\\(fechado\\) via=ledger `));
+    expect(r.prompt).toMatch(new RegExp(`- id=${id} .*\\(fechada\\) via=ledger `));
     expect(r.r).toMatchObject({ tipo: "PENDENTE_REVISAO" });
     expect((r.r as { confirmacao: string }).confirmacao).toContain("não reabri");
     expect(await dbT.projeto.count()).toBe(antes);

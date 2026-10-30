@@ -13,7 +13,7 @@
  */
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import type { ProjetoCandidata } from "@/lib/llm/prompts/extracao.v2";
+import type { ProjetoCandidato } from "@/lib/llm/prompts/extracao.v2";
 import { PIPELINE_VENDAS } from "@/lib/projetos/terminal-regras";
 import type { ViaCandidata } from "./alvo";
 
@@ -83,7 +83,7 @@ export async function projetosCandidatos(
     ledger?: string[];
   },
   cliente: Cliente = db,
-): Promise<ProjetoCandidata[]> {
+): Promise<ProjetoCandidato[]> {
   const vias = new Map<string, Set<ViaCandidata>>();
   const marcar = (id: string, via: ViaCandidata) => (vias.get(id) ?? vias.set(id, new Set()).get(id)!).add(via);
 

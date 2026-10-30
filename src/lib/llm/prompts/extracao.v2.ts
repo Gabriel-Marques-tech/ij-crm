@@ -1,8 +1,8 @@
 /**
  * Prompt + schema da extração, versão 2 (GAB-38; design doc §4.3 "Alvo de
  * ATUALIZAR"). Muda em relação à v1:
- * - o contexto ganha os PROJETOS CANDIDATOS (abertos em vendas dos
- *   contatos/empresas candidatos + os últimos 3 tocados pelo remetente nos
+ * - o contexto ganha as OPORTUNIDADES CANDIDATAS (abertas em vendas dos
+ *   contatos/empresas candidatos + as últimas 3 tocadas pelo remetente nos
  *   últimos 30 min) e, quando a mensagem responde a uma confirmação do bot,
  *   o card dela;
  * - o prompt explica quando usar `ATUALIZAR` + `oportunidade_id` e como
@@ -41,11 +41,11 @@ export const JSON_SCHEMA_EXTRACAO = {
     intencao: {
       ...SCHEMA_V1.properties.intencao,
       description:
-        "CRIAR = lead/projeto novo; ATUALIZAR = novidade sobre um card que já existe (um dos PROJETOS CANDIDATOS); IGNORAR = não é sobre venda.",
+        "CRIAR = lead/oportunidade nova; ATUALIZAR = novidade sobre um card que já existe (uma das OPORTUNIDADES CANDIDATAS); IGNORAR = não é sobre venda.",
     },
     oportunidade_id: {
       anyOf: [{ type: "string" }, nulo],
-      description: "Em ATUALIZAR: id de um dos PROJETOS CANDIDATOS do contexto (copie exatamente). Em CRIAR/IGNORAR: null. Nunca invente ids.",
+      description: "Em ATUALIZAR: id de uma das OPORTUNIDADES CANDIDATAS do contexto (copie exatamente). Em CRIAR/IGNORAR: null. Nunca invente ids.",
     },
   },
 } as const;
@@ -60,7 +60,7 @@ Responda SÓ com o JSON do schema. Regras:
 - Candidato de empresa marcado "dominio" é só sugestão: use o id apenas se a mensagem confirmar que é a mesma empresa.
 - Valores em dinheiro e datas: copie o trecho como escrito ("15k", "sexta que vem"); não converta.
 - intencao:
-  - ATUALIZAR quando a mensagem é sobre um lead que já tem card — está nos PROJETOS CANDIDATOS (mesmo contato/empresa, ou um card que o vendedor acabou de mexer). Copie o id dele em oportunidade_id.
+  - ATUALIZAR quando a mensagem é sobre um lead que já tem card — está nas OPORTUNIDADES CANDIDATAS (mesmo contato/empresa, ou um card que o vendedor acabou de mexer). Copie o id dele em oportunidade_id.
   - Mensagens picadas: o vendedor costuma mandar o mesmo assunto em várias mensagens seguidas ("falei com o Gustavo" / "é da Economia Sensata" / "mando proposta sexta"). Uma mensagem curta que só completa a anterior é ATUALIZAR do card "recente" mais provável, não um lead novo.
   - Se a mensagem responde a uma confirmação do bot (há um "Card da confirmação respondida"), é ATUALIZAR desse card.
   - CRIAR quando é um lead/conversa nova, sem card candidato que combine.
@@ -69,8 +69,11 @@ Responda SÓ com o JSON do schema. Regras:
 - fase_chave só se a mensagem indicar a etapa (ex.: "vai pra reunião diagnóstica", "marquei reunião"); senão null. Venda fechada → a fase de ganho + valor_fechado; venda perdida → a fase de perda + motivo_perda.
 - confianca baixa (< 0.7) quando a mensagem é ambígua, faltam nomes, há mais de um card que serviria, ou você teve de adivinhar.`;
 
+// GAB-80: o código fala em Projeto, mas o TEXTO enviado à LLM (prompt, descrições do JSON
+// schema, "Oportunidades candidatas", "(fechada)", "- nenhuma") continua o da v2.1, byte a
+// byte. Mudar o texto exige eval e bump de VERSAO_EXTRACAO.
 /** Projeto que a LLM pode escolher em `oportunidade_id`. */
-export type ProjetoCandidata = {
+export type ProjetoCandidato = {
   id: string;
   titulo: string;
   faseNome: string;
@@ -99,7 +102,7 @@ export type ContextoExtracao = {
   fases: FaseContexto[];
   contatos: ContatoCandidato[];
   empresas: EmpresaCandidata[];
-  projetos: ProjetoCandidata[];
+  projetos: ProjetoCandidato[];
   /** Card da confirmação do bot que a mensagem responde (fixa o alvo). */
   alvoResposta: string | null;
   /** GAB-39: veio sem `#crm` (o classificador achou que pode ser venda). */
@@ -185,12 +188,12 @@ export function montarMensagemUsuario(textoMensagem: string, ctx: ContextoExtrac
   for (const e of ctx.empresas) add(`- id=${e.id} nome=${JSON.stringify(e.nome)} via=${e.via}`);
   add("");
   add(
-    "Projetos candidatos (cards de vendas: dos contatos/empresas acima, e os que o remetente mexeu nos últimos 30 min = recente; ledger = mexido por uma mensagem dele nesta janela de 12 h; resposta = card da confirmação respondida):",
+    "Oportunidades candidatas (cards de vendas: dos contatos/empresas acima, e as que o remetente mexeu nos últimos 30 min = recente; ledger = mexida por uma mensagem dele nesta janela de 12 h; resposta = card da confirmação respondida):",
   );
-  if (ctx.projetos.length === 0) add("- nenhum");
+  if (ctx.projetos.length === 0) add("- nenhuma");
   for (const o of ctx.projetos) {
     add(
-      `- id=${o.id} titulo=${JSON.stringify(o.titulo)} fase=${JSON.stringify(o.faseNome)}${o.terminal ? " (fechado)" : ""} via=${o.via.join(",")} tocada=${HORA_SP.format(o.tocadaEm)}`,
+      `- id=${o.id} titulo=${JSON.stringify(o.titulo)} fase=${JSON.stringify(o.faseNome)}${o.terminal ? " (fechada)" : ""} via=${o.via.join(",")} tocada=${HORA_SP.format(o.tocadaEm)}`,
     );
   }
   if (ctx.alvoResposta) {
