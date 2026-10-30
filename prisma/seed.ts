@@ -14,7 +14,7 @@ type FaseSeed = {
 // Fases do Pipefy, na ordem (design doc §4.2), com os marcos do ciclo único (GAB-81,
 // spec fase 2 §4.2): as fases de vendas da v1 são subfases antes de Proposta; as de
 // projetos, subfases de Execução. Bancos que já existiam ganham os marcos pela
-// migration 20261030120000_ciclo_unico (este seed não mexe em fases existentes).
+// migration 20261030130000_ciclo_unico (este seed não mexe em fases existentes).
 export const PIPELINES: { chave: string; nome: string; ordem: number; fases: FaseSeed[] }[] = [
   {
     chave: "vendas",

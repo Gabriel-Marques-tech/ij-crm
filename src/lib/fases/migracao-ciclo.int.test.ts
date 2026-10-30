@@ -1,5 +1,5 @@
 /**
- * GAB-81: migration 20261030120000_ciclo_unico contra dados no formato da v1
+ * GAB-81: migration 20261030130000_ciclo_unico contra dados no formato da v1
  * (pares venda → projeto, órfãos, reaberturas, pipefy_id, perdidos, lixeira,
  * fases customizadas e arquivadas). O schema de teste já está migrado (global
  * setup); aqui o banco é montado como a v1 deixava (fases sem marco, dois
@@ -21,7 +21,7 @@ import { restaurarCard } from "@/lib/lixeira/cards";
 
 const db = dbTeste();
 const raiz = path.resolve(import.meta.dirname, "../../..");
-const SQL_MIGRACAO = readFileSync(path.join(raiz, "prisma/migrations/20261030120000_ciclo_unico/migration.sql"), "utf8");
+const SQL_MIGRACAO = readFileSync(path.join(raiz, "prisma/migrations/20261030130000_ciclo_unico/migration.sql"), "utf8");
 const SQL_VERIFICAR = readFileSync(path.join(raiz, "scripts/verificar-ciclo-unico.sql"), "utf8").trim().replace(/;$/, "");
 
 /** Divide o SQL em comandos, respeitando '…', $tag$…$tag$ e comentários `--`. */

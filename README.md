@@ -502,7 +502,7 @@ Gestão só migra cards para fase do mesmo tipo (aberta, ganho ou perdido) — a
 pelo gancho. Vendas/Projetos ficam na navegação (lista pelo `?quadro=`; o detalhe declara o
 quadro do card).
 
-Migração da v1 (`prisma/migrations/20261030120000_ciclo_unico`): cada par venda → card de
+Migração da v1 (`prisma/migrations/20261030130000_ciclo_unico`): cada par venda → card de
 projetos (`origem_oportunidade_id`) virou um Projeto (a venda sobrevive; Timeline,
 TransicaoFase, prazos e mensagens do card de projetos passaram para ela; a casca fica
 soft-deletada com `absorvido_por_id`, fora da lixeira). Deploy e rollback: runbook, "Ciclo

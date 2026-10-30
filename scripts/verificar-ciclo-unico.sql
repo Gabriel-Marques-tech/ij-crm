@@ -1,5 +1,5 @@
 -- GAB-81: contagens do ciclo único, SÓ LEITURA. Rode ANTES e DEPOIS da migration
--- 20261030120000_ciclo_unico (numa cópia de produção, ou em produção mesmo: não
+-- 20261030130000_ciclo_unico (numa cópia de produção, ou em produção mesmo: não
 -- escreve nada) e compare (docs/runbook.md, "Ciclo único (GAB-81)"):
 --
 --   psql "$DATABASE_URL" -f scripts/verificar-ciclo-unico.sql

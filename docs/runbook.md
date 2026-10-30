@@ -261,7 +261,7 @@ problema. Veja `dc logs <serviço>`.
 
 ### Ciclo único (GAB-81): deploy com migração de dados
 
-A migration `20261030120000_ciclo_unico` **mexe em dados** (une cada par venda →
+A migration `20261030130000_ciclo_unico` **mexe em dados** (une cada par venda →
 card de projetos num Projeto só, cria/adota os marcos e reordena as fases). Ela
 roda numa transação só, é idempotente e não apaga nada (o card de projetos
 absorvido fica soft-deletado com `absorvido_por_id`), mas **não tem volta
