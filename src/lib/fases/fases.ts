@@ -295,6 +295,9 @@ export async function removerFase(
       // Tudo lido DEPOIS do lock, inclusive o destino (pode ter sido arquivado).
       const [qtdCards, qtdCardsDeletados, qtdTransicoes, destino] = await Promise.all([
         tx.projeto.count({ where: { faseId, deletadoEm: null } }),
+        // Inclui as cascas absorvidas pelo ciclo único (GAB-81) DE PROPÓSITO: elas não
+        // aparecem em lugar nenhum, mas ainda apontam para a fase (FK); sem contar,
+        // a remoção tentaria EXCLUIR e o DELETE falharia (P2003 → FASE_EM_USO).
         tx.projeto.count({ where: { faseId, deletadoEm: { not: null } } }),
         tx.transicaoFase.count({ where: { OR: [{ deFaseId: faseId }, { paraFaseId: faseId }] } }),
         opts.destinoFaseId
