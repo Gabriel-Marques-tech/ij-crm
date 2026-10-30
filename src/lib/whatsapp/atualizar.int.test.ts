@@ -348,19 +348,31 @@ describe("mover para terminal pelo WhatsApp", () => {
     return (r.r as { projetoId: string }).projetoId;
   }
 
-  it("ganho COM valor → contrato assinado, valor fechado e card de projeto (regras do GAB-32)", async () => {
+  it("ganho COM valor → contrato assinado, valor fechado e o MESMO card segue para o Handoff (GAB-81)", async () => {
     const id = await cardRecente();
     const r = await enviar("#crm fechamos o Gustavo, 18 mil", (p) =>
       saida({ intencao: "ATUALIZAR", oportunidade_id: idCandidata(p, "recente"), fase_chave: "contrato_assinado", campos: { valor_fechado: "18 mil" } }),
     );
     expect(r.r).toMatchObject({ tipo: "PROCESSADA", confirmacao: "✅ Gustavo — Economia Sensata: Primeiro Contato → Contrato assinado." });
     const card = await cardDe(id);
-    expect(card.fase.chave).toBe("contrato_assinado");
+    expect(card.fase.chave).toBe("handoff");
     expect(card.valorFechado?.toFixed(2)).toBe("18000.00");
     expect(card.dataGanho).not.toBeNull();
-    const projeto = await dbT.projeto.findFirstOrThrow({ where: { vendaOrigemId: id }, include: { fase: true } });
-    expect(projeto.fase.chave).toBe("em_execucao");
-    expect(await dbT.transicaoFase.findFirst({ where: { projetoId: id, paraFaseId: card.faseId } })).toMatchObject({ origem: "WHATSAPP" });
+    expect(await dbT.projeto.count()).toBe(1);
+    const ganho = await dbT.fase.findFirstOrThrow({ where: { marco: "GANHO" } });
+    expect(await dbT.transicaoFase.findFirst({ where: { projetoId: id, paraFaseId: ganho.id } })).toMatchObject({ origem: "WHATSAPP" });
+    expect(await dbT.transicaoFase.findFirst({ where: { projetoId: id, paraFaseId: card.faseId } })).toMatchObject({ origem: "SISTEMA", deFaseId: ganho.id });
+
+    // Para o WhatsApp o card ganho é uma venda FECHADA no Ganho (como na v1): mensagem nova reabre em Vendas.
+    const r2 = await enviar("#crm o Gustavo quer outro projeto", (p) => {
+      const linha = p.usuario.split("\n").find((l) => l.startsWith(`- id=${id} `))!;
+      expect(linha).toContain('fase="Contrato assinado" (fechado)');
+      return saida({ intencao: "ATUALIZAR", oportunidade_id: id });
+    });
+    expect(r2.r).toMatchObject({ tipo: "PROCESSADA" });
+    const novo = await dbT.projeto.findFirstOrThrow({ where: { reabertaDeId: id }, include: { pipeline: true } });
+    expect(novo.pipeline.chave).toBe("vendas");
+    expect((await cardDe(id)).fase.chave).toBe("handoff");
   });
 
   it("ganho SEM valor → NÃO move (nunca inventa), revisar com o motivo", async () => {
@@ -516,7 +528,7 @@ describe("review do PR #23", () => {
     expect((await cardDe(id)).revisar).toBe(true);
   });
 
-  it("ganho: campos da mensagem entram ANTES do gancho — o card de projeto já nasce com eles", async () => {
+  it("ganho: campos da mensagem entram ANTES do gancho — o card chega ao Handoff com eles", async () => {
     const r1 = await enviar("#crm falei com o Gustavo", () => saida({ contato: { nome: "Gustavo" } }));
     const id = (r1.r as { projetoId: string }).projetoId;
     await enviar("#crm fechamos o Gustavo, 18 mil, é da Economia Sensata de Campinas/SP", (p) =>
@@ -528,8 +540,8 @@ describe("review do PR #23", () => {
         campos: { valor_fechado: "18 mil", cidade: "Campinas", estado: "SP" },
       }),
     );
-    expect((await cardDe(id)).fase.chave).toBe("contrato_assinado");
-    const projeto = await dbT.projeto.findFirstOrThrow({ where: { vendaOrigemId: id }, include: { empresa: true } });
+    expect((await cardDe(id)).fase.chave).toBe("handoff");
+    const projeto = await dbT.projeto.findUniqueOrThrow({ where: { id }, include: { empresa: true } });
     expect(projeto).toMatchObject({ titulo: "Gustavo — Economia Sensata", cidade: "Campinas", estado: "SP" });
     expect(projeto.empresa?.nome).toBe("Economia Sensata");
   });

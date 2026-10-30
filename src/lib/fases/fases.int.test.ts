@@ -479,4 +479,21 @@ describe("marcos do ciclo único (GAB-81)", () => {
     expect(await moverFase(f("em_execucao").id, "SUBIR")).toEqual({ ok: false, erro: "ORDEM_MARCOS" }); // não passa de Handoff
     expect(projetos.fases[0].marco).toBe("HANDOFF");
   });
+
+  it("WhatsApp: a lista de fases de Vendas (contexto da LLM) é a mesma da v1 — sem o marco Proposta", async () => {
+    await semeado();
+    const { FASES_DO_WHATSAPP } = await import("@/lib/whatsapp/ciclo-vendas");
+    const fs = await db.fase.findMany({ where: { pipeline: { chave: "vendas" }, arquivadaEm: null, ...FASES_DO_WHATSAPP }, orderBy: { ordem: "asc" } });
+    expect(fs.map((f) => f.chave)).toEqual([
+      "primeiro_contato",
+      "reuniao_diagnostica",
+      "reuniao_intermediaria",
+      "montando_proposta",
+      "reuniao_proposta",
+      "em_negociacao",
+      "montando_contrato",
+      "contrato_assinado",
+      "perdido",
+    ]);
+  });
 });

@@ -29,13 +29,22 @@ async function semear() {
     },
     include: { fases: true },
   });
-  await db.pipeline.create({ data: { chave: "projetos", nome: "Projetos", ordem: 1, fases: { create: [{ chave: "em_execucao", nome: "Em execução", ordem: 0 }] } } });
+  // GAB-81: o ganho leva o card ao Handoff de Projetos; a parte de vendas continua pontuando.
+  const projetos = await db.pipeline.create({
+    data: {
+      chave: "projetos",
+      nome: "Projetos",
+      ordem: 1,
+      fases: { create: [{ chave: "handoff", nome: "Handoff", ordem: 0, marco: "HANDOFF" }, { chave: "em_execucao", nome: "Em execução", ordem: 1 }] },
+    },
+    include: { fases: true },
+  });
   const ana = await db.usuario.create({ data: { nome: "Ana Vendas", email: "ana@ij.test" } });
   const bruno = await db.usuario.create({ data: { nome: "Bruno Lima", email: "bruno@ij.test" } });
   const gil = await db.usuario.create({ data: { nome: "Gil Gestor", email: "gil@ij.test", papel: "GESTOR" } });
   const gaia = await db.usuario.create({ data: { nome: "Gaia Sem Cards", email: "gaia@ij.test", papel: "GESTOR" } });
   const ivo = await db.usuario.create({ data: { nome: "Ivo Inativo", email: "ivo@ij.test", ativo: false } });
-  return { vendas, ana, bruno, gil, gaia, ivo };
+  return { vendas, projetos, ana, bruno, gil, gaia, ivo };
 }
 
 type S = Awaited<ReturnType<typeof semear>>;
@@ -91,7 +100,7 @@ describe("ranking a partir do histórico real (criar, mover, marcar feita, ganha
     expect(v.feed.map((i) => i.tipo)).toEqual(["GANHO", "AVANCO"]);
   });
 
-  it("venda reaberta deixa de contar o ganho; re-ganho conta de novo; card excluído não pontua", async () => {
+  it("ganho segue contando com o card em Projetos (sem pontuar o que anda lá); card excluído não pontua", async () => {
     const s = await semear();
     const id = await novoCard(s, s.ana, "Padaria");
     await ok(moverCard(id, fase(s, "contrato_assinado"), s.ana, { dadosTerminal: {} }));
@@ -101,14 +110,16 @@ describe("ranking a partir do histórico real (criar, mover, marcar feita, ganha
       if (v.modo !== "completo") throw new Error("modo");
       return v.ranking.linhas.find((l) => l.usuario.id === s.ana.id)!;
     };
-    expect((await pontosAna()).detalhe.ganho).toBe(100);
+    const antes = await pontosAna();
+    expect(antes.detalhe.ganho).toBe(100);
+    expect((await db.projeto.findUniqueOrThrow({ where: { id } })).pipelineId).toBe(s.projetos.id);
 
-    await ok(moverCard(id, fase(s, "em_negociacao"), s.ana)); // reabre (avanço de 0 → 1 também é 1ª entrada)
-    expect((await pontosAna()).detalhe.ganho).toBe(0);
-    await ok(moverCard(id, fase(s, "contrato_assinado"), s.ana, { dadosTerminal: {} }));
+    // Andar em Projetos não pontua (nem avanço, nem nada); o ganho continua.
+    await ok(moverCard(id, s.projetos.fases.find((f) => f.chave === "em_execucao")!.id, s.ana));
     const l = await pontosAna();
-    expect(l.detalhe.ganho).toBe(100);
+    expect(l.detalhe).toEqual(antes.detalhe);
     expect(l.ganhos).toBe(1);
+    expect(l.abertos).toBe(0);
 
     await db.projeto.update({ where: { id }, data: { deletadoEm: new Date() } });
     expect((await pontosAna()).pontos).toBe(0);

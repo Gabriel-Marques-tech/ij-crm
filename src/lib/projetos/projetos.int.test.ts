@@ -28,7 +28,7 @@ async function semear() {
       chave: "projetos",
       nome: "Projetos",
       ordem: 1,
-      fases: { create: [{ chave: "em_execucao", nome: "Em execução", ordem: 0 }, { chave: "finalizado", nome: "Finalizado", ordem: 1, isTerminal: true, tipoTerminal: "GANHO" }] },
+      fases: { create: [{ chave: "em_execucao", nome: "Em execução", ordem: 0 }, { chave: "finalizado", nome: "Finalizado", ordem: 1, isTerminal: true, tipoTerminal: "GANHO" }, { chave: "handoff", nome: "Handoff", ordem: 2, marco: "HANDOFF" }] },
     },
     include: { fases: { orderBy: { ordem: "asc" } } },
   });
@@ -148,7 +148,7 @@ describe("moverCard", () => {
     expect(await db.transicaoFase.count()).toBe(1); // só a de criação
   });
 
-  it("ganho em vendas também trava projetos (quadro que o gancho do GAB-32 escreve)", async () => {
+  it("ganho em vendas também trava projetos (o card segue para o Handoff de lá, GAB-81)", async () => {
     const { vendas, projetos, vendedora } = await semear();
     const c = await criarCard({ pipelineId: vendas.id, faseId: fase(vendas, "em_negociacao").id, titulo: "Acme" }, vendedora);
     if (!c.ok) throw new Error(c.erro);

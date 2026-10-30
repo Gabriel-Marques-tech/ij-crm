@@ -27,7 +27,7 @@ async function preparar() {
 }
 
 const fase = async (pipeline: string, chave: string) => db.fase.findFirstOrThrow({ where: { chave, pipeline: { chave: pipeline } } });
-const card = (pipefyId: string) => db.projeto.findUniqueOrThrow({ where: { pipefyId }, include: { fase: true, responsavel: true, empresa: true, contato: { include: { pontos: true } }, cardProjetos: { include: { fase: true } } } });
+const card = (pipefyId: string) => db.projeto.findUniqueOrThrow({ where: { pipefyId }, include: { fase: true, responsavel: true, empresa: true, contato: { include: { pontos: true } }, pipeline: true } });
 
 async function contagens() {
   return {
@@ -99,35 +99,34 @@ describe("confirmar", () => {
     expect(tl1).toHaveLength(1);
     expect(tl1[0]).toMatchObject({ tipo: "IMPORT", usuarioId: admin.id, payload: expect.objectContaining({ acao: "criado", pipefyId: "900001" }) });
 
-    // Contrato assinado → ganho com valor e data de entrada; projeto em em_execucao pelo gancho do GAB-32.
+    // Contrato assinado → ganho com valor e data de entrada; o MESMO card segue para o Handoff (GAB-81).
     const c2 = await card("900002");
-    expect(c2.fase.chave).toBe("contrato_assinado");
+    expect(c2.fase.chave).toBe("handoff");
+    expect(c2.pipeline.chave).toBe("projetos");
     expect(c2.valorFechado?.toFixed(2)).toBe("45000.00");
     expect(c2.dataGanho?.toISOString()).toBe("2026-02-01T21:00:00.000Z");
-    expect(c2.cardProjetos?.fase.chave).toBe("em_execucao");
-    expect(c2.cardProjetos).toMatchObject({ titulo: c2.titulo, responsavelId: c2.responsavelId, empresaId: c2.empresaId });
 
-    // Pipefy em "Em execução" → venda ganha + projeto, fase_desde = entrada no Pipefy.
+    // Pipefy em "Em execução" → ganho em Vendas e o card segue até lá; fase_desde = entrada no Pipefy.
     const c3 = await card("900003");
-    expect(c3.fase.chave).toBe("contrato_assinado");
+    expect(c3.fase.chave).toBe("em_execucao");
     expect(c3.dataGanho?.toISOString()).toBe("2025-11-20T19:00:00.000Z");
-    expect(c3.cardProjetos?.fase.chave).toBe("em_execucao");
-    expect(c3.cardProjetos?.faseDesde.toISOString()).toBe("2025-12-01T12:00:00.000Z");
+    expect(c3.faseDesde.toISOString()).toBe("2025-12-01T12:00:00.000Z");
     expect(c3.empresa).toMatchObject({ nome: "Metalúrgica Forte", cnpj: null });
 
-    // "Finalizado" → projeto movido até o terminal de Projetos, com transições retroativas.
+    // "Finalizado" → card movido até o terminal de Projetos, com transições retroativas.
     const c4 = await card("900004");
-    expect(c4.cardProjetos?.fase.chave).toBe("finalizado");
-    const tp4 = await db.transicaoFase.findMany({ where: { projetoId: c4.cardProjetos!.id }, orderBy: { em: "asc" }, include: { paraFase: true } });
+    expect(c4.fase.chave).toBe("finalizado");
+    const tp4 = await db.transicaoFase.findMany({ where: { projetoId: c4.id, paraFase: { pipeline: { chave: "projetos" } } }, orderBy: { em: "asc" }, include: { paraFase: true } });
     expect(tp4.map((t) => [t.origem, t.paraFase.chave])).toEqual([
-      ["SISTEMA", "em_execucao"],
+      ["SISTEMA", "handoff"],
+      ["IMPORT", "em_execucao"], // o histórico do Pipefy passou por lá (na v1 era a entrada do card de projeto)
       ["IMPORT", "finalizado"],
     ]);
 
     // Perdido: motivo do CSV pela regra do GAB-32.
     const c5 = await card("900005");
     expect(c5).toMatchObject({ motivoPerda: "Preço: achou caro", origem: "COLD_CALL" });
-    expect(c5.cardProjetos).toBeNull();
+    expect(c5.pipeline.chave).toBe("vendas");
 
     // Responsável sem usuário → quem importou + revisar.
     const c7 = await card("900007");
@@ -166,20 +165,23 @@ describe("confirmar", () => {
     if (!r.ok) throw new Error(r.erro);
     expect(r.relatorio).toMatchObject({ criados: 0, atualizados: 8, semMudanca: 7, projetosCriados: 1 });
     const depois = await card("900001");
-    expect(depois.fase.chave).toBe("contrato_assinado");
-    expect(depois.cardProjetos?.fase.chave).toBe("em_execucao");
+    expect(depois.fase.chave).toBe("handoff");
     const ts = await db.transicaoFase.findMany({ where: { projetoId: c1.id }, orderBy: { em: "asc" }, include: { paraFase: true } });
-    expect(ts.map((t) => t.paraFase.chave)).toEqual(["primeiro_contato", "reuniao_diagnostica", "contrato_assinado"]);
+    expect(ts.map((t) => t.paraFase.chave)).toEqual(["primeiro_contato", "reuniao_diagnostica", "contrato_assinado", "handoff"]);
     const tl = await db.timeline.findMany({ where: { projetoId: c1.id, tipo: { in: ["IMPORT", "MOVIMENTACAO"] } }, orderBy: [{ em: "asc" }, { id: "asc" }] });
     expect(tl.map((t) => [t.tipo, (t.payload as { acao?: string }).acao ?? null])).toEqual([
       ["IMPORT", "criado"],
       ["MOVIMENTACAO", null],
       ["IMPORT", "atualizado"],
+      ["MOVIMENTACAO", null], // ganho → Handoff, 1 ms depois do ganho (sem histórico: agora)
     ]);
-    // 3ª vez com o mesmo arquivo: nada muda, nem um 2º projeto.
+    // 3ª vez com o mesmo arquivo: nada muda, nem um 2º card; o card não volta para Vendas.
+    const antes3 = await db.projeto.count();
     const r3 = await importarConteudo(novo, undefined, admin, new Date("2026-03-03T12:00:00Z"));
     expect(r3.ok && r3.relatorio).toMatchObject({ semMudanca: 8, projetosCriados: 0 });
-    expect(await db.projeto.count({ where: { vendaOrigemId: c1.id } })).toBe(1);
+    expect(r3.ok && r3.relatorio.avisos.filter((a) => a.pipefyId === "900001")).toEqual([]);
+    expect(await db.projeto.count()).toBe(antes3);
+    expect((await card("900001")).fase.chave).toBe("handoff");
   });
 
   it("CSV com campo vazio não apaga o que o CRM tem; card na lixeira é pulado", async () => {
@@ -227,13 +229,13 @@ describe("confirmar", () => {
 
   it("card que falha no meio do lote vai para os erros; o resto do lote é gravado", async () => {
     const { admin } = await preparar();
-    // Sem em_execucao ativa, ganho em Vendas não consegue criar o projeto (regra do GAB-32).
-    await db.fase.update({ where: { id: (await fase("projetos", "em_execucao")).id }, data: { arquivadaEm: new Date() } });
+    // Sem o marco Handoff ativo, o ganho em Vendas não tem para onde levar o card (GAB-81).
+    await db.fase.update({ where: { id: (await fase("projetos", "handoff")).id }, data: { arquivadaEm: new Date() } });
     const r = await importarConteudo(CSV, undefined, admin, AGORA);
     if (!r.ok) throw new Error(r.erro);
     const msg = (id: string) => r.relatorio.erros.find((e) => e.pipefyId === id)?.mensagem;
-    expect(msg("900002")).toBe('Projetos não tem a fase "em_execucao" ativa: o projeto da venda ganha não pôde ser criado.');
-    expect(msg("900004")).toBe('Projetos não tem a fase "em_execucao" ativa: o projeto da venda ganha não pôde ser criado.');
+    expect(msg("900002")).toBe("Projetos não tem o marco Handoff ativo: o card ganho não pôde seguir para lá.");
+    expect(msg("900004")).toBe("Projetos não tem o marco Handoff ativo: o card ganho não pôde seguir para lá.");
     expect(r.relatorio.criados).toBe(5); // 900001, 900005, 900007, 900008, 900010
     expect(await db.projeto.count({ where: { pipefyId: { in: ["900002", "900003", "900004"] } } })).toBe(0);
     expect(await db.projeto.count()).toBe(5);
@@ -337,9 +339,8 @@ describe("PERDIDO sem motivo em Projetos", () => {
     expect(await db.projeto.count()).toBe(0);
     const com = await importarConteudo(arq, undefined, admin, AGORA, { opcoes: { motivoPerdaPadrao: "timing" } });
     if (!com.ok) throw new Error(com.erro);
-    const venda = await card("1");
-    expect(venda.cardProjetos?.fase.chave).toBe("cancelado");
-    const proj = await db.projeto.findUniqueOrThrow({ where: { id: venda.cardProjetos!.id } });
+    const proj = await card("1");
+    expect(proj.fase.chave).toBe("cancelado");
     expect(proj.motivoPerda).toBe("Timing: Motivo definido na importação por Admin Import");
   });
 });
