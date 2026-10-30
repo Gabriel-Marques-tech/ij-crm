@@ -505,7 +505,9 @@ quadro do card).
 Migração da v1 (`prisma/migrations/20261030130000_ciclo_unico`): cada par venda → card de
 projetos (`origem_oportunidade_id`) virou um Projeto (a venda sobrevive; Timeline,
 TransicaoFase, prazos e mensagens do card de projetos passaram para ela; a casca fica
-soft-deletada com `absorvido_por_id`, fora da lixeira). Deploy e rollback: runbook, "Ciclo
+soft-deletada com `absorvido_por_id`, fora da lixeira). Exceção: venda fora do ganho (reaberta ou
+perdida depois do ganho) com projeto vivo **não é unida** — ficam dois cards, um em cada quadro.
+O ganho guarda `vendedor_id` (responsável no momento do ganho); o ranking credita ganho/perda a ele. Deploy e rollback: runbook, "Ciclo
 único (GAB-81)"; contagens antes/depois: `scripts/verificar-ciclo-unico.sql`.
 
 ## Empresas e Contatos
