@@ -22,6 +22,21 @@ enum Papel {
   // Somente leitura (outras áreas): vê Kanban/Tabela/Calendário/Semana/Contatos/
   // Empresas/Ranking, não escreve nada nem é responsável de card.
   VISUALIZADOR
+  // Membro do time de projetos (GAB-82): mesmas permissões de card que VENDEDOR;
+  // o lado (área PROJETOS) vem junto. Ver src/lib/auth/areas.ts.
+  PROJETOS
+}
+
+// Lado do usuário no ciclo (spec fase 2 §4.12). null = nenhum (gestão/admin/visualizador).
+enum Area {
+  VENDAS
+  PROJETOS
+}
+
+// Cargo DENTRO da área (não é papel de permissão). Novo cargo da IJ = só
+// `ALTER TYPE "Cargo" ADD VALUE` (aditivo), sem mexer em linhas existentes.
+enum Cargo {
+  GP // GP da área: age em nome do seu lado na caneta da proposta
 }
 
 enum TipoContatoPonto {
@@ -85,6 +100,10 @@ model Usuario {
   email             String    @unique
   senhaHash         String?   @map("senha_hash") // null = ainda sem senha (convite pendente)
   papel             Papel     @default(VENDEDOR)
+  // GAB-82: lado e cargos. Coerência com o papel garantida em src/lib/auth/areas.ts
+  // (VENDEDOR → VENDAS, PROJETOS → PROJETOS, VISUALIZADOR → nenhum).
+  area              Area?
+  cargos            Cargo[]   @default([])
   telefoneWhatsapp  String?   @unique @map("telefone_whatsapp")
   whatsappLid       String?   @unique @map("whatsapp_lid")
   ativo             Boolean   @default(true)

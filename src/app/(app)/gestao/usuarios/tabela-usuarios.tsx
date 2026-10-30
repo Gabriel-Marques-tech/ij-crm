@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useState, useTransition } from "react";
-import type { Papel } from "@prisma/client";
+import type { Area, Cargo, Papel } from "@prisma/client";
 import { KeyRound, Pencil, RefreshCw } from "lucide-react";
 import { Avatar } from "@/components/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -10,16 +10,19 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { podeAtribuirPapel, podeGerarRedefinicao } from "@/lib/auth/papeis";
+import { descreverLado } from "@/lib/auth/areas";
+import { ROTULO_PAPEL, podeAtribuirPapel, podeGerarRedefinicao } from "@/lib/auth/papeis";
 import { alternarAtivoAction, editarUsuarioAction, gerarLinkRedefinicaoAction, reemitirConviteAction, type EstadoConvite } from "./actions";
 import { LinkGerado } from "./convidar-dialog";
-import { SelectPapel } from "./select-papel";
+import { CamposPapelLado } from "./campos-lado";
 
 type Usuario = {
   id: string;
   nome: string;
   email: string;
   papel: Papel;
+  area: Area | null;
+  cargos: Cargo[];
   telefoneWhatsapp: string | null;
   ativo: boolean;
   convitePendente: boolean;
@@ -31,7 +34,6 @@ type Usuario = {
 
 type Ator = { id: string; papel: Papel };
 
-const ROTULO: Record<Papel, string> = { ADMIN: "Admin", GESTOR: "Gestor", VENDEDOR: "Vendedor", VISUALIZADOR: "Visualizador" };
 
 export function TabelaUsuarios({ usuarios, ator }: { usuarios: Usuario[]; ator: Ator }) {
   const [editando, setEditando] = useState<Usuario | null>(null);
@@ -90,6 +92,7 @@ export function TabelaUsuarios({ usuarios, ator }: { usuarios: Usuario[]; ator: 
               <th className="eyebrow hidden px-4 py-3 font-normal md:table-cell">email</th>
               <th className="eyebrow hidden px-4 py-3 font-normal sm:table-cell">whatsapp</th>
               <th className="eyebrow px-4 py-3 font-normal">papel</th>
+              <th className="eyebrow hidden px-4 py-3 font-normal sm:table-cell">área</th>
               <th className="eyebrow px-4 py-3 font-normal">ativo</th>
               <th className="px-4 py-3" />
             </tr>
@@ -124,7 +127,8 @@ export function TabelaUsuarios({ usuarios, ator }: { usuarios: Usuario[]; ator: 
                 <td className="hidden px-4 py-3 font-mono text-xs text-fg-soft sm:table-cell">
                   {u.telefoneWhatsapp ?? <span className="text-fg-faint">—</span>}
                 </td>
-                <td className="px-4 py-3">{ROTULO[u.papel]}</td>
+                <td className="px-4 py-3">{ROTULO_PAPEL[u.papel]}</td>
+                <td className="hidden px-4 py-3 text-fg-soft sm:table-cell">{descreverLado(u)}</td>
                 <td className="px-4 py-3">
                   <Switch
                     checked={u.ativo}
@@ -163,7 +167,7 @@ export function TabelaUsuarios({ usuarios, ator }: { usuarios: Usuario[]; ator: 
             ))}
             {usuarios.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-4 py-10 text-center text-sm text-fg-faint">
+                <td colSpan={7} className="px-4 py-10 text-center text-sm text-fg-faint">
                   Nenhum usuário ainda.
                 </td>
               </tr>
@@ -231,10 +235,10 @@ function EditarForm({ usuario, ator, onSalvo }: { usuario: Usuario; ator: Ator; 
         <p className="text-xs text-fg-faint">Deixe vazio para remover. É este número que liga a pessoa às mensagens do grupo.</p>
       </div>
       {!souEu ? (
-        <div className="space-y-1.5">
-          <Label htmlFor="papel">Papel</Label>
-          <SelectPapel name="papel" papelAtor={ator.papel} defaultValue={usuario.papel} />
-        </div>
+        <CamposPapelLado papelAtor={ator.papel} papel={usuario.papel} area={usuario.area} cargos={usuario.cargos} />
+      ) : ator.papel === "ADMIN" ? (
+        // Admin define o próprio lado (ex.: admin que atua em vendas); fica na auditoria. Ver usuarios.ts.
+        <CamposPapelLado papelAtor={ator.papel} papel={usuario.papel} area={usuario.area} cargos={usuario.cargos} mostrarPapel={false} />
       ) : null}
       {estado?.erro ? (
         <p role="alert" className="text-sm text-danger">

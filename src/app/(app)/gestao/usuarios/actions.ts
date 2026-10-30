@@ -22,14 +22,29 @@ const MENSAGEM: Record<ErroUsuario, string> = {
 
 export type EstadoConvite = { erro?: string; link?: string; expiraEm?: string } | undefined;
 
-const papelSchema = z.enum(["ADMIN", "GESTOR", "VENDEDOR", "VISUALIZADOR"]);
+const papelSchema = z.enum(["ADMIN", "GESTOR", "VENDEDOR", "PROJETOS", "VISUALIZADOR"]);
+// "" = nenhuma área. Coerência com o papel é resolvida no serviço (lib/auth/areas).
+const areaSchema = z.enum(["VENDAS", "PROJETOS", ""]).transform((a) => (a === "" ? null : a));
+const cargosSchema = z.array(z.enum(["GP"]));
 
 const conviteSchema = z.object({
   nome: z.string().trim().min(2, "Nome muito curto."),
   email: z.string().trim().min(3),
   papel: papelSchema,
   telefone: z.string().trim().optional(),
+  area: areaSchema.optional(),
+  cargos: cargosSchema,
 });
+
+/**
+ * Campos de lado do form (CamposLado): `area` + checkboxes `cargos`. O hidden
+ * `ladoNoForm` diferencia "nenhum cargo marcado" de "form sem esses campos"
+ * (editar a si mesmo não mostra lado/cargo).
+ */
+function ladoDoForm(form: FormData): { area?: unknown; cargos?: unknown[] } {
+  if (form.get("ladoNoForm") !== "1") return {};
+  return { area: form.get("area") ?? "", cargos: form.getAll("cargos") };
+}
 
 function linkConvite(token: string, caminho: "convite" | "redefinir" = "convite"): string {
   const base = process.env.APP_URL?.replace(/\/+$/, "");
@@ -61,6 +76,8 @@ export async function criarConviteAction(_prev: EstadoConvite, form: FormData): 
       email: form.get("email"),
       papel: form.get("papel"),
       telefone: form.get("telefone") ?? undefined,
+      cargos: [],
+      ...ladoDoForm(form),
     });
     if (!parsed.success) return { erro: parsed.error.issues[0]?.message ?? "Dados inválidos." };
     const r = await criarConvite(parsed.data, ator);
@@ -85,6 +102,8 @@ const edicaoSchema = z.object({
   nome: z.string().trim().min(2).optional(),
   telefone: z.string().trim().optional(),
   papel: papelSchema.optional(),
+  area: areaSchema.optional(),
+  cargos: cargosSchema.optional(),
 });
 
 export type EstadoEdicao = { erro?: string; ok?: true } | undefined;
@@ -97,6 +116,7 @@ export async function editarUsuarioAction(_prev: EstadoEdicao, form: FormData): 
       nome: form.get("nome") ?? undefined,
       telefone: form.get("telefone") ?? undefined,
       papel: form.get("papel") ?? undefined,
+      ...ladoDoForm(form),
     });
     if (!parsed.success) return { erro: "Dados inválidos." };
     const { usuarioId, ...dados } = parsed.data;

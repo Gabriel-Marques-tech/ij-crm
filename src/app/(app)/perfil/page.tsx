@@ -1,7 +1,9 @@
 import { ErroCarregamento } from "@/components/erro-carregamento";
 import { PageHeader } from "@/components/shell/page-header";
 import { exigirUsuario, idSessaoAtual } from "@/lib/auth/atual";
+import { descreverLado } from "@/lib/auth/areas";
 import { descreverDispositivo } from "@/lib/auth/dispositivo";
+import { ROTULO_PAPEL } from "@/lib/auth/papeis";
 import { listarSessoes } from "@/lib/auth/sessao";
 import { db } from "@/lib/db";
 import { comTratamento, ehInesperado } from "@/lib/erros/registrar";
@@ -14,15 +16,13 @@ import { Sessoes } from "./sessoes";
 
 export const metadata = { title: "Meu perfil" };
 
-const ROTULO = { ADMIN: "Admin", GESTOR: "Gestor", VENDEDOR: "Vendedor", VISUALIZADOR: "Visualizador" } as const;
-
 export default async function PerfilPage() {
   const eu = await exigirUsuario();
   const dados = await comTratamento("pagina.perfil", () =>
     Promise.all([
       db.usuario.findUniqueOrThrow({
         where: { id: eu.id },
-        select: { nome: true, email: true, papel: true, telefoneWhatsapp: true, foto: { select: { atualizadoEm: true } } },
+        select: { nome: true, email: true, papel: true, area: true, cargos: true, telefoneWhatsapp: true, foto: { select: { atualizadoEm: true } } },
       }),
       obterPreferencias(eu.id),
       idSessaoAtual().then((atual) => listarSessoes(eu.id, atual)),
@@ -44,7 +44,9 @@ export default async function PerfilPage() {
             <dt className="eyebrow">email</dt>
             <dd className="font-mono text-fg-soft">{u.email}</dd>
             <dt className="eyebrow">papel</dt>
-            <dd className="text-fg-soft">{ROTULO[u.papel]}</dd>
+            <dd className="text-fg-soft">{ROTULO_PAPEL[u.papel]}</dd>
+            <dt className="eyebrow">área</dt>
+            <dd className="text-fg-soft">{descreverLado(u)}</dd>
           </dl>
           <PerfilForm nome={u.nome} telefone={u.telefoneWhatsapp ?? ""} />
           <PaginaInicialForm atual={paginaInicial(prefs)} />

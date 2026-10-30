@@ -3,11 +3,10 @@ import { LogOut } from "lucide-react";
 import { Avatar } from "@/components/avatar";
 import { Button } from "@/components/ui/button";
 import { logoutAction } from "@/lib/auth/actions";
+import { ROTULO_PAPEL } from "@/lib/auth/papeis";
 import type { UsuarioSessao } from "@/lib/auth/sessao";
 import { SimboloIJ } from "@/components/marca/marca";
 import type { DestinoInicio } from "@/lib/preferencias/preferencias";
-
-const ROTULO_PAPEL = { ADMIN: "admin", GESTOR: "gestor", VENDEDOR: "vendedor", VISUALIZADOR: "visualizador" } as const;
 
 export function Topbar({ usuario, inicio }: { usuario: UsuarioSessao; inicio: DestinoInicio }) {
   return (
@@ -20,7 +19,7 @@ export function Topbar({ usuario, inicio }: { usuario: UsuarioSessao; inicio: De
         <Link href="/perfil" className="flex items-center gap-3 rounded-lg px-2 py-1 hover:bg-surface-hover" title="Meu perfil">
           <div className="hidden text-right sm:block">
             <p className="text-sm leading-tight text-fg-soft">{usuario.nome}</p>
-            <p className="eyebrow">{ROTULO_PAPEL[usuario.papel]}</p>
+            <p className="eyebrow">{ROTULO_PAPEL[usuario.papel].toLowerCase()}</p>
           </div>
           <Avatar nome={usuario.nome} usuarioId={usuario.id} fotoEm={usuario.fotoEm} tamanho="sm" />
         </Link>

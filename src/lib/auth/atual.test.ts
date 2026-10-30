@@ -32,8 +32,8 @@ describe("exigirEscrita (papel VISUALIZADOR é somente leitura)", () => {
     await expect(exigirUsuario()).resolves.toMatchObject({ id: "u1", papel: "VISUALIZADOR" });
   });
 
-  it("vendedor, gestor e admin escrevem", async () => {
-    for (const papel of ["VENDEDOR", "GESTOR", "ADMIN"] as const) {
+  it("vendedor, projetos (GAB-82), gestor e admin escrevem", async () => {
+    for (const papel of ["VENDEDOR", "PROJETOS", "GESTOR", "ADMIN"] as const) {
       sessao.papel = papel;
       await expect(exigirEscrita()).resolves.toMatchObject({ papel });
     }

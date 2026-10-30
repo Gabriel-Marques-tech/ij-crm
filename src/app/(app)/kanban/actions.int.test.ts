@@ -151,3 +151,24 @@ describe("papel VISUALIZADOR (somente leitura)", () => {
     expect((await db.projeto.findUniqueOrThrow({ where: { id: c.id } })).responsavelId).toBe(u.id);
   });
 });
+
+describe("papel PROJETOS (GAB-82): mesmas permissões de card do vendedor", () => {
+  it("actions: criar, editar, mover e comentar gravam; aparece entre os responsáveis e pode assumir card", async () => {
+    const { p, fase, u } = await semear();
+    const outra = await db.fase.create({ data: { pipelineId: p.id, chave: "proposta", nome: "Proposta", ordem: 1 } });
+    const pedro = await db.usuario.create({ data: { nome: "Pedro Projetos", email: "pedro@ij.test", papel: "PROJETOS", area: "PROJETOS" } });
+    const c = await db.projeto.create({ data: { titulo: "Padaria", pipelineId: p.id, faseId: fase.id, responsavelId: u.id, criadoVia: "UI" } });
+    exigirUsuario.mockResolvedValue({ id: pedro.id, papel: "PROJETOS" });
+
+    expect(await criarCardAction(p.id, fase.id, "Do time de projetos")).toMatchObject({ ok: true });
+    expect(await editarCampoAction(c.id, "titulo", "Padaria Nova")).toEqual({ ok: true });
+    expect(await moverCardAction(c.id, outra.id)).toMatchObject({ ok: true });
+    expect(await adicionarNotaAction(c.id, "escopo ok")).toMatchObject({ ok: true });
+    expect((await listarResponsaveis()).map((r) => r.id).sort()).toEqual([u.id, pedro.id].sort());
+    expect(await editarCampoAction(c.id, "responsavelId", pedro.id)).toEqual({ ok: true });
+
+    const card = await db.projeto.findUniqueOrThrow({ where: { id: c.id } });
+    expect([card.titulo, card.faseId, card.responsavelId]).toEqual(["Padaria Nova", outra.id, pedro.id]);
+    expect(await db.projeto.count()).toBe(2);
+  });
+});

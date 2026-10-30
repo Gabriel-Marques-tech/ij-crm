@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { criarConviteAction } from "./actions";
-import { SelectPapel } from "./select-papel";
+import { CamposPapelLado } from "./campos-lado";
 
 export function ConvidarDialog({ papelAtor }: { papelAtor: Papel }) {
   const [aberto, setAberto] = useState(false);
@@ -57,10 +57,7 @@ function CorpoConvite({ papelAtor, onFechar }: { papelAtor: Papel; onFechar: () 
         <Label htmlFor="telefone">WhatsApp (DDD + número)</Label>
         <Input id="telefone" name="telefone" placeholder="11 99999-8888" inputMode="tel" />
       </div>
-      <div className="space-y-1.5">
-        <Label htmlFor="papel">Papel</Label>
-        <SelectPapel name="papel" papelAtor={papelAtor} defaultValue="VENDEDOR" />
-      </div>
+      <CamposPapelLado papelAtor={papelAtor} papel="VENDEDOR" area={null} cargos={[]} />
       {estado?.erro ? (
         <p role="alert" className="text-sm text-danger">
           {estado.erro}
