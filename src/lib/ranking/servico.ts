@@ -76,7 +76,8 @@ export async function carregarDados({ inicio, fim }: Intervalo, cliente: Consult
       WHERE t.em >= ${ini} AND t.em < ${ate} AND t.de_fase_id IS NOT NULL AND t.para_fase_id IN (SELECT id FROM fases_vendas)
     ),
     terminais AS (
-      SELECT o.id, o.titulo, o.responsavel_id, o.data_ganho, o.valor_fechado, o.criado_em, x.tipo AS tipo_terminal, entrada.origem, entrada.em AS entrou_em
+      -- Ganho/perda são de quem vendeu (vendedor_id, GAB-81), não do responsável atual em Projetos.
+      SELECT o.id, o.titulo, COALESCE(o.vendedor_id, o.responsavel_id) AS responsavel_id, o.data_ganho, o.valor_fechado, o.criado_em, x.tipo AS tipo_terminal, entrada.origem, entrada.em AS entrou_em
         FROM vivos o JOIN fase f ON f.id = o.fase_id
         -- Em Projetos = ganho (seguiu pelo Ganho de Vendas).
         CROSS JOIN LATERAL (SELECT CASE WHEN o.em_vendas THEN f.tipo_terminal ELSE 'GANHO'::"TipoTerminal" END AS tipo) x

@@ -125,6 +125,17 @@ describe("ranking a partir do histórico real (criar, mover, marcar feita, ganha
     expect((await pontosAna()).pontos).toBe(0);
   });
 
+  it("card ganho e depois reatribuído em Projetos: o ganho continua do vendedor (vendedor_id, GAB-81)", async () => {
+    const s = await semear();
+    const id = await novoCard(s, s.ana, "Padaria");
+    await ok(moverCard(id, fase(s, "contrato_assinado"), s.bruno, { dadosTerminal: { valorFechado: "1.000" } }));
+    expect((await db.projeto.findUniqueOrThrow({ where: { id } })).vendedorId).toBe(s.ana.id);
+    await db.projeto.update({ where: { id }, data: { responsavelId: s.bruno.id } }); // GP de projetos assume
+    const agora = new Date();
+    const d = await carregarDados({ inicio: new Date(agora.getTime() - 86_400_000), fim: new Date(agora.getTime() + 86_400_000) });
+    expect(d.ganhos.map((g) => [g.projetoId, g.responsavelId])).toEqual([[id, s.ana.id]]);
+  });
+
   it("ganho fora do período (data_ganho no mês passado) não conta na semana", async () => {
     const s = await semear();
     const id = await novoCard(s, s.ana, "Velha");

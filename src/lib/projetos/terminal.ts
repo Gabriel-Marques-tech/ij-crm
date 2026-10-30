@@ -11,7 +11,7 @@
  * - GANHO em `vendas` (= contrato assinado) → `data_ganho` = agora,
  *   `valor_fechado` opcional e o MESMO card segue para o marco Handoff, 1ª
  *   coluna do quadro Projetos (spec fase 2 §4.2/§4.8): pipeline/fase/fase_desde
- *   mudam, com TransicaoFase Ganho → Handoff (origem SISTEMA) e MOVIMENTACAO
+ *   mudam, `vendedor_id` = responsável no ganho, com TransicaoFase Ganho → Handoff (origem SISTEMA) e MOVIMENTACAO
  *   `motivo: "ganho_handoff"`. Não existe mais segundo card (era o
  *   `garantirCardProjetos` da v1). Assim o card fica em exatamente um quadro e o
  *   Ganho de Vendas é só a porta de saída (coluna normalmente vazia; só cards
@@ -124,7 +124,13 @@ async function seguirParaHandoff(ctx: ContextoTerminal) {
   const handoff = await tx.fase.findUnique({ where: { marco: "HANDOFF" } });
   if (!handoff || handoff.arquivadaEm || handoff.isTerminal) throw new ErroDeRegra("FASE_HANDOFF_INDISPONIVEL");
   const em = ctx.instante();
-  await tx.projeto.update({ where: { id: ctx.projetoId }, data: { pipelineId: handoff.pipelineId, faseId: handoff.id, faseDesde: em } });
+  // Quem ganhou: o responsável agora. Em Projetos o responsável pode mudar (GP);
+  // o ranking credita o ganho ao `vendedor_id`.
+  const { responsavelId } = await tx.projeto.findUniqueOrThrow({ where: { id: ctx.projetoId }, select: { responsavelId: true } });
+  await tx.projeto.update({
+    where: { id: ctx.projetoId },
+    data: { pipelineId: handoff.pipelineId, faseId: handoff.id, faseDesde: em, vendedorId: responsavelId },
+  });
   await tx.transicaoFase.create({
     data: { projetoId: ctx.projetoId, deFaseId: ctx.destino.id, paraFaseId: handoff.id, usuarioId: ctx.porUsuarioId, origem: "SISTEMA", em },
   });

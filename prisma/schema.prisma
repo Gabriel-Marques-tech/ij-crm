@@ -114,6 +114,8 @@ model Usuario {
   atualizadoEm      DateTime  @updatedAt @map("atualizado_em")
 
   projetos     Projeto[]   @relation("responsavel")
+  /// GAB-81: Projetos que esta pessoa ganhou (vendedor no momento do ganho).
+  vendas            Projeto[]   @relation("vendedor")
   transicoes        TransicaoFase[]
   timeline          Timeline[]
   mensagensBrutas   MensagemBruta[]
@@ -306,6 +308,9 @@ model Projeto {
   /// origem (Timeline/TransicaoFase/prazos foram para ela). Fica soft-deletado e
   /// fora da lixeira, só como registro, até o ticket de limpeza.
   absorvidoPorId        String?    @map("absorvido_por_id")
+  /// GAB-81: responsável no momento do GANHO (o card segue para Projetos e pode
+  /// mudar de responsável). O ranking credita ganho/perda a ele.
+  vendedorId            String?    @map("vendedor_id")
   criadoEm              DateTime   @default(now()) @map("criado_em")
   atualizadoEm          DateTime   @updatedAt @map("atualizado_em")
 
@@ -314,6 +319,7 @@ model Projeto {
   empresa               Empresa?   @relation(fields: [empresaId], references: [id])
   contato               Contato?   @relation(fields: [contatoId], references: [id])
   responsavel           Usuario    @relation("responsavel", fields: [responsavelId], references: [id])
+  vendedor              Usuario?  @relation("vendedor", fields: [vendedorId], references: [id], onDelete: SetNull)
   vendaOrigem           Projeto?  @relation("vendaParaCardProjetos", fields: [vendaOrigemId], references: [id])
   // Card de projetos da v1 gerado pelo ganho desta venda (hoje: só a casca absorvida, GAB-81).
   cardProjetos          Projeto?  @relation("vendaParaCardProjetos")
@@ -335,6 +341,7 @@ model Projeto {
   @@index([proximaAcaoEm])
   @@index([reabertaDeId])
   @@index([absorvidoPorId])
+  @@index([vendedorId])
   @@map("oportunidade")
 }
 
