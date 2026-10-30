@@ -46,7 +46,6 @@ const card: CardCliente = {
   estado: null,
   valorFechado: null,
   motivoPerda: null,
-  alertaVenda: null,
 };
 
 function montar(cards: CardCliente[]) {

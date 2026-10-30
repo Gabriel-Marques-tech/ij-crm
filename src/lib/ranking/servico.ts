@@ -45,10 +45,16 @@ type Consultor = Pick<PrismaClient, "$queryRaw">;
 const utc = (d: Date) => Prisma.sql`(${d.toISOString()}::timestamptz AT TIME ZONE 'UTC')`;
 
 /**
- * Eventos do intervalo [inicio, fim) — só cards vivos de Vendas. Transições:
- * histórico COMPLETO (até `fim`) dos cards que se moveram no intervalo, para
- * achar a primeira entrada por fase. Ganho/perda trazem a origem e o instante
- * da transição que levou o card ao ganho/perda (vindo de fora dele: migração
+ * Eventos do intervalo [inicio, fim) — só a PARTE DE VENDAS do ciclo, de cards
+ * vivos que passaram por Vendas. Ciclo único (GAB-81): o card ganho segue para
+ * Projetos (Handoff); ele continua contando como GANHO (pela `data_ganho` e
+ * pela transição que entrou no Ganho de Vendas), mas o que acontece em Projetos
+ * não pontua: transições e criação só para fases de Vendas, ações só enquanto o
+ * card estava em Vendas, "em aberto" só cards em Vendas. Cards de Projetos que
+ * nunca passaram por Vendas ficam de fora, como na v1. Transições: histórico
+ * COMPLETO (até `fim`) dos cards que se moveram no intervalo, para achar a
+ * primeira entrada por fase. Ganho/perda trazem a origem e o instante da
+ * transição que levou o card ao ganho/perda (vindo de fora dele: migração
  * entre duas fases de ganho não troca a origem). ABERTO = situação de agora.
  */
 export async function carregarDados({ inicio, fim }: Intervalo, cliente: Consultor = db): Promise<DadosRanking> {
@@ -56,21 +62,31 @@ export async function carregarDados({ inicio, fim }: Intervalo, cliente: Consult
   const ate = utc(fim);
   const linhas = await cliente.$queryRaw<Linha[]>`
     WITH vendas AS (SELECT id FROM pipeline WHERE chave = ${QUADRO_VENDAS}),
-    vivos AS (SELECT o.* FROM oportunidade o WHERE o.pipeline_id IN (SELECT id FROM vendas) AND o.deletado_em IS NULL),
+    fases_vendas AS (SELECT id, tipo_terminal FROM fase WHERE pipeline_id IN (SELECT id FROM vendas)),
+    vivos AS (
+      SELECT o.*, (o.pipeline_id IN (SELECT id FROM vendas)) AS em_vendas,
+             (SELECT min(t.em) FROM transicao_fase t WHERE t.oportunidade_id = o.id AND t.para_fase_id NOT IN (SELECT id FROM fases_vendas)) AS saiu_de_vendas
+        FROM oportunidade o
+       WHERE o.deletado_em IS NULL
+         AND (o.pipeline_id IN (SELECT id FROM vendas)
+              OR EXISTS (SELECT 1 FROM transicao_fase t WHERE t.oportunidade_id = o.id AND t.para_fase_id IN (SELECT id FROM fases_vendas)))
+    ),
     movidos AS (
       SELECT DISTINCT t.oportunidade_id FROM transicao_fase t JOIN vivos o ON o.id = t.oportunidade_id
-      WHERE t.em >= ${ini} AND t.em < ${ate} AND t.de_fase_id IS NOT NULL
+      WHERE t.em >= ${ini} AND t.em < ${ate} AND t.de_fase_id IS NOT NULL AND t.para_fase_id IN (SELECT id FROM fases_vendas)
     ),
     terminais AS (
-      SELECT o.id, o.titulo, o.responsavel_id, o.data_ganho, o.valor_fechado, o.criado_em, f.tipo_terminal, entrada.origem, entrada.em AS entrou_em
+      SELECT o.id, o.titulo, o.responsavel_id, o.data_ganho, o.valor_fechado, o.criado_em, x.tipo AS tipo_terminal, entrada.origem, entrada.em AS entrou_em
         FROM vivos o JOIN fase f ON f.id = o.fase_id
+        -- Em Projetos = ganho (seguiu pelo Ganho de Vendas).
+        CROSS JOIN LATERAL (SELECT CASE WHEN o.em_vendas THEN f.tipo_terminal ELSE 'GANHO'::"TipoTerminal" END AS tipo) x
         LEFT JOIN LATERAL (
           SELECT t.origem, t.em FROM transicao_fase t
-            JOIN fase pf ON pf.id = t.para_fase_id LEFT JOIN fase df ON df.id = t.de_fase_id
-           WHERE t.oportunidade_id = o.id AND pf.tipo_terminal = f.tipo_terminal AND df.tipo_terminal IS DISTINCT FROM f.tipo_terminal
+            JOIN fases_vendas pf ON pf.id = t.para_fase_id LEFT JOIN fase df ON df.id = t.de_fase_id
+           WHERE t.oportunidade_id = o.id AND pf.tipo_terminal = x.tipo AND df.tipo_terminal IS DISTINCT FROM x.tipo
            ORDER BY t.em DESC, t.id DESC LIMIT 1
         ) entrada ON true
-       WHERE f.tipo_terminal IS NOT NULL
+       WHERE x.tipo IS NOT NULL
     )
     SELECT 'GANHO' AS tipo, x.id AS op, x.titulo, x.responsavel_id AS usuario, x.data_ganho AS em, x.valor_fechado::float8 AS valor, x.criado_em AS criado,
            NULL::text AS tid, x.origem, NULL::text AS para_id, NULL::text AS para_nome, NULL::int AS para_ordem,
@@ -85,19 +101,21 @@ export async function carregarDados({ inicio, fim }: Intervalo, cliente: Consult
     SELECT 'TRANSICAO', t.oportunidade_id, o.titulo, t.usuario_id, t.em, NULL, NULL, t.id, t.origem, t.para_fase_id, pf.nome, pf.ordem, pf.is_terminal, df.ordem, NULL
       FROM transicao_fase t JOIN vivos o ON o.id = t.oportunidade_id
       JOIN fase pf ON pf.id = t.para_fase_id LEFT JOIN fase df ON df.id = t.de_fase_id
-     WHERE t.oportunidade_id IN (SELECT oportunidade_id FROM movidos) AND t.em < ${ate}
+     WHERE t.oportunidade_id IN (SELECT oportunidade_id FROM movidos) AND t.em < ${ate} AND pf.id IN (SELECT id FROM fases_vendas)
     UNION ALL
     SELECT 'ACAO', tl.oportunidade_id, NULL, tl.usuario_id, tl.em, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
       FROM timeline tl JOIN vivos o ON o.id = tl.oportunidade_id
      WHERE tl.tipo = 'NOTA' AND (tl.payload -> 'feito') IS NOT NULL AND tl.usuario_id IS NOT NULL AND tl.em >= ${ini} AND tl.em < ${ate}
+       AND (o.em_vendas OR tl.em < o.saiu_de_vendas)
     UNION ALL
     SELECT 'CRIACAO', t.oportunidade_id, NULL, t.usuario_id, t.em, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
       FROM transicao_fase t JOIN vivos o ON o.id = t.oportunidade_id
      WHERE t.de_fase_id IS NULL AND t.origem IN ('UI', 'WHATSAPP') AND t.usuario_id IS NOT NULL AND t.em >= ${ini} AND t.em < ${ate}
+       AND t.para_fase_id IN (SELECT id FROM fases_vendas)
     UNION ALL
     SELECT 'ABERTO', NULL, NULL, o.responsavel_id, NULL, COALESCE(SUM(o.orcamento_previsto), 0)::float8, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, COUNT(*)::int
       FROM vivos o JOIN fase f ON f.id = o.fase_id
-     WHERE NOT f.is_terminal
+     WHERE NOT f.is_terminal AND o.em_vendas
      GROUP BY o.responsavel_id
   `;
 

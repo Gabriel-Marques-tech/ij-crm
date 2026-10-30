@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { alertaDaVenda, dialogoTerminal, interpretarGanho, interpretarPerda, lerDinheiro, MOTIVOS_PERDA, motivoDeTexto, valorParaCampo } from "./terminal-regras";
+import { dialogoTerminal, interpretarGanho, interpretarPerda, lerDinheiro, MOTIVOS_PERDA, motivoDeTexto, valorParaCampo } from "./terminal-regras";
 
 describe("lerDinheiro", () => {
   it("aceita formato BR, com ou sem R$, e devolve decimal com 2 casas", () => {
@@ -120,13 +120,3 @@ describe("pré-preenchimento do diálogo (re-ganho / re-perda)", () => {
   });
 });
 
-describe("alertaDaVenda", () => {
-  const venda = (tipoTerminal: "GANHO" | "PERDIDO" | null, deletadoEm: Date | null = null) => ({ deletadoEm, fase: { tipoTerminal } });
-  it("só avisa enquanto a venda de origem não está em ganho", () => {
-    expect(alertaDaVenda(null)).toBeNull();
-    expect(alertaDaVenda(venda("GANHO"))).toBeNull();
-    expect(alertaDaVenda(venda(null))).toBe("reaberta");
-    expect(alertaDaVenda(venda("PERDIDO"))).toBe("perdida");
-    expect(alertaDaVenda(venda("GANHO", new Date()))).toBe("removida");
-  });
-});

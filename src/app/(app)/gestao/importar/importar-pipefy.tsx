@@ -239,7 +239,7 @@ function PreviaImport({
         <Numero rotulo="cards no arquivo" valor={previa.cards} />
         <Numero rotulo="novos" valor={previa.novos} tom="success" />
         <Numero rotulo="já existem (atualiza)" valor={previa.existentes} />
-        <Numero rotulo="com projeto" valor={previa.comProjeto} />
+        <Numero rotulo="vão para Projetos" valor={previa.comProjeto} />
         <Numero rotulo="linhas repetidas" valor={previa.duplicadas} tom={previa.duplicadas ? "warn" : undefined} />
         <Numero rotulo="com erro (pulados)" valor={previa.erros.length} tom={previa.erros.length ? "danger" : undefined} />
       </div>
@@ -398,7 +398,7 @@ function RelatorioFinal({ relatorio, onNovo }: { relatorio: Relatorio; onNovo: (
         <Numero rotulo="criados" valor={relatorio.criados} tom="success" />
         <Numero rotulo="atualizados" valor={relatorio.atualizados} />
         <Numero rotulo="sem mudança" valor={relatorio.semMudanca} />
-        <Numero rotulo="projetos criados" valor={relatorio.projetosCriados} />
+        <Numero rotulo="foram para Projetos" valor={relatorio.projetosCriados} />
         <Numero rotulo="linhas repetidas" valor={relatorio.duplicadas} tom={relatorio.duplicadas ? "warn" : undefined} />
         <Numero rotulo="pulados" valor={relatorio.pulados} tom={relatorio.pulados ? "danger" : undefined} />
       </div>

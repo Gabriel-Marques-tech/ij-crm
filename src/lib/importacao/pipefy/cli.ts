@@ -134,7 +134,7 @@ export async function rodarCli(argv: string[], io: IoCli, agora = new Date()): P
   const p = r.previa;
   const porId = new Map(p.fasesCrm.map((f) => [f.id, f]));
   io.log(`arquivo: ${arquivo} (separador "${p.separador}", ${p.totalLinhas} linhas)`);
-  io.log(`cards: ${p.cards} — novos ${p.novos}, já existem ${p.existentes}, repetidos ${p.duplicadas}, com projeto ${p.comProjeto}, com erro ${p.erros.length}`);
+  io.log(`cards: ${p.cards} — novos ${p.novos}, já existem ${p.existentes}, repetidos ${p.duplicadas}, vão para Projetos ${p.comProjeto}, com erro ${p.erros.length}`);
   io.log("mapeamento de fases (chave do Pipefy → fase do CRM):");
   for (const f of p.fases) {
     const d = f.faseId ? porId.get(f.faseId) : undefined;
@@ -163,7 +163,7 @@ export async function rodarCli(argv: string[], io: IoCli, agora = new Date()): P
     return 1;
   }
   const rel = imp.relatorio;
-  io.log(`import concluído: criados ${rel.criados}, atualizados ${rel.atualizados} (sem mudança ${rel.semMudanca}), pulados ${rel.pulados}, projetos criados ${rel.projetosCriados}`);
+  io.log(`import concluído: criados ${rel.criados}, atualizados ${rel.atualizados} (sem mudança ${rel.semMudanca}), pulados ${rel.pulados}, foram para Projetos ${rel.projetosCriados}`);
   salvarOcorrencias(io, arquivo, rel.erros, rel.avisos);
   if (rel.interrompido) {
     io.erro(`import INTERROMPIDO (ref: ${rel.interrompido.ref}): ${rel.interrompido.naoProcessados} cards não foram processados. O que está acima foi gravado; rodar de novo não duplica.`);

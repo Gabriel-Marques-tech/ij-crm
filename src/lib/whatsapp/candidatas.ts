@@ -9,13 +9,16 @@
  * - GAB-49: os cards que as mensagens de venda do remetente mexeram na janela
  *   de 12 h atual (`ledger`, ids já calculados por `contexto/ledger.ts`).
  *
- * WhatsApp só mexe em `vendas` na v1: `projetos` nunca entra.
+ * WhatsApp só mexe na parte de vendas do ciclo: card que já seguiu para
+ * Projetos (ganho) entra como FECHADO no Ganho, como na v1; o resto de
+ * Projetos nunca entra (GAB-81, `ciclo-vendas.ts`).
  */
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import type { ProjetoCandidato } from "@/lib/llm/prompts/extracao.v2";
 import { PIPELINE_VENDAS } from "@/lib/projetos/terminal-regras";
 import type { ViaCandidata } from "./alvo";
+import { CARD_FECHADO_NO_CICLO_DE_VENDAS, CARD_VIVO_NO_CICLO_DE_VENDAS, faseVistaPeloWhatsapp } from "./ciclo-vendas";
 
 type Cliente = Prisma.TransactionClient | typeof db;
 
@@ -34,7 +37,7 @@ export const VALIDADE_RESPOSTA_MS = 30 * 24 * 60 * 60 * 1000;
 export type MotivoRespostaInvalida = "RESPOSTA_ANTIGA" | "RESPOSTA_CARD_REMOVIDO" | "RESPOSTA_FORA_DE_VENDAS";
 export type AlvoDaResposta = { tipo: "CARD"; id: string } | { tipo: "INVALIDA"; motivo: MotivoRespostaInvalida };
 
-const CARD_VIVO_EM_VENDAS = { deletadoEm: null, pipeline: { chave: PIPELINE_VENDAS } } as const;
+const ABERTO_EM_VENDAS = { deletadoEm: null, pipeline: { chave: PIPELINE_VENDAS }, fase: { isTerminal: false } } as const;
 
 /**
  * Reply a uma confirmação do bot que cita um card. `CARD` = fixa o alvo (até
@@ -49,10 +52,11 @@ export async function alvoDaResposta(respondendoEventoId: string | null, recebid
   if (!enviada?.projetoId) return null;
   const card = await cliente.projeto.findUnique({
     where: { id: enviada.projetoId },
-    select: { id: true, deletadoEm: true, pipeline: { select: { chave: true } } },
+    select: { id: true, deletadoEm: true, dataGanho: true, pipeline: { select: { chave: true } } },
   });
   if (!card || card.deletadoEm) return { tipo: "INVALIDA", motivo: "RESPOSTA_CARD_REMOVIDO" };
-  if (card.pipeline.chave !== PIPELINE_VENDAS) return { tipo: "INVALIDA", motivo: "RESPOSTA_FORA_DE_VENDAS" };
+  // Ganho que seguiu para Projetos ainda é a venda (fechada) da confirmação.
+  if (card.pipeline.chave !== PIPELINE_VENDAS && !card.dataGanho) return { tipo: "INVALIDA", motivo: "RESPOSTA_FORA_DE_VENDAS" };
   if (recebidaEm.getTime() - enviada.em.getTime() > VALIDADE_RESPOSTA_MS) return { tipo: "INVALIDA", motivo: "RESPOSTA_ANTIGA" };
   return { tipo: "CARD", id: card.id };
 }
@@ -62,7 +66,7 @@ async function porIdentidade(cliente: Cliente, filtro: Prisma.ProjetoWhereInput)
   const [abertos, fechados] = await Promise.all(
     ([false, true] as const).map((terminal) =>
       cliente.projeto.findMany({
-        where: { ...CARD_VIVO_EM_VENDAS, ...filtro, fase: { isTerminal: terminal } },
+        where: { ...(terminal ? CARD_FECHADO_NO_CICLO_DE_VENDAS : ABERTO_EM_VENDAS), ...filtro },
         orderBy: [{ atualizadoEm: "desc" }, { id: "asc" }],
         take: terminal ? MAX_FECHADOS_POR_IDENTIDADE : MAX_ABERTOS_POR_IDENTIDADE,
         select: { id: true },
@@ -103,7 +107,7 @@ export async function projetosCandidatos(
       where: {
         usuarioId: e.remetenteUsuarioId,
         em: { gte: new Date(e.recebidaEm.getTime() - JANELA_RECENTES_MS) },
-        projeto: CARD_VIVO_EM_VENDAS,
+        projeto: CARD_VIVO_NO_CICLO_DE_VENDAS,
       },
       orderBy: [{ em: "desc" }, { id: "desc" }],
       take: 50,
@@ -117,20 +121,22 @@ export async function projetosCandidatos(
 
   if (vias.size === 0) return [];
   const ids = [...vias.keys()];
-  const [cards, ultimos] = await Promise.all([
+  const [cards, ultimos, ganho] = await Promise.all([
     cliente.projeto.findMany({
-      where: { id: { in: ids }, ...CARD_VIVO_EM_VENDAS },
-      select: { id: true, titulo: true, criadoEm: true, fase: { select: { nome: true, isTerminal: true } } },
+      where: { id: { in: ids }, ...CARD_VIVO_NO_CICLO_DE_VENDAS },
+      select: { id: true, titulo: true, criadoEm: true, pipeline: { select: { chave: true } }, fase: { select: { nome: true, isTerminal: true } } },
     }),
     cliente.timeline.groupBy({ by: ["projetoId"], where: { projetoId: { in: ids } }, _max: { em: true } }),
+    cliente.fase.findUnique({ where: { marco: "GANHO" }, select: { nome: true } }),
   ]);
   const tocada = new Map(ultimos.map((u) => [u.projetoId, u._max.em]));
   return cards
-    .map((c) => ({
+    .map((c) => ({ c, vista: faseVistaPeloWhatsapp(c, ganho?.nome ?? "Ganho") }))
+    .map(({ c, vista }) => ({
       id: c.id,
       titulo: c.titulo,
-      faseNome: c.fase.nome,
-      terminal: c.fase.isTerminal,
+      faseNome: vista.nome,
+      terminal: vista.terminal,
       tocadaEm: tocada.get(c.id) ?? c.criadoEm,
       via: [...vias.get(c.id)!],
     }))

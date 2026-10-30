@@ -429,3 +429,54 @@ describe("travarPipelines", () => {
     expect(rs).toEqual([true, true, true, true]);
   });
 });
+
+describe("marcos do ciclo único (GAB-81)", () => {
+  async function semeado() {
+    const { semear } = await import("../../../prisma/seed");
+    await semear(db, { log: () => {} });
+    invalidarCachePipelines();
+    const ps = await listarPipelines();
+    const vendas = ps.find((p) => p.chave === "vendas")!;
+    const projetos = ps.find((p) => p.chave === "projetos")!;
+    const f = (chave: string) => [...vendas.fases, ...projetos.fases].find((x) => x.chave === chave)!;
+    return { vendas, projetos, f };
+  }
+
+  it("seed: marcos nos quadros certos, Handoff primeiro em Projetos", async () => {
+    const { vendas, projetos } = await semeado();
+    expect(vendas.fases.filter((x) => x.marco).map((x) => x.marco)).toEqual(["PROPOSTA", "MONTANDO_CONTRATO", "GANHO", "PERDIDO"]);
+    expect(projetos.fases.map((x) => x.marco)).toEqual(["HANDOFF", "EXECUCAO", null, null, null, "FINALIZADO"]);
+  });
+
+  it("marco não é removido nem muda de tipo; nome/cor/alerta sim; subfase continua livre", async () => {
+    const { f } = await semeado();
+    const g = await gestor();
+    expect(await removerFase(f("proposta").id, {}, g)).toEqual({ ok: false, erro: "MARCO_FIXO" });
+    expect(await removerFase(f("handoff").id, {}, g)).toEqual({ ok: false, erro: "MARCO_FIXO" });
+    expect(await editarFase(f("contrato_assinado").id, { tipoTerminal: null })).toEqual({ ok: false, erro: "MARCO_FIXO" });
+    expect(await editarFase(f("montando_contrato").id, { tipoTerminal: "GANHO" })).toEqual({ ok: false, erro: "MARCO_FIXO" });
+    expect(await editarFase(f("contrato_assinado").id, { nome: "Ganho (contrato assinado)", cor: "#1e9b6b", limiteDiasAlerta: 3 })).toEqual({ ok: true });
+    expect((await db.fase.findUniqueOrThrow({ where: { id: f("contrato_assinado").id } })).chave).toBe("contrato_assinado");
+    expect(await removerFase(f("reuniao_intermediaria").id, {}, g)).toEqual({ ok: true, acao: "EXCLUIR" });
+  });
+
+  it("reordenar: subfase passa entre marcos; marco não sai da ordem; Handoff fica em primeiro", async () => {
+    const { vendas, projetos, f } = await semeado();
+    const ids = (p: { fases: { id: string }[] }) => p.fases.map((x) => x.id);
+    // subfase para depois de Montando contrato: ok
+    const v = ids(vendas).filter((id) => id !== f("em_negociacao").id);
+    v.splice(v.indexOf(f("montando_contrato").id) + 1, 0, f("em_negociacao").id);
+    expect(await reordenarFases(vendas.id, v)).toEqual({ ok: true });
+    // Proposta depois de Montando contrato: recusa
+    const troca = [...v];
+    const [ip, imc] = [troca.indexOf(f("proposta").id), troca.indexOf(f("montando_contrato").id)];
+    [troca[ip], troca[imc]] = [troca[imc], troca[ip]];
+    expect(await reordenarFases(vendas.id, troca)).toEqual({ ok: false, erro: "ORDEM_MARCOS" });
+    // botões: subir Proposta acima de uma subfase ok; Execução acima de Handoff não
+    expect(await moverFase(f("proposta").id, "SUBIR")).toEqual({ ok: true });
+    expect(await moverFase(f("execucao").id, "SUBIR")).toEqual({ ok: false, erro: "ORDEM_MARCOS" });
+    expect(await moverFase(f("em_execucao").id, "SUBIR")).toEqual({ ok: true }); // fica entre Handoff e Execução
+    expect(await moverFase(f("em_execucao").id, "SUBIR")).toEqual({ ok: false, erro: "ORDEM_MARCOS" }); // não passa de Handoff
+    expect(projetos.fases[0].marco).toBe("HANDOFF");
+  });
+});

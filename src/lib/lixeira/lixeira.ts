@@ -30,7 +30,8 @@ export type CardNaLixeira = {
 export async function listarCardsNaLixeira(busca?: string): Promise<CardNaLixeira[]> {
   const q = termoDeBusca(busca);
   const cards = await db.projeto.findMany({
-    where: { deletadoEm: { not: null }, ...(q ? { titulo: { contains: q, mode: "insensitive" } } : {}) },
+    // Casca absorvida pelo ciclo único (GAB-81) não é card da lixeira: não restaura.
+    where: { deletadoEm: { not: null }, absorvidoPorId: null, ...(q ? { titulo: { contains: q, mode: "insensitive" } } : {}) },
     orderBy: [{ deletadoEm: "desc" }, { id: "asc" }],
     take: LISTA_MAX,
     select: {

@@ -47,16 +47,27 @@ function Descricao({
   fases,
   nomes,
   relacionados,
+  mesmoCard,
 }: {
   e: Entrada;
   fases: ReadonlyMap<string, string>;
   nomes: ReadonlyMap<string, string>;
   relacionados: ReadonlyMap<string, CardRelacionado>;
+  mesmoCard: ReadonlySet<string>;
 }) {
   const p = obj(e.payload);
   const fase = (id: unknown) => (typeof id === "string" ? (fases.get(id) ?? "fase removida") : "—");
+  const ehEste = (id: unknown) => typeof id === "string" && mesmoCard.has(id);
   switch (e.tipo) {
     case "CRIACAO":
+      // Histórico herdado do card de projetos da v1 (unido a este no ciclo único, GAB-81).
+      if (p.via === "GANHO" && ehEste(p.origemOportunidadeId)) {
+        return (
+          <>
+            levou o card para o quadro Projetos em <b className="font-medium text-foreground">{fase(p.faseId)}</b> pelo ganho
+          </>
+        );
+      }
       if (p.via === "GANHO") {
         return (
           <>
@@ -72,6 +83,12 @@ function Descricao({
         </>
       );
     case "VINCULO_PROJETO":
+      if (p.evento === "ciclo_unico") {
+        return <>uniu a venda e o card de projetos da v1 neste card (ciclo único): histórico dos dois juntos</>;
+      }
+      if (typeof p.projetoId === "string" && ehEste(p.projetoId)) {
+        return p.criado === true ? <>ganhou: o card seguiu para o quadro Projetos</> : <>ganhou de novo (nada duplicado)</>;
+      }
       if (typeof p.projetoId === "string") {
         return p.criado === true ? (
           <>
@@ -117,6 +134,7 @@ function Descricao({
           moveu de <b className="font-medium text-foreground">{fase(p.deFaseId)}</b> para <b className="font-medium text-foreground">{fase(p.paraFaseId)}</b>
           {p.motivo === "fase_arquivada" || p.motivo === "fase_removida" ? " (fase de origem removida pela gestão)" : ""}
           {p.motivo === "restauracao" ? " ao restaurar da lixeira (a fase original foi arquivada)" : ""}
+          {p.motivo === "ganho_handoff" ? " (ganho: o card seguiu para o quadro Projetos)" : ""}
         </>
       );
     case "CAMPO_ALTERADO": {
@@ -189,11 +207,14 @@ export function Timeline({
   fases,
   nomes,
   relacionados = new Map(),
+  mesmoCard = new Set(),
 }: {
   entradas: Entrada[];
   fases: ReadonlyMap<string, string>;
   nomes: ReadonlyMap<string, string>;
   relacionados?: ReadonlyMap<string, CardRelacionado>;
+  /** Este card + os cards de projetos da v1 absorvidos por ele (GAB-81). */
+  mesmoCard?: ReadonlySet<string>;
 }) {
   if (entradas.length === 0) return <p className="text-sm text-fg-faint">Sem histórico.</p>;
   return (
@@ -207,7 +228,7 @@ export function Timeline({
               <Icone className="size-2.5" aria-hidden />
             </span>
             <p className="text-sm text-fg-soft">
-              <span className="text-foreground">{e.usuario?.nome ?? "Sistema"}</span> <Descricao e={e} fases={fases} nomes={nomes} relacionados={relacionados} />
+              <span className="text-foreground">{e.usuario?.nome ?? "Sistema"}</span> <Descricao e={e} fases={fases} nomes={nomes} relacionados={relacionados} mesmoCard={mesmoCard} />
             </p>
             {e.tipo === "MENSAGEM_WHATSAPP" ? <MensagemWhatsapp payload={p} /> : null}
             {e.tipo === "NOTA" && typeof p.texto === "string" ? (

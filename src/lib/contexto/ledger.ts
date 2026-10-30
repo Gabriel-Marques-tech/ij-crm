@@ -19,7 +19,7 @@
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import type { EntradaHistorico, SituacaoHistorico } from "@/lib/llm/prompts/extracao.v2";
-import { PIPELINE_VENDAS } from "@/lib/projetos/terminal-regras";
+import { CARD_VIVO_NO_CICLO_DE_VENDAS } from "@/lib/whatsapp/ciclo-vendas";
 import type { Janela } from "./janela";
 
 type Cliente = Prisma.TransactionClient | typeof db;
@@ -43,7 +43,8 @@ function filtroLedger(e: Recorte): Prisma.MensagemBrutaWhereInput {
   };
 }
 
-const CARD_VIVO_EM_VENDAS = { deletadoEm: null, pipeline: { chave: PIPELINE_VENDAS } } as const;
+// GAB-81: inclui o card ganho que seguiu para Projetos (ver whatsapp/ciclo-vendas.ts).
+const CARD_VIVO_EM_VENDAS = CARD_VIVO_NO_CICLO_DE_VENDAS;
 
 const SITUACAO: Partial<Record<string, SituacaoHistorico>> = {
   RECEBIDA: "em processamento",

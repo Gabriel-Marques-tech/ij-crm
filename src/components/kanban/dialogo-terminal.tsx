@@ -94,7 +94,7 @@ function FormGanho({ pedido, onConfirmar, onCancelar }: PropsForm) {
       <DialogHeader>
         <DialogTitle>Ganho: {pedido.faseNome}</DialogTitle>
         <DialogDescription>
-          “{pedido.titulo}” vira ganho e ganha um card no quadro Projetos (Em execução), se ainda não tiver. Dá para reabrir depois.
+          “{pedido.titulo}” vira ganho (contrato assinado) e o mesmo card segue para Handoff, no quadro Projetos.
         </DialogDescription>
       </DialogHeader>
       <div className="grid gap-1.5">

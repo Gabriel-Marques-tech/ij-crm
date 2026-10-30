@@ -1,6 +1,5 @@
 import type { Origem, TipoTerminal } from "@prisma/client";
 import type { Quadro } from "@/lib/projetos/projetos";
-import { alertaDaVenda, type AlertaVenda } from "@/lib/projetos/terminal-regras";
 
 /** Dados serializáveis que o servidor passa ao quadro cliente. */
 export type FaseCliente = {
@@ -37,8 +36,6 @@ export type CardCliente = {
   /** Último fechamento ("10000.00" / texto), mantido ao reabrir: pré-preenche o diálogo. */
   valorFechado: string | null;
   motivoPerda: string | null;
-  /** Projeto cuja venda de origem saiu do ganho. */
-  alertaVenda: AlertaVenda | null;
 };
 
 export function paraCliente(q: Quadro): { fases: FaseCliente[]; cards: CardCliente[] } {
@@ -70,7 +67,6 @@ export function paraCliente(q: Quadro): { fases: FaseCliente[]; cards: CardClien
       estado: c.estado,
       valorFechado: c.valorFechado?.toFixed(2) ?? null,
       motivoPerda: c.motivoPerda,
-      alertaVenda: alertaDaVenda(c.vendaOrigem),
     })),
   };
 }

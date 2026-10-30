@@ -48,6 +48,7 @@ import type { ContatoCandidato, EmpresaCandidata } from "@/lib/llm/prompts/extra
 import { VERSAO_EXTRACAO } from "@/lib/llm/prompts/extracao.v2";
 import { ErroDeRegra } from "@/lib/projetos/erros";
 import { PIPELINE_VENDAS } from "@/lib/projetos/terminal-regras";
+import { FASES_DO_WHATSAPP } from "./ciclo-vendas";
 import { aplicarExtracao, type Desfecho } from "./aplicar";
 import { alvoDaResposta, projetosCandidatos, type MotivoRespostaInvalida } from "./candidatas";
 import { textoAtualizado, textoAtualizadoSemTag, textoCriado, textoCriadoSemTag, textoFalha, textoPendente } from "./confirmacao";
@@ -116,7 +117,8 @@ export async function montarContexto(
     respondendoA = anterior?.texto ?? null;
   }
   const fases = await db.fase.findMany({
-    where: { pipeline: { chave: PIPELINE_VENDAS }, arquivadaEm: null },
+    // GAB-81: a parte de vendas do ciclo, sem o marco Proposta = a mesma lista da v1 (ver ciclo-vendas.ts).
+    where: { pipeline: { chave: PIPELINE_VENDAS }, arquivadaEm: null, ...FASES_DO_WHATSAPP },
     orderBy: [{ ordem: "asc" }, { criadoEm: "asc" }],
     select: { chave: true, nome: true, isTerminal: true },
   });

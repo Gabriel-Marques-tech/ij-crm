@@ -18,6 +18,9 @@
  *   cada um ganha uma entrada na Timeline explicando. Mensagens enviadas ficam
  *   (histórico), sem card. Trava os quadros de TODOS os cards envolvidos antes
  *   da linha, como `excluirCard`/`restaurarCard`.
+ * - GAB-81: o card de projetos da v1 absorvido pela migração do ciclo único
+ *   (`absorvidoPorId`) não é card da lixeira: não restaura nem é apagado
+ *   sozinho; apagar de vez o Projeto leva a casca junto (FK CASCADE).
  */
 import type { Papel, Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
@@ -68,8 +71,8 @@ export async function restaurarCard(id: string, por: Ator, opts: { faseId?: stri
   if (!podeRestaurar(por.papel)) return { ok: false, erro: "SEM_PERMISSAO" };
   try {
     const faseId = await db.$transaction(async (tx) => {
-      const alvo = await tx.projeto.findUnique({ where: { id }, select: { pipelineId: true } });
-      if (!alvo) throw new Falha({ erro: "CARD_NAO_ENCONTRADO" });
+      const alvo = await tx.projeto.findUnique({ where: { id }, select: { pipelineId: true, absorvidoPorId: true } });
+      if (!alvo || alvo.absorvidoPorId) throw new Falha({ erro: "CARD_NAO_ENCONTRADO" });
       await travarPipelines(tx, [alvo.pipelineId]);
       if (!(await travarLinha(tx, id))) throw new Falha({ erro: "CARD_NAO_ENCONTRADO" });
       const card = await tx.projeto.findUniqueOrThrow({ where: { id }, select: { deletadoEm: true, faseId: true, fase: true } });
@@ -121,8 +124,9 @@ export async function apagarCardDefinitivo(id: string, por: Ator, confirmacao: s
 
 const SELECAO_LIGADOS = {
   pipelineId: true,
-  vendaOrigem: { select: { id: true, pipelineId: true } },
-  cardProjetos: { select: { id: true, pipelineId: true } },
+  absorvidoPorId: true,
+  vendaOrigem: { select: { id: true, pipelineId: true, absorvidoPorId: true } },
+  cardProjetos: { select: { id: true, pipelineId: true, absorvidoPorId: true } },
   reaberturas: { select: { id: true, pipelineId: true } },
 } as const;
 
@@ -131,7 +135,7 @@ async function apagarCardNaTransacao(tx: Tx, id: string, por: Ator, confirmacao:
   // Escrevemos na Timeline dos cards ligados (venda ↔ projeto, reaberturas) e o
   // DELETE zera as FKs deles, então os quadros deles entram no lock também.
   const antes = await tx.projeto.findUnique({ where: { id }, select: SELECAO_LIGADOS });
-  if (!antes) throw new Falha({ erro: "CARD_NAO_ENCONTRADO" });
+  if (!antes || antes.absorvidoPorId) throw new Falha({ erro: "CARD_NAO_ENCONTRADO" });
   const quadros = new Set(pipelinesEnvolvidos(antes));
   await travarPipelines(tx, quadros);
   if (!(await travarLinha(tx, id))) throw new Falha({ erro: "CARD_NAO_ENCONTRADO" });
@@ -148,13 +152,14 @@ async function apagarCardNaTransacao(tx: Tx, id: string, por: Ator, confirmacao:
     em: agora,
   });
   // Os cards ligados perdem a FK (SET NULL) mas sobrevivem: fica o registro do porquê.
+  // Casca absorvida (ciclo único) não ganha nota: vai junto no CASCADE.
   const notas = [
-    ...(card.cardProjetos ? [nota(card.cardProjetos.id, "venda_apagada")] : []),
-    ...(card.vendaOrigem ? [nota(card.vendaOrigem.id, "projeto_apagado")] : []),
+    ...(card.cardProjetos && !card.cardProjetos.absorvidoPorId ? [nota(card.cardProjetos.id, "venda_apagada")] : []),
+    ...(card.vendaOrigem && !card.vendaOrigem.absorvidoPorId ? [nota(card.vendaOrigem.id, "projeto_apagado")] : []),
     ...card.reaberturas.map((r) => nota(r.id, "origem_reabertura_apagada")),
   ];
   if (notas.length > 0) await tx.timeline.createMany({ data: notas });
-  // Cascade: TransicaoFase, Timeline. SET NULL: projeto.origem, reaberturas.reabertaDe, MensagemEnviada.
+  // Cascade: TransicaoFase, Timeline, cascas absorvidas. SET NULL: projeto.origem, reaberturas.reabertaDe, MensagemEnviada.
   await tx.projeto.delete({ where: { id } });
 }
 

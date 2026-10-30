@@ -477,21 +477,36 @@ em fase terminal; todo movimento grava `TransicaoFase` (origem `UI`) + Timeline
 "dias na fase" (`aging.ts`): sem limite → neutro; `< 70%` do limite → verde; até o limite → âmbar;
 `≥ limite` → vermelho.
 
+**Ciclo único (GAB-81, spec fase 2 §4.1/§4.2).** O Projeto é um card só, do primeiro contato à
+finalização. As fases são **marcos fixos** (`fase.marco`, regras em `src/lib/fases/marcos.ts`) e
+**subfases** livres da Gestão entre eles. O ciclo aparece em dois quadros — o quadro do card é o
+`pipeline` dele, então ele está em exatamente um: **Vendas** = [subfases] Proposta, Montando
+contrato, [subfases] Ganho (= contrato assinado), Perdido; **Projetos** = Handoff (1ª coluna),
+Execução, [subfases] Finalizado. Em Gestão → Fases, marco não é removido/arquivado, não muda de
+tipo terminal e não sai da ordem canônica (Handoff sempre primeiro em Projetos); nome, cor e
+alerta mudam, e subfases vão para qualquer lugar. As travas dos marcos (proposta aceita,
+handoff fechado) vêm nos tickets de proposta/contrato/handoff.
+
 Ganho/perdido (`terminal.ts`, regras puras em `terminal-regras.ts`), dentro da transação do
 movimento — o servidor é a porta: sem o objeto `dadosTerminal` (pode ser `{}`) o movimento para
 ganho em Vendas ou para perdido é recusado. **Ganho em Vendas**: diálogo com valor fechado
 (opcional, BRL estrito: ponto só milhar, vírgula decimal — `12.500`, `1.234,56`), grava
-`data_ganho` e cria o card em Projetos (fase de chave `em_execucao`, mesmo
-título/responsável/empresa/contato, `origem_oportunidade_id`). Um projeto por venda, garantido no
-banco (`origem_oportunidade_id` único; P2002 de outro escritor no meio do ganho → o movimento é
-refeito e só registra o vínculo). **Perdido** exige motivo (preço, timing, concorrente, sem
-resposta, outro + texto) em qualquer quadro. **Reabrir mantém** `data_ganho`/`valor_fechado` e
-`motivo_perda` (último fechamento; o diálogo seguinte vem pré-preenchido, re-ganho atualiza a
-data). Se a venda sai do ganho, o projeto não é movido nem apagado: ganha uma entrada na Timeline
-e um aviso ("venda reaberta/perdida") enquanto a venda não voltar a ganho. "Finalizado" em
-Projetos move direto. Remover fase em Gestão só migra cards para fase do mesmo tipo (aberta,
-ganho ou perdido) — a migração não passa pelo gancho. Vendas/Projetos ficam na navegação (lista
-pelo `?quadro=`; o detalhe declara o quadro do card).
+`data_ganho` e o **mesmo card segue para o marco Handoff** no quadro Projetos (TransicaoFase
+Ganho → Handoff, origem `SISTEMA`; Timeline `MOVIMENTACAO` com `motivo: "ganho_handoff"`). Não
+existe mais segundo card: a coluna Ganho de Vendas é a porta de saída (fica vazia; só cards
+migrados cujo projeto tinha sido apagado na v1 param nela). **Perdido** exige motivo (preço,
+timing, concorrente, sem resposta, outro + texto) em qualquer quadro. **Reabrir mantém**
+`data_ganho`/`valor_fechado` e `motivo_perda` (último fechamento; o diálogo seguinte vem
+pré-preenchido, re-ganho atualiza a data). "Finalizado" em Projetos move direto. Remover fase em
+Gestão só migra cards para fase do mesmo tipo (aberta, ganho ou perdido) — a migração não passa
+pelo gancho. Vendas/Projetos ficam na navegação (lista pelo `?quadro=`; o detalhe declara o
+quadro do card).
+
+Migração da v1 (`prisma/migrations/20261030120000_ciclo_unico`): cada par venda → card de
+projetos (`origem_oportunidade_id`) virou um Projeto (a venda sobrevive; Timeline,
+TransicaoFase, prazos e mensagens do card de projetos passaram para ela; a casca fica
+soft-deletada com `absorvido_por_id`, fora da lixeira). Deploy e rollback: runbook, "Ciclo
+único (GAB-81)"; contagens antes/depois: `scripts/verificar-ciclo-unico.sql`.
 
 ## Empresas e Contatos
 

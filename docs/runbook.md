@@ -259,6 +259,52 @@ Depois de um rollback automático confira `dc ps`: ele só troca o `app`. Se o
 que falhou foi outro serviço (ex.: a Evolution não subiu), ele segue com o
 problema. Veja `dc logs <serviço>`.
 
+### Ciclo único (GAB-81): deploy com migração de dados
+
+A migration `20261030120000_ciclo_unico` **mexe em dados** (une cada par venda →
+card de projetos num Projeto só, cria/adota os marcos e reordena as fases). Ela
+roda numa transação só, é idempotente e não apaga nada (o card de projetos
+absorvido fica soft-deletado com `absorvido_por_id`), mas **não tem volta
+automática**: o rollback é restaurar o dump. Neste deploy, na ordem:
+
+1. **`pg_dump` de produção antes de tudo** (além do backup automático do
+   `deploy.sh`, que no Coolify não existe):
+   ```bash
+   # standalone (compose.prod.yml)
+   scripts/backup.sh                      # ou: dc exec -T db pg_dump -U ijcrm -d ijcrm -Fc > /var/backups/ij-crm/ijcrm-pre-gab81.dump
+   # Coolify: backup do recurso PostgreSQL no painel, ou no host:
+   docker exec <container-postgres-do-crm> pg_dump -U <usuario> -d <banco> -Fc > ijcrm-pre-gab81.dump
+   ls -l ijcrm-pre-gab81.dump && pg_restore --list ijcrm-pre-gab81.dump | grep -c 'TABLE DATA'   # confere que o dump abre
+   ```
+2. **Contagens antes** (só leitura, pode rodar em produção):
+   `psql "$DATABASE_URL" -f scripts/verificar-ciclo-unico.sql > antes.txt`
+   (no container: `... psql -U <usuario> -d <banco> < scripts/verificar-ciclo-unico.sql`).
+   Se puder, rode antes a migration numa **cópia** do dump (`createdb copia &&
+   pg_restore -d copia ijcrm-pre-gab81.dump && DATABASE_URL=…/copia prisma migrate deploy`)
+   e compare as contagens da cópia.
+3. Deploy normal (`prisma migrate deploy` roda a migration; o log do `migrate`
+   termina com `ciclo único: marcos criados=…, adotados=…, pares unidos=…`).
+4. **Contagens depois**, mesmo script, `> depois.txt`, e confira as relações
+   listadas no topo de `scripts/verificar-ciclo-unico.sql` (ex.:
+   `projetos_entidades` depois = `cards_total` antes − `pares_venda_projeto` antes;
+   `pares_venda_projeto` depois = 0; `marcos` = 7; transições/prazos/mensagens iguais).
+   Na tela: Gestão → Fases mostra os marcos; um card ganho antigo abre com a
+   Timeline da venda e do projeto juntas.
+5. **Rollback** (algo errado nos dados): primeiro o app volta para a tag
+   anterior, depois o banco volta para o dump do passo 1. Standalone:
+   `scripts/deploy.sh rollback sha-<anterior>` e então `scripts/restore.sh <dump>`
+   (o `migrate deploy` que o restore roda usa a tag do app, que não conhece esta
+   migration: ela não é reaplicada). Coolify: redeploy do commit anterior e
+   restauração do backup do recurso PostgreSQL (ou `pg_restore --clean --if-exists
+   --no-owner --single-transaction -d <banco> ijcrm-pre-gab81.dump`). Escritas
+   feitas entre o deploy e o restore se perdem. Só trocar o app (sem restaurar)
+   também funciona — a versão anterior lê o banco migrado —, mas os cards
+   continuam unidos.
+
+Migração falhou no meio: a transação desfaz tudo (nada fica pela metade); siga
+"Migration falhou" (§2). As conferências no fim da migration abortam com
+`ciclo único: marcos inconsistentes…` se algum marco não puder ser montado.
+
 ## Deploy automático (GitHub Actions + AWS SSM)
 
 Cada push na `main` (merge de PR) roda o workflow **imagens**:

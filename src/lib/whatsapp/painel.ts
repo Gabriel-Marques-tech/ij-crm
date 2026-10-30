@@ -14,6 +14,7 @@ import { travarPipelines } from "@/lib/fases/fases";
 import { ErroDeRegra, type ErroProjeto } from "@/lib/projetos/erros";
 import { criarCardTravado } from "@/lib/projetos/projetos";
 import { PIPELINE_VENDAS } from "@/lib/projetos/terminal-regras";
+import { CARD_VIVO_NO_CICLO_DE_VENDAS } from "./ciclo-vendas";
 import { mascararJid, mascararTelefone } from "./mascarar";
 
 export const POR_PAGINA_FILA = 20;
@@ -163,8 +164,8 @@ export async function buscarCardsParaVincular(q: string): Promise<{ id: string; 
   const termo = q.trim().slice(0, 100);
   if (!termo) return [];
   const ops = await db.projeto.findMany({
-    // Só Vendas, como o "criar card" do mesmo diálogo.
-    where: { deletadoEm: null, pipeline: { chave: PIPELINE_VENDAS }, titulo: { contains: termo, mode: "insensitive" } },
+    // Parte de vendas do ciclo (inclui o ganho que seguiu para Projetos, GAB-81), como o WhatsApp vê.
+    where: { ...CARD_VIVO_NO_CICLO_DE_VENDAS, titulo: { contains: termo, mode: "insensitive" } },
     orderBy: { atualizadoEm: "desc" },
     take: 10,
     select: { id: true, titulo: true, fase: { select: { nome: true } }, pipeline: { select: { nome: true } } },
@@ -219,7 +220,7 @@ export async function resolverManualmente(
           por,
         );
       } else {
-        const op = await tx.projeto.findFirst({ where: { id: alvo.projetoId, deletadoEm: null, pipeline: { chave: PIPELINE_VENDAS } }, select: { id: true } });
+        const op = await tx.projeto.findFirst({ where: { id: alvo.projetoId, ...CARD_VIVO_NO_CICLO_DE_VENDAS }, select: { id: true } });
         if (!op) throw new ErroDeRegra("CARD_NAO_ENCONTRADO");
         id = op.id;
       }

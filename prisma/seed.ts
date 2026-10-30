@@ -1,5 +1,5 @@
 import { pathToFileURL } from "node:url";
-import { PrismaClient, TipoTerminal } from "@prisma/client";
+import { Marco, PrismaClient, TipoTerminal } from "@prisma/client";
 
 type FaseSeed = {
   chave: string;
@@ -7,9 +7,14 @@ type FaseSeed = {
   tipoTerminal?: TipoTerminal;
   cor?: string;
   limiteDiasAlerta?: number;
+  /** GAB-81: marco fixo do ciclo único (ver src/lib/fases/marcos.ts). */
+  marco?: Marco;
 };
 
-// Fases do Pipefy, na ordem (design doc §4.2).
+// Fases do Pipefy, na ordem (design doc §4.2), com os marcos do ciclo único (GAB-81,
+// spec fase 2 §4.2): as fases de vendas da v1 são subfases antes de Proposta; as de
+// projetos, subfases de Execução. Bancos que já existiam ganham os marcos pela
+// migration 20261030120000_ciclo_unico (este seed não mexe em fases existentes).
 export const PIPELINES: { chave: string; nome: string; ordem: number; fases: FaseSeed[] }[] = [
   {
     chave: "vendas",
@@ -22,9 +27,10 @@ export const PIPELINES: { chave: string; nome: string; ordem: number; fases: Fas
       { chave: "montando_proposta", nome: "Montando Proposta", cor: "#ff8655", limiteDiasAlerta: 7 },
       { chave: "reuniao_proposta", nome: "Reunião de Proposta", cor: "#ffc857", limiteDiasAlerta: 10 },
       { chave: "em_negociacao", nome: "Em negociação", cor: "#ff4d3a", limiteDiasAlerta: 14 },
-      { chave: "montando_contrato", nome: "Montando Contrato", cor: "#b447eb", limiteDiasAlerta: 7 },
-      { chave: "contrato_assinado", nome: "Contrato assinado", tipoTerminal: "GANHO", cor: "#1e9b6b" },
-      { chave: "perdido", nome: "Perdido", tipoTerminal: "PERDIDO", cor: "#6b7280" },
+      { chave: "proposta", nome: "Proposta", cor: "#ffc857", limiteDiasAlerta: 10, marco: "PROPOSTA" },
+      { chave: "montando_contrato", nome: "Montando Contrato", cor: "#b447eb", limiteDiasAlerta: 7, marco: "MONTANDO_CONTRATO" },
+      { chave: "contrato_assinado", nome: "Contrato assinado", tipoTerminal: "GANHO", cor: "#1e9b6b", marco: "GANHO" },
+      { chave: "perdido", nome: "Perdido", tipoTerminal: "PERDIDO", cor: "#6b7280", marco: "PERDIDO" },
     ],
   },
   {
@@ -32,10 +38,12 @@ export const PIPELINES: { chave: string; nome: string; ordem: number; fases: Fas
     nome: "Projetos",
     ordem: 1,
     fases: [
+      { chave: "handoff", nome: "Handoff", cor: "#8a5cf6", limiteDiasAlerta: 7, marco: "HANDOFF" },
+      { chave: "execucao", nome: "Execução", cor: "#4cc9f0", marco: "EXECUCAO" },
       { chave: "em_execucao", nome: "Em execução", cor: "#4cc9f0" },
       { chave: "conclusao", nome: "Conclusão", cor: "#ffc857" },
       { chave: "coleta_dados", nome: "Coleta de dados", cor: "#ff8655" },
-      { chave: "finalizado", nome: "Finalizado", tipoTerminal: "GANHO", cor: "#1e9b6b" },
+      { chave: "finalizado", nome: "Finalizado", tipoTerminal: "GANHO", cor: "#1e9b6b", marco: "FINALIZADO" },
     ],
   },
 ];
@@ -69,6 +77,7 @@ export async function semear(prisma: PrismaClient, opts: { log?: (msg: string) =
             tipoTerminal: f.tipoTerminal ?? null,
             cor: f.cor ?? null,
             limiteDiasAlerta: f.limiteDiasAlerta ?? null,
+            marco: f.marco ?? null,
           })),
         },
       },
