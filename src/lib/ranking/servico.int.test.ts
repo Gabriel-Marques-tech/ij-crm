@@ -136,6 +136,16 @@ describe("ranking a partir do histórico real (criar, mover, marcar feita, ganha
     expect(d.ganhos.map((g) => [g.projetoId, g.responsavelId])).toEqual([[id, s.ana.id]]);
   });
 
+  it("perdido conta para o responsável atual, mesmo com vendedor_id de um ganho antigo (GAB-81)", async () => {
+    const s = await semear();
+    const id = await novoCard(s, s.ana, "Padaria");
+    await db.projeto.update({ where: { id }, data: { dataGanho: new Date(Date.now() - 60 * 86_400_000), vendedorId: s.ana.id, responsavelId: s.bruno.id } });
+    await ok(moverCard(id, fase(s, "perdido"), s.bruno, { dadosTerminal: { motivo: "preco" } }));
+    const agora = new Date();
+    const d = await carregarDados({ inicio: new Date(agora.getTime() - 86_400_000), fim: new Date(agora.getTime() + 86_400_000) });
+    expect(d.perdas.map((p) => [p.projetoId, p.responsavelId])).toEqual([[id, s.bruno.id]]);
+  });
+
   it("ganho fora do período (data_ganho no mês passado) não conta na semana", async () => {
     const s = await semear();
     const id = await novoCard(s, s.ana, "Velha");

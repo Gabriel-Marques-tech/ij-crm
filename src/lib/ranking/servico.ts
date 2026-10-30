@@ -76,8 +76,9 @@ export async function carregarDados({ inicio, fim }: Intervalo, cliente: Consult
       WHERE t.em >= ${ini} AND t.em < ${ate} AND t.de_fase_id IS NOT NULL AND t.para_fase_id IN (SELECT id FROM fases_vendas)
     ),
     terminais AS (
-      -- Ganho/perda são de quem vendeu (vendedor_id, GAB-81), não do responsável atual em Projetos.
-      SELECT o.id, o.titulo, COALESCE(o.vendedor_id, o.responsavel_id) AS responsavel_id, o.data_ganho, o.valor_fechado, o.criado_em, x.tipo AS tipo_terminal, entrada.origem, entrada.em AS entrou_em
+      -- GANHO é de quem vendeu (vendedor_id, GAB-81): o card segue para Projetos e muda de
+      -- responsável. PERDIDO fica com o responsável atual (card perdido está sempre em Vendas).
+      SELECT o.id, o.titulo, o.responsavel_id, COALESCE(o.vendedor_id, o.responsavel_id) AS vendedor, o.data_ganho, o.valor_fechado, o.criado_em, x.tipo AS tipo_terminal, entrada.origem, entrada.em AS entrou_em
         FROM vivos o JOIN fase f ON f.id = o.fase_id
         -- Em Projetos = ganho (seguiu pelo Ganho de Vendas).
         CROSS JOIN LATERAL (SELECT CASE WHEN o.em_vendas THEN f.tipo_terminal ELSE 'GANHO'::"TipoTerminal" END AS tipo) x
@@ -89,7 +90,7 @@ export async function carregarDados({ inicio, fim }: Intervalo, cliente: Consult
         ) entrada ON true
        WHERE x.tipo IS NOT NULL
     )
-    SELECT 'GANHO' AS tipo, x.id AS op, x.titulo, x.responsavel_id AS usuario, x.data_ganho AS em, x.valor_fechado::float8 AS valor, x.criado_em AS criado,
+    SELECT 'GANHO' AS tipo, x.id AS op, x.titulo, x.vendedor AS usuario, x.data_ganho AS em, x.valor_fechado::float8 AS valor, x.criado_em AS criado,
            NULL::text AS tid, x.origem, NULL::text AS para_id, NULL::text AS para_nome, NULL::int AS para_ordem,
            NULL::boolean AS para_terminal, NULL::int AS de_ordem, NULL::int AS qtd
       FROM terminais x
