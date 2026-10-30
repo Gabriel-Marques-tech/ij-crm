@@ -18,7 +18,7 @@ vi.mock("@/lib/auth/atual", async () => {
 });
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
-import { adicionarNota, criarCard, editarCard, listarQuadro, listarResponsaveis, moverCard, obterCard } from "@/lib/oportunidades/oportunidades";
+import { adicionarNota, criarCard, editarCard, listarQuadro, listarResponsaveis, moverCard, obterCard } from "@/lib/projetos/projetos";
 import { adicionarNotaAction, criarCardAction, editarCampoAction, moverCardAction } from "./actions";
 
 const db = dbTeste();
@@ -42,12 +42,12 @@ beforeEach(async () => {
 describe("descrição do card (actions)", () => {
   it("editar descrição grava o texto (com quebras de linha) e uma Timeline CAMPO_ALTERADO", async () => {
     const { p, fase, u } = await semear();
-    const c = await db.oportunidade.create({ data: { titulo: "Padaria", pipelineId: p.id, faseId: fase.id, responsavelId: u.id, criadoVia: "UI" } });
+    const c = await db.projeto.create({ data: { titulo: "Padaria", pipelineId: p.id, faseId: fase.id, responsavelId: u.id, criadoVia: "UI" } });
 
     expect(await editarCampoAction(c.id, "descricao", "  Site novo\n\nCom loja  ")).toEqual({ ok: true });
-    expect((await db.oportunidade.findUniqueOrThrow({ where: { id: c.id } })).descricao).toBe("Site novo\n\nCom loja");
+    expect((await db.projeto.findUniqueOrThrow({ where: { id: c.id } })).descricao).toBe("Site novo\n\nCom loja");
 
-    const tl = await db.timeline.findMany({ where: { oportunidadeId: c.id, tipo: "CAMPO_ALTERADO" } });
+    const tl = await db.timeline.findMany({ where: { projetoId: c.id, tipo: "CAMPO_ALTERADO" } });
     expect(tl).toHaveLength(1);
     expect(tl[0].payload).toEqual({ campo: "descricao", antes: null, depois: "Site novo\n\nCom loja" });
     expect(tl[0].usuarioId).toBe(u.id);
@@ -55,7 +55,7 @@ describe("descrição do card (actions)", () => {
     // Limpar também vira Timeline; mesmo valor não gera nada.
     expect(await editarCampoAction(c.id, "descricao", "")).toEqual({ ok: true });
     expect(await editarCampoAction(c.id, "descricao", "")).toEqual({ ok: true });
-    const todas = await db.timeline.findMany({ where: { oportunidadeId: c.id, tipo: "CAMPO_ALTERADO" }, orderBy: { em: "asc" } });
+    const todas = await db.timeline.findMany({ where: { projetoId: c.id, tipo: "CAMPO_ALTERADO" }, orderBy: { em: "asc" } });
     expect(todas.map((t) => t.payload)).toEqual([
       { campo: "descricao", antes: null, depois: "Site novo\n\nCom loja" },
       { campo: "descricao", antes: "Site novo\n\nCom loja", depois: null },
@@ -64,24 +64,24 @@ describe("descrição do card (actions)", () => {
 
   it("descrição longa: a Timeline guarda só uma prévia (300, sem partir emoji) marcada como truncada", async () => {
     const { p, fase, u } = await semear();
-    const c = await db.oportunidade.create({ data: { titulo: "Padaria", pipelineId: p.id, faseId: fase.id, responsavelId: u.id, criadoVia: "UI" } });
+    const c = await db.projeto.create({ data: { titulo: "Padaria", pipelineId: p.id, faseId: fase.id, responsavelId: u.id, criadoVia: "UI" } });
     const longa = `${"a".repeat(299)}😀${"b".repeat(4000)}`;
     expect(await editarCampoAction(c.id, "descricao", longa)).toEqual({ ok: true });
-    expect((await db.oportunidade.findUniqueOrThrow({ where: { id: c.id } })).descricao).toBe(longa);
-    const [tl] = await db.timeline.findMany({ where: { oportunidadeId: c.id, tipo: "CAMPO_ALTERADO" } });
+    expect((await db.projeto.findUniqueOrThrow({ where: { id: c.id } })).descricao).toBe(longa);
+    const [tl] = await db.timeline.findMany({ where: { projetoId: c.id, tipo: "CAMPO_ALTERADO" } });
     expect(tl.payload).toEqual({ campo: "descricao", antes: null, depois: "a".repeat(299), truncado: true });
 
     await editarCampoAction(c.id, "descricao", "curta");
-    const ultima = await db.timeline.findFirstOrThrow({ where: { oportunidadeId: c.id, tipo: "CAMPO_ALTERADO" }, orderBy: { em: "desc" } });
+    const ultima = await db.timeline.findFirstOrThrow({ where: { projetoId: c.id, tipo: "CAMPO_ALTERADO" }, orderBy: { em: "desc" } });
     expect(ultima.payload).toEqual({ campo: "descricao", antes: "a".repeat(299), depois: "curta", truncado: true });
   });
 
   it("quadro recebe só a prévia (300 caracteres) e a marca de truncada; o detalhe tem o texto inteiro", async () => {
     const { p, fase, u } = await semear();
     const longa = "z".repeat(5000);
-    const c = await db.oportunidade.create({ data: { titulo: "Longa", descricao: longa, pipelineId: p.id, faseId: fase.id, responsavelId: u.id, criadoVia: "UI" } });
-    await db.oportunidade.create({ data: { titulo: "Curta", descricao: "oi", pipelineId: p.id, faseId: fase.id, responsavelId: u.id, criadoVia: "UI" } });
-    await db.oportunidade.create({ data: { titulo: "Sem", pipelineId: p.id, faseId: fase.id, responsavelId: u.id, criadoVia: "UI" } });
+    const c = await db.projeto.create({ data: { titulo: "Longa", descricao: longa, pipelineId: p.id, faseId: fase.id, responsavelId: u.id, criadoVia: "UI" } });
+    await db.projeto.create({ data: { titulo: "Curta", descricao: "oi", pipelineId: p.id, faseId: fase.id, responsavelId: u.id, criadoVia: "UI" } });
+    await db.projeto.create({ data: { titulo: "Sem", pipelineId: p.id, faseId: fase.id, responsavelId: u.id, criadoVia: "UI" } });
     const q = await listarQuadro("vendas");
     const por = Object.fromEntries(q!.cards.map((k) => [k.titulo, [k.descricaoPrevia, k.descricaoTruncada]]));
     expect(por).toEqual({ Longa: ["z".repeat(300), true], Curta: ["oi", false], Sem: [null, false] });
@@ -91,9 +91,9 @@ describe("descrição do card (actions)", () => {
 
   it("descrição acima de 5000 caracteres é recusada com mensagem em português", async () => {
     const { p, fase, u } = await semear();
-    const c = await db.oportunidade.create({ data: { titulo: "Padaria", pipelineId: p.id, faseId: fase.id, responsavelId: u.id, criadoVia: "UI" } });
+    const c = await db.projeto.create({ data: { titulo: "Padaria", pipelineId: p.id, faseId: fase.id, responsavelId: u.id, criadoVia: "UI" } });
     expect(await editarCampoAction(c.id, "descricao", "x".repeat(5001))).toEqual({ erro: "Descrição: no máximo 5000 caracteres." });
-    expect((await db.oportunidade.findUniqueOrThrow({ where: { id: c.id } })).descricao).toBeNull();
+    expect((await db.projeto.findUniqueOrThrow({ where: { id: c.id } })).descricao).toBeNull();
   });
 
   it("novo card pelo + aceita descrição opcional", async () => {
@@ -102,11 +102,11 @@ describe("descrição do card (actions)", () => {
     expect(com).toMatchObject({ ok: true });
     const sem = await criarCardAction(p.id, fase.id, "Sem descrição");
     expect(sem).toMatchObject({ ok: true });
-    const porTitulo = Object.fromEntries((await db.oportunidade.findMany()).map((o) => [o.titulo, o.descricao]));
+    const porTitulo = Object.fromEntries((await db.projeto.findMany()).map((o) => [o.titulo, o.descricao]));
     expect(porTitulo).toEqual({ "Com descrição": "linha 1\nlinha 2", "Sem descrição": null });
 
     expect(await criarCardAction(p.id, fase.id, "Longa", "x".repeat(5001))).toEqual({ erro: "Descrição: no máximo 5000 caracteres." });
-    expect(await db.oportunidade.count()).toBe(2);
+    expect(await db.projeto.count()).toBe(2);
   });
 });
 
@@ -114,7 +114,7 @@ describe("papel VISUALIZADOR (somente leitura)", () => {
   async function comVisualizador() {
     const base = await semear();
     const vera = await db.usuario.create({ data: { nome: "Vera Visualizadora", email: "vera@ij.test", papel: "VISUALIZADOR" } });
-    const c = await db.oportunidade.create({ data: { titulo: "Padaria", pipelineId: base.p.id, faseId: base.fase.id, responsavelId: base.u.id, criadoVia: "UI" } });
+    const c = await db.projeto.create({ data: { titulo: "Padaria", pipelineId: base.p.id, faseId: base.fase.id, responsavelId: base.u.id, criadoVia: "UI" } });
     return { ...base, vera, c };
   }
 
@@ -128,8 +128,8 @@ describe("papel VISUALIZADOR (somente leitura)", () => {
     await expect(moverCardAction(c.id, outra.id)).rejects.toMatchObject(proibido);
     await expect(adicionarNotaAction(c.id, "oi")).rejects.toMatchObject(proibido);
 
-    expect(await db.oportunidade.count()).toBe(1);
-    const card = await db.oportunidade.findUniqueOrThrow({ where: { id: c.id } });
+    expect(await db.projeto.count()).toBe(1);
+    const card = await db.projeto.findUniqueOrThrow({ where: { id: c.id } });
     expect([card.titulo, card.faseId]).toEqual(["Padaria", fase.id]);
     expect(await db.timeline.count()).toBe(0);
   });
@@ -148,6 +148,6 @@ describe("papel VISUALIZADOR (somente leitura)", () => {
     const { u, vera, c } = await comVisualizador();
     expect((await listarResponsaveis()).map((r) => r.id)).toEqual([u.id]);
     expect(await editarCampoAction(c.id, "responsavelId", vera.id)).toEqual({ erro: "Responsável inválido ou inativo." });
-    expect((await db.oportunidade.findUniqueOrThrow({ where: { id: c.id } })).responsavelId).toBe(u.id);
+    expect((await db.projeto.findUniqueOrThrow({ where: { id: c.id } })).responsavelId).toBe(u.id);
   });
 });

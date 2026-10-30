@@ -14,7 +14,7 @@
  */
 import type { Origem, TipoContatoPonto } from "@prisma/client";
 import { normalizarCnpj, normalizarEmail, normalizarTelefoneBr } from "@/lib/normalizacao";
-import { DESCRICAO_MAX, UFS, validarTitulo } from "@/lib/oportunidades/campos";
+import { DESCRICAO_MAX, UFS, validarTitulo } from "@/lib/projetos/campos";
 import { cortarTexto } from "@/lib/texto";
 import { lerCsv } from "./csv";
 import { ALIASES_PADRAO, mapearCabecalho, type Aliases, type Campo, type ColunaHistorico } from "./colunas";

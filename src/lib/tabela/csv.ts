@@ -9,7 +9,7 @@
  * Números e datas são formatados aqui mesmo, então não passam pela guarda
  * (um "-" legítimo de número não vira texto).
  */
-import { FUSO_NEGOCIO } from "@/lib/oportunidades/aging";
+import { FUSO_NEGOCIO } from "@/lib/projetos/aging";
 
 export const BOM = "﻿";
 export const SEPARADOR = ";";

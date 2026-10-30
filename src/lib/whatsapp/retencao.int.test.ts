@@ -23,7 +23,7 @@ async function mensagem(recebidaEm: Date, comLlm = true) {
 
 async function entrada(em: Date, mensagemBrutaId: string | null) {
   return dbT.timeline.create({
-    data: { oportunidadeId: opId, tipo: "MENSAGEM_WHATSAPP", em, usuarioId, mensagemBrutaId, payload: { texto: "#crm Gustavo", versao: "extracao.v2", saida: LLM.saida, motivosRevisar: [] } },
+    data: { projetoId: opId, tipo: "MENSAGEM_WHATSAPP", em, usuarioId, mensagemBrutaId, payload: { texto: "#crm Gustavo", versao: "extracao.v2", saida: LLM.saida, motivosRevisar: [] } },
   });
 }
 
@@ -33,7 +33,7 @@ beforeEach(async () => {
   const u = await dbT.usuario.create({ data: { nome: "João", email: "joao@ij.test" } });
   usuarioId = u.id;
   const fase = await dbT.fase.findFirstOrThrow({ where: { pipeline: { chave: "vendas" }, isTerminal: false } });
-  opId = (await dbT.oportunidade.create({ data: { titulo: "Card", pipelineId: fase.pipelineId, faseId: fase.id, responsavelId: u.id, criadoVia: "UI" } })).id;
+  opId = (await dbT.projeto.create({ data: { titulo: "Card", pipelineId: fase.pipelineId, faseId: fase.id, responsavelId: u.id, criadoVia: "UI" } })).id;
 });
 
 describe("apagarJsonLlmVencido", () => {

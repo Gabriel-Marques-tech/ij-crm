@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { dbTeste, limparBanco } from "@/test/db";
 import { invalidarCachePipelines } from "@/lib/fases/cache";
-import { inicioDoDia } from "@/lib/oportunidades/campos";
-import { definirProximaAcao, marcarAcaoFeita } from "@/lib/oportunidades/feita";
+import { inicioDoDia } from "@/lib/projetos/campos";
+import { definirProximaAcao, marcarAcaoFeita } from "@/lib/projetos/feita";
 import { carregarSemana, resolverVendedor } from "./semana";
 
 const db = dbTeste();
@@ -41,13 +41,13 @@ async function semear() {
 type S = Awaited<ReturnType<typeof semear>>;
 const fase = (p: { fases: { chave: string; id: string }[] }, chave: string) => p.fases.find((f) => f.chave === chave)!.id;
 
-async function card(s: S, titulo: string, extra: { responsavelId?: string; faseChave?: string; proximaAcao?: string | null; dia?: string | null; deletado?: boolean; projeto?: boolean; empresa?: boolean } = {}) {
-  const pipeline = extra.projeto ? s.projetos : s.vendas;
-  return db.oportunidade.create({
+async function card(s: S, titulo: string, extra: { responsavelId?: string; faseChave?: string; proximaAcao?: string | null; dia?: string | null; deletado?: boolean; noQuadroProjetos?: boolean; empresa?: boolean } = {}) {
+  const pipeline = extra.noQuadroProjetos ? s.projetos : s.vendas;
+  return db.projeto.create({
     data: {
       titulo,
       pipelineId: pipeline.id,
-      faseId: fase(pipeline, extra.faseChave ?? (extra.projeto ? "em_execucao" : "primeiro_contato")),
+      faseId: fase(pipeline, extra.faseChave ?? (extra.noQuadroProjetos ? "em_execucao" : "primeiro_contato")),
       responsavelId: extra.responsavelId ?? s.ana.id,
       criadoVia: "UI",
       proximaAcao: extra.proximaAcao === undefined ? `ação ${titulo}` : extra.proximaAcao,
@@ -68,7 +68,7 @@ describe("carregarSemana", () => {
     const s = await semear();
     await card(s, "vencida", { dia: "2026-10-20", empresa: true });
     await card(s, "hoje", { dia: "2026-10-24" });
-    await card(s, "semana", { dia: "2026-10-30", projeto: true });
+    await card(s, "semana", { dia: "2026-10-30", noQuadroProjetos: true });
     await card(s, "longe", { dia: "2026-12-01" });
     await card(s, "sem", { proximaAcao: null, dia: null });
     await card(s, "de outro", { dia: "2026-10-19", responsavelId: s.bruno.id });
@@ -141,11 +141,11 @@ describe("marcarAcaoFeita", () => {
     );
     expect(r).toEqual({ ok: true });
 
-    const op = await db.oportunidade.findUniqueOrThrow({ where: { id: c.id } });
+    const op = await db.projeto.findUniqueOrThrow({ where: { id: c.id } });
     expect(op.proximaAcao).toBe("Enviar proposta");
     expect(op.proximaAcaoEm).toEqual(dia("2026-10-28"));
 
-    const tl = await db.timeline.findMany({ where: { oportunidadeId: c.id }, orderBy: [{ em: "asc" }, { id: "asc" }] });
+    const tl = await db.timeline.findMany({ where: { projetoId: c.id }, orderBy: [{ em: "asc" }, { id: "asc" }] });
     expect(tl.map((t) => t.tipo)).toEqual(["NOTA", "CAMPO_ALTERADO", "CAMPO_ALTERADO"]);
     expect(tl[0]).toMatchObject({
       usuarioId: s.gestora.id,
@@ -161,10 +161,10 @@ describe("marcarAcaoFeita", () => {
     const c = await card(s, "x", { proximaAcao: "Visitar", dia: "2026-10-24" });
     expect(await marcarAcaoFeita(c.id, { proximaAcao: "Visitar", dia: "2026-10-24" }, { tipo: "nenhuma" }, s.ana)).toEqual({ ok: true });
 
-    const op = await db.oportunidade.findUniqueOrThrow({ where: { id: c.id } });
+    const op = await db.projeto.findUniqueOrThrow({ where: { id: c.id } });
     expect(op.proximaAcao).toBeNull();
     expect(op.proximaAcaoEm).toBeNull();
-    const tl = await db.timeline.findMany({ where: { oportunidadeId: c.id }, orderBy: [{ em: "asc" }, { id: "asc" }] });
+    const tl = await db.timeline.findMany({ where: { projetoId: c.id }, orderBy: [{ em: "asc" }, { id: "asc" }] });
     expect(tl[0].payload).toMatchObject({ texto: "Feito: Visitar\nSem próxima ação definida.", proxima: null });
     expect(tl.slice(1).map((t) => t.payload)).toEqual([
       { campo: "proximaAcao", antes: "Visitar", depois: null },
@@ -176,7 +176,7 @@ describe("marcarAcaoFeita", () => {
     const s = await semear();
     const c = await card(s, "x", { proximaAcao: null, dia: "2026-10-24" });
     expect(await marcarAcaoFeita(c.id, { proximaAcao: null, dia: "2026-10-24" }, { tipo: "nenhuma" }, s.ana)).toEqual({ ok: true });
-    const nota = await db.timeline.findFirstOrThrow({ where: { oportunidadeId: c.id, tipo: "NOTA" } });
+    const nota = await db.timeline.findFirstOrThrow({ where: { projetoId: c.id, tipo: "NOTA" } });
     expect((nota.payload as { texto: string }).texto).toBe("Feito: próxima ação de 24/10/2026\nSem próxima ação definida.");
   });
 
@@ -186,7 +186,7 @@ describe("marcarAcaoFeita", () => {
     expect(await marcarAcaoFeita(c.id, { proximaAcao: "Ligar", dia: "2026-10-23" }, { tipo: "nenhuma" }, s.ana)).toEqual({ ok: false, erro: "ACAO_MUDOU" });
     expect(await marcarAcaoFeita(c.id, { proximaAcao: "Outra", dia: "2026-10-24" }, { tipo: "nenhuma" }, s.ana)).toEqual({ ok: false, erro: "ACAO_MUDOU" });
     expect(await db.timeline.count()).toBe(0);
-    expect((await db.oportunidade.findUniqueOrThrow({ where: { id: c.id } })).proximaAcao).toBe("Ligar");
+    expect((await db.projeto.findUniqueOrThrow({ where: { id: c.id } })).proximaAcao).toBe("Ligar");
   });
 
   it("sem próxima ação, soft-deletado ou inexistente → erro, nada gravado", async () => {
@@ -215,10 +215,10 @@ describe("definirProximaAcao (card sem próxima ação)", () => {
     const s = await semear();
     const c = await card(s, "x", { proximaAcao: null, dia: null });
     expect(await definirProximaAcao(c.id, { proximaAcao: "Ligar", proximaAcaoEm: dia("2026-10-27") }, s.ana)).toEqual({ ok: true });
-    const op = await db.oportunidade.findUniqueOrThrow({ where: { id: c.id } });
+    const op = await db.projeto.findUniqueOrThrow({ where: { id: c.id } });
     expect(op.proximaAcao).toBe("Ligar");
     expect(op.proximaAcaoEm).toEqual(dia("2026-10-27"));
-    const tl = await db.timeline.findMany({ where: { oportunidadeId: c.id }, orderBy: [{ em: "asc" }, { id: "asc" }] });
+    const tl = await db.timeline.findMany({ where: { projetoId: c.id }, orderBy: [{ em: "asc" }, { id: "asc" }] });
     expect(tl.map((t) => t.tipo)).toEqual(["CAMPO_ALTERADO", "CAMPO_ALTERADO"]);
   });
 
@@ -226,9 +226,9 @@ describe("definirProximaAcao (card sem próxima ação)", () => {
     const s = await semear();
     const c = await card(s, "x", { proximaAcao: null, dia: null });
     // Outra aba define primeiro.
-    await db.oportunidade.update({ where: { id: c.id }, data: { proximaAcao: "Da outra aba", proximaAcaoEm: dia("2026-10-26") } });
+    await db.projeto.update({ where: { id: c.id }, data: { proximaAcao: "Da outra aba", proximaAcaoEm: dia("2026-10-26") } });
     expect(await definirProximaAcao(c.id, { proximaAcao: "Minha", proximaAcaoEm: dia("2026-10-27") }, s.ana)).toEqual({ ok: false, erro: "ACAO_MUDOU" });
-    const op = await db.oportunidade.findUniqueOrThrow({ where: { id: c.id } });
+    const op = await db.projeto.findUniqueOrThrow({ where: { id: c.id } });
     expect(op.proximaAcao).toBe("Da outra aba");
     expect(op.proximaAcaoEm).toEqual(dia("2026-10-26"));
     expect(await db.timeline.count()).toBe(0);

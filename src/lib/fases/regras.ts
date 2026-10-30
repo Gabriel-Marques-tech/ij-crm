@@ -136,7 +136,7 @@ export type AcaoRemocao = "EXCLUIR" | "ARQUIVAR";
 
 /**
  * Cards migrados pela remoção de fase NÃO passam pelo gancho de terminal
- * (`oportunidades/terminal.ts`): sem ele, card aberto que cai em ganho/perdido
+ * (`projetos/terminal.ts`): sem ele, card aberto que cai em ganho/perdido
  * fica sem data_ganho/motivo/projeto, e card fechado que cai em fase aberta
  * fica com dados de fechamento velhos. Só migra entre fases do MESMO tipo
  * (abertas entre si; GANHO→GANHO; PERDIDO→PERDIDO), onde os dados continuam válidos.

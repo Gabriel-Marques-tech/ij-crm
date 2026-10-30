@@ -8,11 +8,11 @@
  */
 import type { Papel, Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { diaEmFuso } from "@/lib/oportunidades/aging";
-import { inicioDoDia } from "@/lib/oportunidades/campos";
-import { somarDias } from "@/lib/oportunidades/proxima-acao";
+import { diaEmFuso } from "@/lib/projetos/aging";
+import { inicioDoDia } from "@/lib/projetos/campos";
+import { somarDias } from "@/lib/projetos/proxima-acao";
 import { SELECAO_NOME_EXIBIDO, nomeExibido } from "@/lib/entidades/vinculo";
-import { listarResponsaveis } from "@/lib/oportunidades/oportunidades";
+import { listarResponsaveis } from "@/lib/projetos/projetos";
 import { compararPrazos, paraPrazoItem, PRAZO_VIVO, SELECAO_PRAZO, type PessoaItem, type PrazoItem } from "@/lib/prazos/prazos";
 import { instanteDoPrazo, type SemanaCalendario } from "./semana";
 
@@ -38,7 +38,7 @@ export type ItensDaSemana = { acoes: AcaoItem[]; prazos: PrazoItem[] };
 export type FiltroPessoas = { responsavelIds: string[] } | "time";
 
 /** Leitura com um cliente qualquer (o `db` ou uma transação — ex.: teste com fuso de sessão). */
-type Cliente = Pick<Prisma.TransactionClient, "oportunidade" | "prazo">;
+type Cliente = Pick<Prisma.TransactionClient, "projeto" | "prazo">;
 
 /** Dias civis `YYYY-MM-DD` (SP), inclusivos nas duas pontas; `hoje` decide "vencida". */
 export type IntervaloDias = { primeiroDia: string; ultimoDia: string; hoje: string };
@@ -58,7 +58,7 @@ export async function carregarItens(filtro: FiltroPessoas, intervalo: IntervaloD
   const inicio = inicioDoDia(intervalo.primeiroDia)!;
   const fim = inicioDoDia(seguinte)!;
   const [cards, prazos] = await Promise.all([
-    cliente.oportunidade.findMany({
+    cliente.projeto.findMany({
       // Mesma fonte da Minha Semana: vivo e fora de fase terminal, em qualquer quadro.
       where: { ...resp, deletadoEm: null, fase: { isTerminal: false }, proximaAcaoEm: { gte: inicio, lt: fim } },
       select: {

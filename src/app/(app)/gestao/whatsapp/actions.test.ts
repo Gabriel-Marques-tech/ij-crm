@@ -27,7 +27,7 @@ describe("permissão", () => {
     exigirPapel.mockRejectedValue(proibido);
     for (const chamar of [
       () => reprocessarAction("m1"),
-      () => resolverAction("m1", { tipo: "VINCULAR", oportunidadeId: "o1" }),
+      () => resolverAction("m1", { tipo: "VINCULAR", projetoId: "o1" }),
       () => vincularRemetenteAction("r1", "u1"),
       () => buscarCardsAction("x"),
     ]) {
@@ -45,8 +45,8 @@ describe("permissão", () => {
 
 describe("reprocessarAction", () => {
   it("usa a função compartilhada com FALHA e PENDENTE_REVISAO e descreve o desfecho", async () => {
-    reprocessarMensagem.mockResolvedValue({ tipo: "PROCESSADA", oportunidadeId: "o1", confirmacao: "✅" });
-    expect(await reprocessarAction("m1")).toEqual({ ok: true, aviso: "Processada: card criado/atualizado.", oportunidadeId: "o1" });
+    reprocessarMensagem.mockResolvedValue({ tipo: "PROCESSADA", projetoId: "o1", confirmacao: "✅" });
+    expect(await reprocessarAction("m1")).toEqual({ ok: true, aviso: "Processada: card criado/atualizado.", projetoId: "o1" });
     expect(reprocessarMensagem).toHaveBeenCalledWith("m1", ["FALHA", "PENDENTE_REVISAO"]);
     expect(revalidatePath).toHaveBeenCalledWith("/gestao/whatsapp");
   });
@@ -71,14 +71,14 @@ describe("resolverAction", () => {
     expect(await resolverAction("m1", { tipo: "OUTRO" } as never)).toEqual({ erro: "Dados inválidos." });
     resolverManualmente.mockResolvedValue({ ok: false, erro: "MENSAGEM_JA_RESOLVIDA" });
     expect(await resolverAction("m1", { tipo: "CRIAR", titulo: "A", faseId: "f1" })).toEqual({ erro: expect.stringContaining("já foi resolvida") });
-    resolverManualmente.mockResolvedValue({ ok: true, oportunidadeId: "o9" });
-    expect(await resolverAction("m1", { tipo: "VINCULAR", oportunidadeId: "o9" })).toEqual({ ok: true, oportunidadeId: "o9" });
-    expect(resolverManualmente).toHaveBeenLastCalledWith("m1", { tipo: "VINCULAR", oportunidadeId: "o9" }, { id: "g1", papel: "GESTOR" });
+    resolverManualmente.mockResolvedValue({ ok: true, projetoId: "o9" });
+    expect(await resolverAction("m1", { tipo: "VINCULAR", projetoId: "o9" })).toEqual({ ok: true, projetoId: "o9" });
+    expect(resolverManualmente).toHaveBeenLastCalledWith("m1", { tipo: "VINCULAR", projetoId: "o9" }, { id: "g1", papel: "GESTOR" });
   });
 
   it("exceção → INESPERADO com ref logada", async () => {
     resolverManualmente.mockRejectedValue(new Error("db caiu"));
-    expect(await resolverAction("m1", { tipo: "VINCULAR", oportunidadeId: "o9" })).toMatchObject({ ok: false, erro: "INESPERADO", ref: expect.stringMatching(/^[0-9a-f]{8}$/) });
+    expect(await resolverAction("m1", { tipo: "VINCULAR", projetoId: "o9" })).toMatchObject({ ok: false, erro: "INESPERADO", ref: expect.stringMatching(/^[0-9a-f]{8}$/) });
   });
 });
 

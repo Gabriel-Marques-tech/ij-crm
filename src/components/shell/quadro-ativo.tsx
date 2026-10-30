@@ -4,7 +4,7 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from "
 
 /**
  * Quadro (vendas/projetos) que a página atual declara para a navegação. A lista
- * do Kanban usa o `?quadro=`; o detalhe do card (`/kanban/[id]`) não tem esse
+ * do Kanban usa o `?quadro=`; o detalhe do card (`/projetos/[id]`) não tem esse
  * parâmetro — links de Minha Semana, Empresas etc. não o levam — então a página
  * declara o quadro do próprio card com `<MarcarQuadroAtivo>`.
  */

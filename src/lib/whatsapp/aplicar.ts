@@ -32,9 +32,9 @@ import { encontrarContatoPorIdentificador, encontrarEmpresa, resolverEmpresas } 
 import { validarNome } from "@/lib/entidades/campos";
 import { travarPipelines } from "@/lib/fases/fases";
 import { ehDominioPublico, normalizarDominio } from "@/lib/normalizacao";
-import { ErroDeRegra } from "@/lib/oportunidades/erros";
-import { criarCardTravado } from "@/lib/oportunidades/oportunidades";
-import { PIPELINE_VENDAS } from "@/lib/oportunidades/terminal-regras";
+import { ErroDeRegra } from "@/lib/projetos/erros";
+import { criarCardTravado } from "@/lib/projetos/projetos";
+import { PIPELINE_VENDAS } from "@/lib/projetos/terminal-regras";
 import { aplicarAtualizacao, pipelinesParaTravar } from "./atualizar";
 import {
   FASE_PADRAO_CRIAR,
@@ -200,7 +200,7 @@ export async function aplicarExtracao(tx: Tx, e: EntradaAplicacao): Promise<Desf
 
   const titulo = [contato?.nome, empresa?.nome].filter(Boolean).join(" — ");
   const agora = new Date();
-  const oportunidadeId = await criarCardTravado(
+  const projetoId = await criarCardTravado(
     tx,
     {
       pipelineId: vendas.id,
@@ -215,7 +215,7 @@ export async function aplicarExtracao(tx: Tx, e: EntradaAplicacao): Promise<Desf
   );
   await tx.timeline.create({
     data: {
-      oportunidadeId,
+      projetoId,
       tipo: "MENSAGEM_WHATSAPP",
       usuarioId: remetente.id,
       mensagemBrutaId: e.mensagem.id,
@@ -226,7 +226,7 @@ export async function aplicarExtracao(tx: Tx, e: EntradaAplicacao): Promise<Desf
 
   return {
     tipo: "CRIADO",
-    oportunidadeId,
+    projetoId,
     contato: contato ? { id: contato.id, criado: contato.criado } : null,
     empresa: empresa ? { id: empresa.id, criada: empresa.criada } : null,
     sugestoes,

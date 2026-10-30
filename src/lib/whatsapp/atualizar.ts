@@ -36,10 +36,10 @@ import type { Fase, Prisma } from "@prisma/client";
 import { encontrarContatoPorIdentificador, encontrarEmpresa, resolverContatos, resolverEmpresas } from "@/lib/contatos/match";
 import { validarNome } from "@/lib/entidades/campos";
 import { ehDominioPublico, normalizarDominio } from "@/lib/normalizacao";
-import { ErroDeRegra } from "@/lib/oportunidades/erros";
-import { aplicarPatch, criarCardTravado, registrarMovimento, type PatchCard } from "@/lib/oportunidades/oportunidades";
-import { pipelinesExtrasDoTerminal } from "@/lib/oportunidades/terminal";
-import { PIPELINE_VENDAS, type DadosTerminal } from "@/lib/oportunidades/terminal-regras";
+import { ErroDeRegra } from "@/lib/projetos/erros";
+import { aplicarPatch, criarCardTravado, registrarMovimento, type PatchCard } from "@/lib/projetos/projetos";
+import { pipelinesExtrasDoTerminal } from "@/lib/projetos/terminal";
+import { PIPELINE_VENDAS, type DadosTerminal } from "@/lib/projetos/terminal-regras";
 import { resolverAlvo, type Candidata } from "./alvo";
 import {
   FASE_PADRAO_CRIAR,
@@ -112,7 +112,7 @@ async function abertasDaIdentidade(
     if (via.includes("empresa") && v.empresaId) empresas.add(v.empresaId);
   }
   if (!contatos.size && !empresas.size) return [];
-  const novos = await tx.oportunidade.findMany({
+  const novos = await tx.projeto.findMany({
     where: {
       pipelineId: vendasId,
       deletadoEm: null,
@@ -124,8 +124,8 @@ async function abertasDaIdentidade(
     take: 10,
   });
   if (!novos.length) return [];
-  const ultimos = await tx.timeline.groupBy({ by: ["oportunidadeId"], where: { oportunidadeId: { in: novos.map((n) => n.id) } }, _max: { em: true } });
-  const tocada = new Map(ultimos.map((u) => [u.oportunidadeId, u._max.em]));
+  const ultimos = await tx.timeline.groupBy({ by: ["projetoId"], where: { projetoId: { in: novos.map((n) => n.id) } }, _max: { em: true } });
+  const tocada = new Map(ultimos.map((u) => [u.projetoId, u._max.em]));
   return novos.map((n) => ({
     id: n.id,
     terminal: false,
@@ -144,7 +144,7 @@ export async function aplicarAtualizacao(tx: Tx, e: EntradaAplicacao, locks: { v
   const enviadas = new Map((e.candidatas ?? []).map((c) => [c.id, c]));
   if (alvoResposta && !enviadas.has(alvoResposta)) enviadas.set(alvoResposta, { id: alvoResposta, tocadaEm: new Date(0), via: ["resposta"] });
   const vivas = enviadas.size
-    ? await tx.oportunidade.findMany({
+    ? await tx.projeto.findMany({
         where: { id: { in: [...enviadas.keys()] }, pipelineId: locks.vendasId, deletadoEm: null },
         select: { id: true, contatoId: true, empresaId: true, fase: { select: { isTerminal: true } } },
       })
@@ -163,7 +163,7 @@ export async function aplicarAtualizacao(tx: Tx, e: EntradaAplicacao, locks: { v
     const travado = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM oportunidade WHERE id = ${baseId} AND deletado_em IS NULL FOR UPDATE`;
     if (travado.length === 0) throw new ErroDeRegra("CARD_NAO_ENCONTRADO");
   }
-  const base = await tx.oportunidade.findUniqueOrThrow({
+  const base = await tx.projeto.findUniqueOrThrow({
     where: { id: baseId },
     select: { id: true, titulo: true, faseId: true, origem: true, responsavelId: true, contatoId: true, empresaId: true },
   });
@@ -329,7 +329,7 @@ export async function aplicarAtualizacao(tx: Tx, e: EntradaAplicacao, locks: { v
     if (!fase) throw new ErroDeRegra("FASE_NAO_ENCONTRADA");
     const titulo = tituloAntigoAuto && tituloNovo ? tituloNovo : base.titulo;
     const resp = responsavel ?? remetente;
-    const oportunidadeId = await criarCardTravado(
+    const projetoId = await criarCardTravado(
       tx,
       {
         pipelineId: locks.vendasId,
@@ -343,11 +343,11 @@ export async function aplicarAtualizacao(tx: Tx, e: EntradaAplicacao, locks: { v
       remetente,
     );
     await tx.timeline.create({
-      data: { oportunidadeId, tipo: "MENSAGEM_WHATSAPP", usuarioId: remetente.id, mensagemBrutaId: e.mensagem.id, em: new Date(agora.getTime() + 1), payload: payloadMensagem },
+      data: { projetoId, tipo: "MENSAGEM_WHATSAPP", usuarioId: remetente.id, mensagemBrutaId: e.mensagem.id, em: new Date(agora.getTime() + 1), payload: payloadMensagem },
     });
     return {
       tipo: "CRIADO",
-      oportunidadeId,
+      projetoId,
       reabertaDeId: base.id,
       contato: contatoFinal ? { id: contatoFinal.id, criado: !!nomeContatoNovo } : null,
       empresa: empresaFinal ? { id: empresaFinal.id, criada: !!nomeEmpresaNova } : null,
@@ -365,7 +365,7 @@ export async function aplicarAtualizacao(tx: Tx, e: EntradaAplicacao, locks: { v
   // ---- ESCRITA: card existente
   let t = agora.getTime();
   await tx.timeline.create({
-    data: { oportunidadeId: base.id, tipo: "MENSAGEM_WHATSAPP", usuarioId: remetente.id, mensagemBrutaId: e.mensagem.id, em: new Date(t), payload: payloadMensagem },
+    data: { projetoId: base.id, tipo: "MENSAGEM_WHATSAPP", usuarioId: remetente.id, mensagemBrutaId: e.mensagem.id, em: new Date(t), payload: payloadMensagem },
   });
 
   const alterados: string[] = [];
@@ -374,10 +374,10 @@ export async function aplicarAtualizacao(tx: Tx, e: EntradaAplicacao, locks: { v
     ["empresa", empresaAtual, empresaFinal],
   ] as const) {
     if ((antes?.id ?? null) === (depois?.id ?? null) || !depois) continue;
-    await tx.oportunidade.update({ where: { id: base.id }, data: campo === "empresa" ? { empresaId: depois.id } : { contatoId: depois.id } });
+    await tx.projeto.update({ where: { id: base.id }, data: campo === "empresa" ? { empresaId: depois.id } : { contatoId: depois.id } });
     await tx.timeline.create({
       data: {
-        oportunidadeId: base.id,
+        projetoId: base.id,
         tipo: "CAMPO_ALTERADO",
         payload: {
           campo,
@@ -408,7 +408,7 @@ export async function aplicarAtualizacao(tx: Tx, e: EntradaAplicacao, locks: { v
   let deFaseNome: string | null = null;
   if (destino && destino.id !== faseAtual.id) {
     await registrarMovimento(tx, {
-      oportunidadeId: base.id,
+      projetoId: base.id,
       pipelineChave: PIPELINE_VENDAS,
       origem: faseAtual,
       destino,
@@ -421,10 +421,10 @@ export async function aplicarAtualizacao(tx: Tx, e: EntradaAplicacao, locks: { v
     deFaseNome = faseAtual.nome;
   }
 
-  const final = await tx.oportunidade.findUniqueOrThrow({ where: { id: base.id }, select: { titulo: true, fase: { select: { nome: true } } } });
+  const final = await tx.projeto.findUniqueOrThrow({ where: { id: base.id }, select: { titulo: true, fase: { select: { nome: true } } } });
   return {
     tipo: "ATUALIZADO",
-    oportunidadeId: base.id,
+    projetoId: base.id,
     alterados,
     sugestoes,
     titulo: final.titulo,

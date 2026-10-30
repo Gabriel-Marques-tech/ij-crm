@@ -30,7 +30,7 @@ export type EnvioWhatsApp = {
   para: string;
   texto: string;
   citar?: Citacao;
-  oportunidadeId?: string | null;
+  projetoId?: string | null;
 };
 
 export type ResultadoEnvio = { eventoId: string; enviada: boolean };
@@ -75,7 +75,7 @@ function lerJson(resposta: Response, sinal: AbortSignal): Promise<unknown> {
   });
 }
 
-export async function enviarWhatsApp({ para, texto, citar, oportunidadeId = null }: EnvioWhatsApp): Promise<ResultadoEnvio> {
+export async function enviarWhatsApp({ para, texto, citar, projetoId = null }: EnvioWhatsApp): Promise<ResultadoEnvio> {
   if (!notificacoesAtivas()) {
     console.info(`[SAFE MODE] WhatsApp NÃO enviado para ${mascararJid(para)}`);
     return { eventoId: `safe-${crypto.randomUUID()}`, enviada: false };
@@ -117,7 +117,7 @@ export async function enviarWhatsApp({ para, texto, citar, oportunidadeId = null
   if (typeof eventoId !== "string" || !eventoId) throw new ErroEnvioWhatsApp("Evolution sendText sem key.id na resposta", status);
 
   try {
-    await db.mensagemEnviada.create({ data: { eventoId, grupoJid: para, texto, oportunidadeId } });
+    await db.mensagemEnviada.create({ data: { eventoId, grupoJid: para, texto, projetoId } });
   } catch (e) {
     throw new ErroPosEnvio(eventoId, e);
   }

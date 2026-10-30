@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { inicioDoDia } from "@/lib/oportunidades/campos";
+import { inicioDoDia } from "@/lib/projetos/campos";
 import { agruparSemana, quandoRotulo, validarProximaEscolha } from "./agrupar";
 
 const sp = (iso: string) => new Date(`${iso}-03:00`);

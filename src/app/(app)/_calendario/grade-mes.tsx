@@ -150,7 +150,7 @@ export function GradeMes({
                 {acoesVis.map((a) => (
                   <Link
                     key={a.cardId}
-                    href={`/kanban/${a.cardId}`}
+                    href={`/projetos/${a.cardId}`}
                     data-estado={a.vencida ? "vencida" : "normal"}
                     title={`${a.acao ?? "Próxima ação"} · ${a.empresa ?? a.titulo} · ${a.responsavel.nome}`}
                     className={cn(

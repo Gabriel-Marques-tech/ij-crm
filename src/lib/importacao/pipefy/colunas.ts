@@ -64,7 +64,7 @@ export const ALIASES_PADRAO: Aliases = {
   cargo: ["Cargo", "Cargo do contato", "Job title"],
   origem: ["Origem", "Origem do lead", "Source", "Canal"],
   dor: ["Dor", "Dor do cliente", "Necessidade"],
-  // Descrição do card do Pipefy → `Oportunidade.descricao` (antes caía em `dor`).
+  // Descrição do card do Pipefy → `Projeto.descricao` (antes caía em `dor`).
   descricao: ["Descrição", "Descricao", "Description", "Descrição do card", "Card description"],
   orcamento: ["Orçamento", "Orçamento previsto", "Valor estimado", "Valor previsto", "Budget"],
   valorFechado: ["Valor fechado", "Valor do contrato", "Valor final", "Contract value"],

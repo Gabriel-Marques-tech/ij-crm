@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { dbTeste, limparBanco } from "@/test/db";
 import { invalidarCachePipelines } from "@/lib/fases/cache";
-import { criarCard, moverCard } from "./oportunidades";
+import { criarCard, moverCard } from "./projetos";
 
 const db = dbTeste();
 
@@ -44,13 +44,13 @@ async function semear() {
   const contato = await db.contato.create({ data: { nome: "Zé", empresaId: empresa.id } });
   const r = await criarCard({ pipelineId: vendas.id, faseId: fase(vendas, "em_negociacao").id, titulo: "Site da padaria" }, ana);
   if (!r.ok) throw new Error(r.erro);
-  await db.oportunidade.update({ where: { id: r.id }, data: { empresaId: empresa.id, contatoId: contato.id, estado: "SP", cidade: "Campinas" } });
+  await db.projeto.update({ where: { id: r.id }, data: { empresaId: empresa.id, contatoId: contato.id, estado: "SP", cidade: "Campinas" } });
   return { vendas, projetos, ana, bruno, empresa, contato, vendaId: r.id };
 }
 
 const fase = (p: { fases: { chave: string; id: string }[] }, chave: string) => p.fases.find((f) => f.chave === chave)!;
-const tl = (oportunidadeId: string) => db.timeline.findMany({ where: { oportunidadeId }, orderBy: [{ em: "asc" }, { id: "asc" }] });
-const projetosDe = (vendaId: string) => db.oportunidade.findMany({ where: { origemOportunidadeId: vendaId } });
+const tl = (projetoId: string) => db.timeline.findMany({ where: { projetoId }, orderBy: [{ em: "asc" }, { id: "asc" }] });
+const projetosDe = (vendaId: string) => db.projeto.findMany({ where: { vendaOrigemId: vendaId } });
 
 beforeEach(async () => {
   await limparBanco(["transicao_fase", "timeline", "oportunidade", "contato", "empresa", "fase", "pipeline", "sessao", "usuario"]);
@@ -65,7 +65,7 @@ describe("ganho em vendas", () => {
     const r = await moverCard(vendaId, fase(vendas, "contrato_assinado").id, bruno, { dadosTerminal: {} });
     expect(r).toEqual({ ok: true, mudou: true, terminal: "GANHO" });
 
-    const venda = await db.oportunidade.findUniqueOrThrow({ where: { id: vendaId } });
+    const venda = await db.projeto.findUniqueOrThrow({ where: { id: vendaId } });
     expect(venda.valorFechado).toBeNull();
     expect(venda.dataGanho!.getTime()).toBeGreaterThanOrEqual(antes - 1000);
 
@@ -82,11 +82,11 @@ describe("ganho em vendas", () => {
       estado: "SP",
       cidade: "Campinas",
       criadoVia: "UI",
-      origemOportunidadeId: vendaId,
+      vendaOrigemId: vendaId,
     });
     expect(p.faseDesde.getTime()).toBe(venda.dataGanho!.getTime());
 
-    expect(await db.transicaoFase.findMany({ where: { oportunidadeId: p.id } })).toMatchObject([
+    expect(await db.transicaoFase.findMany({ where: { projetoId: p.id } })).toMatchObject([
       { deFaseId: null, paraFaseId: fase(projetos, "em_execucao").id, usuarioId: bruno.id, origem: "SISTEMA" },
     ]);
     expect(await tl(p.id)).toMatchObject([
@@ -101,9 +101,9 @@ describe("ganho em vendas", () => {
   it("sem o objeto de dados do fechamento (chamada direta, sem diálogo) o ganho é recusado e nada muda", async () => {
     const { vendas, ana, vendaId } = await semear();
     expect(await moverCard(vendaId, fase(vendas, "contrato_assinado").id, ana)).toEqual({ ok: false, erro: "DADOS_TERMINAL_OBRIGATORIOS" });
-    const venda = await db.oportunidade.findUniqueOrThrow({ where: { id: vendaId } });
+    const venda = await db.projeto.findUniqueOrThrow({ where: { id: vendaId } });
     expect(venda).toMatchObject({ faseId: fase(vendas, "em_negociacao").id, dataGanho: null });
-    expect(await db.oportunidade.count()).toBe(1);
+    expect(await db.projeto.count()).toBe(1);
   });
 
   it("valor fechado opcional em BRL é gravado (com histórico); inválido recusa o movimento inteiro", async () => {
@@ -111,14 +111,14 @@ describe("ganho em vendas", () => {
     const ganho = fase(vendas, "contrato_assinado").id;
 
     expect(await moverCard(vendaId, ganho, ana, { dadosTerminal: { valorFechado: "quarenta mil" } })).toEqual({ ok: false, erro: "VALOR_FECHADO_INVALIDO" });
-    const intacta = await db.oportunidade.findUniqueOrThrow({ where: { id: vendaId } });
+    const intacta = await db.projeto.findUniqueOrThrow({ where: { id: vendaId } });
     expect(intacta.faseId).toBe(fase(vendas, "em_negociacao").id);
     expect(intacta.dataGanho).toBeNull();
-    expect(await db.oportunidade.count()).toBe(1);
-    expect(await db.transicaoFase.count({ where: { oportunidadeId: vendaId } })).toBe(1);
+    expect(await db.projeto.count()).toBe(1);
+    expect(await db.transicaoFase.count({ where: { projetoId: vendaId } })).toBe(1);
 
     expect((await moverCard(vendaId, ganho, ana, { dadosTerminal: { valorFechado: "R$ 45.000,50" } })).ok).toBe(true);
-    const venda = await db.oportunidade.findUniqueOrThrow({ where: { id: vendaId } });
+    const venda = await db.projeto.findUniqueOrThrow({ where: { id: vendaId } });
     expect(venda.valorFechado?.toFixed(2)).toBe("45000.50");
     const campos = (await tl(vendaId)).filter((t) => t.tipo === "CAMPO_ALTERADO").map((t) => t.payload);
     expect(campos).toEqual([
@@ -134,16 +134,16 @@ describe("ganho em vendas", () => {
 
     await moverCard(vendaId, ganho, ana, { dadosTerminal: { valorFechado: "10.000" } });
     const [projeto] = await projetosDe(vendaId);
-    const dataPrimeiroGanho = (await db.oportunidade.findUniqueOrThrow({ where: { id: vendaId } })).dataGanho!;
+    const dataPrimeiroGanho = (await db.projeto.findUniqueOrThrow({ where: { id: vendaId } })).dataGanho!;
 
     expect(await moverCard(vendaId, negociacao, bruno)).toEqual({ ok: true, mudou: true, terminal: null });
-    const reaberta = await db.oportunidade.findUniqueOrThrow({ where: { id: vendaId } });
+    const reaberta = await db.projeto.findUniqueOrThrow({ where: { id: vendaId } });
     expect(reaberta.dataGanho).toEqual(dataPrimeiroGanho);
     expect(reaberta.valorFechado?.toFixed(2)).toBe("10000.00");
     // Na venda, só o movimento; nenhum campo mexido.
     expect((await tl(vendaId)).at(-1)!.tipo).toBe("MOVIMENTACAO");
     // O projeto continua onde estava, e a Timeline dele avisa quem reabriu a venda.
-    expect(await db.oportunidade.findUniqueOrThrow({ where: { id: projeto.id } })).toMatchObject({ deletadoEm: null });
+    expect(await db.projeto.findUniqueOrThrow({ where: { id: projeto.id } })).toMatchObject({ deletadoEm: null });
     expect((await tl(projeto.id)).at(-1)).toMatchObject({
       tipo: "VINCULO_PROJETO",
       usuarioId: bruno.id,
@@ -154,8 +154,8 @@ describe("ganho em vendas", () => {
     // Diálogo pré-preenche o valor guardado; o usuário confirma igual.
     expect((await moverCard(vendaId, ganho, ana, { dadosTerminal: { valorFechado: "10.000,00" } })).ok).toBe(true);
     expect(await projetosDe(vendaId)).toHaveLength(1);
-    expect(await db.oportunidade.count()).toBe(2);
-    const reganha = await db.oportunidade.findUniqueOrThrow({ where: { id: vendaId } });
+    expect(await db.projeto.count()).toBe(2);
+    const reganha = await db.projeto.findUniqueOrThrow({ where: { id: vendaId } });
     expect(reganha.dataGanho!.getTime()).toBeGreaterThan(dataPrimeiroGanho.getTime());
     expect(reganha.valorFechado?.toFixed(2)).toBe("10000.00");
     const finais = (await tl(vendaId)).slice(-3);
@@ -168,7 +168,7 @@ describe("ganho em vendas", () => {
       ["VINCULO_PROJETO", { vendaId, criado: false }],
     ]);
     // Histórico completo das transições da venda: criação, ganho, reabertura, ganho.
-    expect(await db.transicaoFase.count({ where: { oportunidadeId: vendaId } })).toBe(4);
+    expect(await db.transicaoFase.count({ where: { projetoId: vendaId } })).toBe(4);
   });
 
   it("dois ganhos concorrentes do mesmo card = 1 card de projeto (o segundo vira no-op)", async () => {
@@ -181,22 +181,22 @@ describe("ganho em vendas", () => {
     expect(rs.every((r) => r.ok)).toBe(true);
     expect(rs.map((r) => r.ok && r.mudou).sort()).toEqual([false, true]);
     expect(await projetosDe(vendaId)).toHaveLength(1);
-    expect(await db.timeline.count({ where: { oportunidadeId: vendaId, tipo: "VINCULO_PROJETO" } })).toBe(1);
+    expect(await db.timeline.count({ where: { projetoId: vendaId, tipo: "VINCULO_PROJETO" } })).toBe(1);
   });
 
   it("outro escritor liga um projeto à venda no meio do ganho (P2002 no índice único) → sucesso idempotente, sem duplicar", async () => {
     const { vendas, projetos, ana, vendaId } = await semear();
-    // Um INSERT em oportunidade esbarra no lock de pipeline (FK → KEY SHARE na
+    // Um INSERT em projeto esbarra no lock de pipeline (FK → KEY SHARE na
     // linha do pipeline), então a corrida real é de quem LIGA um card existente
     // à venda (ex.: import/LLM preenchendo origem_oportunidade_id): o UPDATE não
     // toca o pipeline. A transação dele segura a linha (não commitada): o ganho
     // não a vê, bloqueia no índice único ao inserir e recebe P2002 no commit dela.
-    const solto = await db.oportunidade.create({
+    const solto = await db.projeto.create({
       data: { pipelineId: projetos.id, faseId: fase(projetos, "em_execucao").id, titulo: "Import", responsavelId: ana.id, criadoVia: "IMPORT" },
     });
     let commitEm = 0;
     const intruso = db.$transaction(async (tx) => {
-      await tx.oportunidade.update({ where: { id: solto.id }, data: { origemOportunidadeId: vendaId } });
+      await tx.projeto.update({ where: { id: solto.id }, data: { vendaOrigemId: vendaId } });
       await tx.$executeRaw`SELECT pg_sleep(0.6)`;
       commitEm = Date.now();
     });
@@ -209,11 +209,11 @@ describe("ganho em vendas", () => {
     expect(r).toEqual({ ok: true, mudou: true, terminal: "GANHO" });
     const ps = await projetosDe(vendaId);
     expect(ps.map((p) => p.id)).toEqual([solto.id]);
-    expect(await db.oportunidade.count()).toBe(2);
-    const venda = await db.oportunidade.findUniqueOrThrow({ where: { id: vendaId } });
+    expect(await db.projeto.count()).toBe(2);
+    const venda = await db.projeto.findUniqueOrThrow({ where: { id: vendaId } });
     expect(venda.faseId).toBe(fase(vendas, "contrato_assinado").id);
     expect(venda.valorFechado?.toFixed(2)).toBe("100.00");
-    expect(await db.transicaoFase.count({ where: { oportunidadeId: vendaId } })).toBe(2);
+    expect(await db.transicaoFase.count({ where: { projetoId: vendaId } })).toBe(2);
     expect((await tl(vendaId)).at(-1)!.payload).toEqual({ projetoId: solto.id, criado: false });
   });
 
@@ -222,18 +222,18 @@ describe("ganho em vendas", () => {
     const ganho = fase(vendas, "contrato_assinado").id;
     await moverCard(vendaId, ganho, ana, { dadosTerminal: {} });
     const [projeto] = await projetosDe(vendaId);
-    await db.oportunidade.update({ where: { id: projeto.id }, data: { deletadoEm: new Date() } });
+    await db.projeto.update({ where: { id: projeto.id }, data: { deletadoEm: new Date() } });
     await moverCard(vendaId, fase(vendas, "em_negociacao").id, ana);
     expect((await moverCard(vendaId, ganho, ana, { dadosTerminal: {} })).ok).toBe(true);
     expect(await projetosDe(vendaId)).toHaveLength(1);
     expect((await tl(vendaId)).at(-1)!.payload).toEqual({ projetoId: projeto.id, criado: false });
   });
 
-  it("o banco garante: duas oportunidades com a mesma origem → violação de unicidade", async () => {
+  it("o banco garante: dois projetos com a mesma origem → violação de unicidade", async () => {
     const { projetos, ana, vendaId } = await semear();
-    const dados = { pipelineId: projetos.id, faseId: fase(projetos, "em_execucao").id, titulo: "P", responsavelId: ana.id, criadoVia: "UI" as const, origemOportunidadeId: vendaId };
-    await db.oportunidade.create({ data: dados });
-    await expect(db.oportunidade.create({ data: dados })).rejects.toMatchObject({ code: "P2002" });
+    const dados = { pipelineId: projetos.id, faseId: fase(projetos, "em_execucao").id, titulo: "P", responsavelId: ana.id, criadoVia: "UI" as const, vendaOrigemId: vendaId };
+    await db.projeto.create({ data: dados });
+    await expect(db.projeto.create({ data: dados })).rejects.toMatchObject({ code: "P2002" });
   });
 
   it("fase inicial de projetos (em_execucao) arquivada ou ausente → erro de regra, nada muda", async () => {
@@ -245,10 +245,10 @@ describe("ganho em vendas", () => {
     await db.fase.delete({ where: { id: fase(projetos, "em_execucao").id } });
     expect(await moverCard(vendaId, ganho, ana, { dadosTerminal: {} })).toEqual({ ok: false, erro: "FASE_INICIAL_PROJETOS_INDISPONIVEL" });
 
-    const venda = await db.oportunidade.findUniqueOrThrow({ where: { id: vendaId } });
+    const venda = await db.projeto.findUniqueOrThrow({ where: { id: vendaId } });
     expect(venda.faseId).toBe(fase(vendas, "em_negociacao").id);
     expect(venda.dataGanho).toBeNull();
-    expect(await db.oportunidade.count()).toBe(1);
+    expect(await db.projeto.count()).toBe(1);
   });
 });
 
@@ -263,22 +263,22 @@ describe("perdido", () => {
       ok: false,
       erro: "MOTIVO_PERDA_DETALHE_OBRIGATORIO",
     });
-    const intacta = await db.oportunidade.findUniqueOrThrow({ where: { id: vendaId } });
+    const intacta = await db.projeto.findUniqueOrThrow({ where: { id: vendaId } });
     expect(intacta.faseId).toBe(fase(vendas, "em_negociacao").id);
     expect(intacta.motivoPerda).toBeNull();
-    expect(await db.transicaoFase.count({ where: { oportunidadeId: vendaId } })).toBe(1);
+    expect(await db.transicaoFase.count({ where: { projetoId: vendaId } })).toBe(1);
   });
 
   it("grava motivo_perda com histórico; não cria projeto; reabrir MANTÉM o motivo", async () => {
     const { vendas, ana, vendaId } = await semear();
     const r = await moverCard(vendaId, fase(vendas, "perdido").id, ana, { dadosTerminal: { motivo: "concorrente", detalhe: "fechou com a X" } });
     expect(r).toEqual({ ok: true, mudou: true, terminal: "PERDIDO" });
-    expect((await db.oportunidade.findUniqueOrThrow({ where: { id: vendaId } })).motivoPerda).toBe("Concorrente: fechou com a X");
+    expect((await db.projeto.findUniqueOrThrow({ where: { id: vendaId } })).motivoPerda).toBe("Concorrente: fechou com a X");
     expect((await tl(vendaId)).at(-1)!.payload).toEqual({ campo: "motivoPerda", antes: null, depois: "Concorrente: fechou com a X" });
     expect(await projetosDe(vendaId)).toHaveLength(0);
 
     await moverCard(vendaId, fase(vendas, "primeiro_contato").id, ana);
-    expect((await db.oportunidade.findUniqueOrThrow({ where: { id: vendaId } })).motivoPerda).toBe("Concorrente: fechou com a X");
+    expect((await db.projeto.findUniqueOrThrow({ where: { id: vendaId } })).motivoPerda).toBe("Concorrente: fechou com a X");
     expect((await tl(vendaId)).at(-1)!.tipo).toBe("MOVIMENTACAO");
 
     // Re-perda com outro motivo sobrescreve, com histórico.
@@ -290,7 +290,7 @@ describe("perdido", () => {
     const { vendas, ana, vendaId } = await semear();
     await moverCard(vendaId, fase(vendas, "contrato_assinado").id, ana, { dadosTerminal: { valorFechado: "500" } });
     expect((await moverCard(vendaId, fase(vendas, "perdido").id, ana, { dadosTerminal: { motivo: "timing" } })).ok).toBe(true);
-    const venda = await db.oportunidade.findUniqueOrThrow({ where: { id: vendaId } });
+    const venda = await db.projeto.findUniqueOrThrow({ where: { id: vendaId } });
     expect(venda.motivoPerda).toBe("Timing");
     expect(venda.dataGanho).not.toBeNull();
     expect(venda.valorFechado?.toFixed(2)).toBe("500.00");
@@ -305,9 +305,9 @@ describe("projetos", () => {
     await moverCard(vendaId, fase(vendas, "contrato_assinado").id, ana, { dadosTerminal: {} });
     const [projeto] = await projetosDe(vendaId);
     expect(await moverCard(projeto.id, fase(projetos, "finalizado").id, ana)).toEqual({ ok: true, mudou: true, terminal: "GANHO" });
-    const p = await db.oportunidade.findUniqueOrThrow({ where: { id: projeto.id } });
+    const p = await db.projeto.findUniqueOrThrow({ where: { id: projeto.id } });
     expect(p).toMatchObject({ faseId: fase(projetos, "finalizado").id, dataGanho: null, valorFechado: null });
-    expect(await db.oportunidade.count()).toBe(2);
+    expect(await db.projeto.count()).toBe(2);
     expect(await projetosDe(projeto.id)).toHaveLength(0);
   });
 });

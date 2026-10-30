@@ -29,7 +29,7 @@ export type CardNaLixeira = {
 
 export async function listarCardsNaLixeira(busca?: string): Promise<CardNaLixeira[]> {
   const q = termoDeBusca(busca);
-  const cards = await db.oportunidade.findMany({
+  const cards = await db.projeto.findMany({
     where: { deletadoEm: { not: null }, ...(q ? { titulo: { contains: q, mode: "insensitive" } } : {}) },
     orderBy: [{ deletadoEm: "desc" }, { id: "asc" }],
     take: LISTA_MAX,
@@ -77,7 +77,7 @@ export async function listarContatosNaLixeira(busca?: string) {
       deletadoEm: true,
       empresa: { select: { nome: true } },
       pontos: { orderBy: { criadoEm: "asc" }, select: { id: true, tipo: true, valorNormalizado: true } },
-      _count: { select: { oportunidades: { where: { deletadoEm: null } }, mergedFrom: true } },
+      _count: { select: { projetos: { where: { deletadoEm: null } }, mergedFrom: true } },
     },
   });
 }
@@ -95,7 +95,7 @@ export async function listarEmpresasNaLixeira(busca?: string) {
       nome: true,
       cnpj: true,
       deletadoEm: true,
-      _count: { select: { contatos: { where: { deletadoEm: null } }, oportunidades: { where: { deletadoEm: null } }, mergedFrom: true } },
+      _count: { select: { contatos: { where: { deletadoEm: null } }, projetos: { where: { deletadoEm: null } }, mergedFrom: true } },
     },
   });
 }

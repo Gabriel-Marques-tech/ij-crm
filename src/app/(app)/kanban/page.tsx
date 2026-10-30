@@ -4,7 +4,7 @@ import { PageHeader } from "@/components/shell/page-header";
 import { exigirUsuario } from "@/lib/auth/atual";
 import { podeEscrever } from "@/lib/auth/papeis";
 import { listarPipelines } from "@/lib/fases/fases";
-import { listarQuadro, listarResponsaveis } from "@/lib/oportunidades/oportunidades";
+import { listarQuadro, listarResponsaveis } from "@/lib/projetos/projetos";
 import { visualizacaoKanban } from "@/lib/preferencias/preferencias";
 import { obterPreferencias } from "@/lib/preferencias/servico";
 import { QuadroKanban } from "./quadro-kanban";

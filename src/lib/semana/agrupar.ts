@@ -3,9 +3,9 @@
  * da próxima ação (`faixaProximaAcao`, a mesma do filtro do Kanban) e escolhe
  * o destaque. Dias civis de São Paulo, qualquer que seja o fuso do servidor.
  */
-import { diaEmFuso, FUSO_NEGOCIO } from "@/lib/oportunidades/aging";
-import { interpretarCampo } from "@/lib/oportunidades/campos";
-import { diasAte, faixaProximaAcao } from "@/lib/oportunidades/proxima-acao";
+import { diaEmFuso, FUSO_NEGOCIO } from "@/lib/projetos/aging";
+import { interpretarCampo } from "@/lib/projetos/campos";
+import { diasAte, faixaProximaAcao } from "@/lib/projetos/proxima-acao";
 
 export type ItemAgrupavel = { id: string; proximaAcaoEm: Date | null; faseDesde: Date };
 

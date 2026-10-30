@@ -5,7 +5,7 @@
  * O deslocamento do fuso é lido do `Intl` no início da janela (SP não tem
  * horário de verão desde 2019; inerte hoje, certo se voltar a ter).
  */
-import { FUSO_NEGOCIO } from "@/lib/oportunidades/aging";
+import { FUSO_NEGOCIO } from "@/lib/projetos/aging";
 
 export type Janela = { inicio: Date; fim: Date };
 

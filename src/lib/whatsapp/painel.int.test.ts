@@ -72,8 +72,8 @@ describe("carregarPainel", () => {
     await dbT.remetenteDesconhecido.create({ data: { telefone: "+5511912345678", total: 3, ultimaVez: new Date(Date.now() + 60_000) } });
     await dbT.remetenteDesconhecido.create({ data: { lid: "123456789012@lid", total: 1 } });
     const proc = await bruta("PROCESSADA");
-    const op = await dbT.oportunidade.create({ data: { titulo: "Card X", pipelineId: faseInicial.pipelineId, faseId: faseInicial.id, responsavelId: joao.id, criadoVia: "WHATSAPP" } });
-    await dbT.timeline.create({ data: { oportunidadeId: op.id, tipo: "MENSAGEM_WHATSAPP", mensagemBrutaId: proc.id, payload: {} } });
+    const op = await dbT.projeto.create({ data: { titulo: "Card X", pipelineId: faseInicial.pipelineId, faseId: faseInicial.id, responsavelId: joao.id, criadoVia: "WHATSAPP" } });
+    await dbT.timeline.create({ data: { projetoId: op.id, tipo: "MENSAGEM_WHATSAPP", mensagemBrutaId: proc.id, payload: {} } });
 
     const p = await carregarPainel();
     expect(p.contagem).toEqual({ FALHA: 1, PENDENTE_REVISAO: 2 });
@@ -93,10 +93,10 @@ describe("resolverManualmente", () => {
     const m = await bruta("PENDENTE_REVISAO");
     const r = await resolverManualmente(m.id, { tipo: "CRIAR", titulo: "Gustavo — ACME", faseId: faseInicial.id }, gestor);
     if (!r.ok) throw new Error(r.erro);
-    const op = await dbT.oportunidade.findUniqueOrThrow({ where: { id: r.oportunidadeId } });
+    const op = await dbT.projeto.findUniqueOrThrow({ where: { id: r.projetoId } });
     expect(op).toMatchObject({ titulo: "Gustavo — ACME", responsavelId: joao.id, faseId: faseInicial.id });
     const t = await dbT.timeline.findFirstOrThrow({ where: { mensagemBrutaId: m.id } });
-    expect(t).toMatchObject({ tipo: "MENSAGEM_WHATSAPP", oportunidadeId: op.id, usuarioId: gestor.id });
+    expect(t).toMatchObject({ tipo: "MENSAGEM_WHATSAPP", projetoId: op.id, usuarioId: gestor.id });
     expect(t.payload).toMatchObject({ texto: m.texto, resolvidaManualmente: true });
     const depois = await dbT.mensagemBruta.findUniqueOrThrow({ where: { id: m.id } });
     expect(depois).toMatchObject({ status: "PROCESSADA", resolvidaPorId: gestor.id });
@@ -105,25 +105,25 @@ describe("resolverManualmente", () => {
 
   it("vincular a card existente: não cria card", async () => {
     const m = await bruta("FALHA", { erro: "x ref=1" });
-    const op = await dbT.oportunidade.create({ data: { titulo: "Já existe", pipelineId: faseInicial.pipelineId, faseId: faseInicial.id, responsavelId: joao.id, criadoVia: "UI" } });
-    const r = await resolverManualmente(m.id, { tipo: "VINCULAR", oportunidadeId: op.id }, gestor);
-    expect(r).toEqual({ ok: true, oportunidadeId: op.id });
-    expect(await dbT.oportunidade.count()).toBe(1);
+    const op = await dbT.projeto.create({ data: { titulo: "Já existe", pipelineId: faseInicial.pipelineId, faseId: faseInicial.id, responsavelId: joao.id, criadoVia: "UI" } });
+    const r = await resolverManualmente(m.id, { tipo: "VINCULAR", projetoId: op.id }, gestor);
+    expect(r).toEqual({ ok: true, projetoId: op.id });
+    expect(await dbT.projeto.count()).toBe(1);
     expect((await dbT.mensagemBruta.findUniqueOrThrow({ where: { id: m.id } })).status).toBe("PROCESSADA");
   });
 
   it("card excluído, mensagem já resolvida ou em processamento → erro de regra, nada muda", async () => {
-    const op = await dbT.oportunidade.create({ data: { titulo: "Morto", pipelineId: faseInicial.pipelineId, faseId: faseInicial.id, responsavelId: joao.id, criadoVia: "UI", deletadoEm: new Date() } });
+    const op = await dbT.projeto.create({ data: { titulo: "Morto", pipelineId: faseInicial.pipelineId, faseId: faseInicial.id, responsavelId: joao.id, criadoVia: "UI", deletadoEm: new Date() } });
     const m = await bruta("PENDENTE_REVISAO");
-    expect(await resolverManualmente(m.id, { tipo: "VINCULAR", oportunidadeId: op.id }, gestor)).toEqual({ ok: false, erro: "CARD_NAO_ENCONTRADO" });
+    expect(await resolverManualmente(m.id, { tipo: "VINCULAR", projetoId: op.id }, gestor)).toEqual({ ok: false, erro: "CARD_NAO_ENCONTRADO" });
     const projeto = await dbT.fase.findFirstOrThrow({ where: { pipeline: { chave: "projetos" }, arquivadaEm: null } });
-    const deProjeto = await dbT.oportunidade.create({ data: { titulo: "Projeto", pipelineId: projeto.pipelineId, faseId: projeto.id, responsavelId: joao.id, criadoVia: "UI" } });
-    expect(await resolverManualmente(m.id, { tipo: "VINCULAR", oportunidadeId: deProjeto.id }, gestor)).toEqual({ ok: false, erro: "CARD_NAO_ENCONTRADO" });
+    const deProjeto = await dbT.projeto.create({ data: { titulo: "Projeto", pipelineId: projeto.pipelineId, faseId: projeto.id, responsavelId: joao.id, criadoVia: "UI" } });
+    expect(await resolverManualmente(m.id, { tipo: "VINCULAR", projetoId: deProjeto.id }, gestor)).toEqual({ ok: false, erro: "CARD_NAO_ENCONTRADO" });
     const feita = await bruta("PROCESSADA");
     expect(await resolverManualmente(feita.id, { tipo: "CRIAR", titulo: "x", faseId: faseInicial.id }, gestor)).toEqual({ ok: false, erro: "MENSAGEM_JA_RESOLVIDA" });
     const andando = await bruta("PROCESSANDO");
     expect(await resolverManualmente(andando.id, { tipo: "CRIAR", titulo: "x", faseId: faseInicial.id }, gestor)).toEqual({ ok: false, erro: "MENSAGEM_EM_PROCESSAMENTO" });
-    expect(await dbT.oportunidade.count()).toBe(2);
+    expect(await dbT.projeto.count()).toBe(2);
     expect(await dbT.timeline.count()).toBe(0);
   });
 
@@ -134,7 +134,7 @@ describe("resolverManualmente", () => {
       resolverManualmente(m.id, { tipo: "CRIAR", titulo: "A", faseId: faseInicial.id }, gestor),
     ]);
     expect(rs.filter((r) => r.ok)).toHaveLength(1);
-    expect(await dbT.oportunidade.count()).toBe(1);
+    expect(await dbT.projeto.count()).toBe(1);
   });
 
   it("título vazio → TITULO_INVALIDO", async () => {
@@ -145,10 +145,10 @@ describe("resolverManualmente", () => {
 
 describe("buscarCardsParaVincular", () => {
   it("por título, só cards vivos", async () => {
-    await dbT.oportunidade.create({ data: { titulo: "Gustavo — ACME", pipelineId: faseInicial.pipelineId, faseId: faseInicial.id, responsavelId: joao.id, criadoVia: "UI" } });
-    await dbT.oportunidade.create({ data: { titulo: "Gustavo morto", pipelineId: faseInicial.pipelineId, faseId: faseInicial.id, responsavelId: joao.id, criadoVia: "UI", deletadoEm: new Date() } });
+    await dbT.projeto.create({ data: { titulo: "Gustavo — ACME", pipelineId: faseInicial.pipelineId, faseId: faseInicial.id, responsavelId: joao.id, criadoVia: "UI" } });
+    await dbT.projeto.create({ data: { titulo: "Gustavo morto", pipelineId: faseInicial.pipelineId, faseId: faseInicial.id, responsavelId: joao.id, criadoVia: "UI", deletadoEm: new Date() } });
     const projeto = await dbT.fase.findFirstOrThrow({ where: { pipeline: { chave: "projetos" }, arquivadaEm: null } });
-    await dbT.oportunidade.create({ data: { titulo: "Gustavo projeto", pipelineId: projeto.pipelineId, faseId: projeto.id, responsavelId: joao.id, criadoVia: "UI" } });
+    await dbT.projeto.create({ data: { titulo: "Gustavo projeto", pipelineId: projeto.pipelineId, faseId: projeto.id, responsavelId: joao.id, criadoVia: "UI" } });
     const r = await buscarCardsParaVincular("gustavo");
     expect(r.map((o) => o.nome)).toEqual(["Gustavo — ACME"]); // só Vendas, como o criar
     expect(await buscarCardsParaVincular(" ")).toEqual([]);

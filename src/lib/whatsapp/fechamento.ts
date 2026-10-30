@@ -13,7 +13,7 @@
  */
 import type { TipoTerminal } from "@prisma/client";
 import { lerValorInformal } from "@/lib/llm/valores";
-import { DETALHE_PERDA_MAX, MOTIVOS_PERDA, valorParaCampo, type DadosTerminal } from "@/lib/oportunidades/terminal-regras";
+import { DETALHE_PERDA_MAX, MOTIVOS_PERDA, valorParaCampo, type DadosTerminal } from "@/lib/projetos/terminal-regras";
 
 export const MOTIVO_GANHO_SEM_VALOR = "venda ganha sem valor fechado na mensagem: mova pelo CRM";
 export const MOTIVO_PERDA_SEM_MOTIVO = "venda perdida sem motivo na mensagem: mova pelo CRM";

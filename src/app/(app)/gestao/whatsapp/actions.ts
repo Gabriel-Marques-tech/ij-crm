@@ -12,12 +12,12 @@ import { comTratamento, type Inesperado } from "@/lib/erros/registrar";
 import { buscarCardsParaVincular, resolverManualmente, vincularRemetente, type AlvoResolver, type ErroResolver, type ErroVincular } from "@/lib/whatsapp/painel";
 import { reprocessarMensagem } from "@/lib/whatsapp/reprocessar";
 
-export type EstadoPainel = { ok?: true; erro?: string; aviso?: string; oportunidadeId?: string } | Inesperado;
+export type EstadoPainel = { ok?: true; erro?: string; aviso?: string; projetoId?: string } | Inesperado;
 
 const id = z.string().min(1).max(64);
 const alvoSchema = z.discriminatedUnion("tipo", [
   z.object({ tipo: z.literal("CRIAR"), titulo: z.string().max(1000), faseId: id }),
-  z.object({ tipo: z.literal("VINCULAR"), oportunidadeId: id }),
+  z.object({ tipo: z.literal("VINCULAR"), projetoId: id }),
 ]);
 
 const FORA_DA_FILA = "Essa mensagem não está mais na fila (já foi resolvida ou está em processamento). Recarregue a página.";
@@ -62,7 +62,7 @@ export async function reprocessarAction(mensagemId: string): Promise<EstadoPaine
         return { ok: false, erro: "INESPERADO", ref: r.ref };
       case "PROCESSADA":
         revalidar();
-        return { ok: true, aviso: "Processada: card criado/atualizado.", oportunidadeId: r.oportunidadeId };
+        return { ok: true, aviso: "Processada: card criado/atualizado.", projetoId: r.projetoId };
       case "PENDENTE_REVISAO":
         revalidar();
         return { ok: true, aviso: "Continua pendente de revisão." };
@@ -85,7 +85,7 @@ export async function resolverAction(mensagemId: string, alvo: AlvoResolver): Pr
     if (!r.ok) return { erro: MENSAGEM_RESOLVER[r.erro] ?? "Não foi possível resolver: dados do card inválidos." };
     revalidar();
     revalidatePath("/kanban");
-    return { ok: true, oportunidadeId: r.oportunidadeId };
+    return { ok: true, projetoId: r.projetoId };
   });
 }
 

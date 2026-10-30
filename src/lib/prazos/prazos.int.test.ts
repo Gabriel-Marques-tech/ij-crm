@@ -14,7 +14,7 @@ async function semear() {
   const bruno = await db.usuario.create({ data: { nome: "Bruno Lima", email: "bruno@ij.test" } });
   const gil = await db.usuario.create({ data: { nome: "Gil Gestora", email: "gil@ij.test", papel: "GESTOR" } });
   const ivo = await db.usuario.create({ data: { nome: "Ivo Inativo", email: "ivo@ij.test", ativo: false } });
-  const card = await db.oportunidade.create({
+  const card = await db.projeto.create({
     data: { titulo: "Padaria", pipelineId: vendas.id, faseId: vendas.fases[0].id, responsavelId: ana.id, criadoVia: "UI" },
   });
   const anaA = { id: ana.id, papel: "VENDEDOR" as const };
@@ -74,7 +74,7 @@ describe("permissões (servidor)", () => {
 describe("ciclo do prazo no card + Timeline", () => {
   it("criar e concluir num card gravam PRAZO na Timeline; reabrir e concluir de novo não duplicam o 'criado'", async () => {
     const s = await semear();
-    const r = await criarPrazo(s.anaA, { titulo: "Enviar proposta", dia: "2026-10-30", responsavelId: s.ana.id, oportunidadeId: s.card.id });
+    const r = await criarPrazo(s.anaA, { titulo: "Enviar proposta", dia: "2026-10-30", responsavelId: s.ana.id, projetoId: s.card.id });
     if (!r.ok) throw new Error(r.erro);
     expect(await marcarPrazoFeito(s.anaA, r.id, true)).toEqual({ ok: true });
     // Concluir de novo (outra aba) não grava outra entrada.
@@ -82,7 +82,7 @@ describe("ciclo do prazo no card + Timeline", () => {
     expect(await marcarPrazoFeito(s.anaA, r.id, false)).toEqual({ ok: true });
     expect((await db.prazo.findUniqueOrThrow({ where: { id: r.id } })).feitoEm).toBeNull();
 
-    const tl = await db.timeline.findMany({ where: { oportunidadeId: s.card.id, tipo: "PRAZO" }, orderBy: { em: "asc" } });
+    const tl = await db.timeline.findMany({ where: { projetoId: s.card.id, tipo: "PRAZO" }, orderBy: { em: "asc" } });
     expect(tl.map((t) => (t.payload as { evento: string }).evento)).toEqual(["criado", "concluido"]);
     expect(tl[0]).toMatchObject({ usuarioId: s.ana.id, payload: { prazoId: r.id, titulo: "Enviar proposta", dia: "2026-10-30" } });
   });
@@ -97,19 +97,19 @@ describe("ciclo do prazo no card + Timeline", () => {
 
   it("card excluído (lixeira) ou inexistente: não cria; prazos dele somem da lista e não são editáveis", async () => {
     const s = await semear();
-    const r = await criarPrazo(s.anaA, { titulo: "antes", dia: "2026-10-30", responsavelId: s.ana.id, oportunidadeId: s.card.id });
+    const r = await criarPrazo(s.anaA, { titulo: "antes", dia: "2026-10-30", responsavelId: s.ana.id, projetoId: s.card.id });
     if (!r.ok) throw new Error(r.erro);
-    expect(await criarPrazo(s.anaA, { titulo: "x", dia: "2026-10-30", responsavelId: s.ana.id, oportunidadeId: "nao-existe" })).toMatchObject({ ok: false, erro: "CARD_NAO_ENCONTRADO" });
+    expect(await criarPrazo(s.anaA, { titulo: "x", dia: "2026-10-30", responsavelId: s.ana.id, projetoId: "nao-existe" })).toMatchObject({ ok: false, erro: "CARD_NAO_ENCONTRADO" });
 
-    await db.oportunidade.update({ where: { id: s.card.id }, data: { deletadoEm: new Date() } });
-    expect(await criarPrazo(s.anaA, { titulo: "x", dia: "2026-10-30", responsavelId: s.ana.id, oportunidadeId: s.card.id })).toMatchObject({ ok: false, erro: "CARD_NAO_ENCONTRADO" });
+    await db.projeto.update({ where: { id: s.card.id }, data: { deletadoEm: new Date() } });
+    expect(await criarPrazo(s.anaA, { titulo: "x", dia: "2026-10-30", responsavelId: s.ana.id, projetoId: s.card.id })).toMatchObject({ ok: false, erro: "CARD_NAO_ENCONTRADO" });
     expect(await marcarPrazoFeito(s.anaA, r.id, true)).toMatchObject({ ok: false, erro: "PRAZO_NAO_ENCONTRADO" });
   });
 
   it("excluir é soft-delete: some da lista do card, linha continua", async () => {
     const s = await semear();
-    const a = await criarPrazo(s.anaA, { titulo: "A", dia: "2026-10-30", responsavelId: s.ana.id, oportunidadeId: s.card.id });
-    const b = await criarPrazo(s.gilA, { titulo: "B", dia: "2026-10-29", responsavelId: s.bruno.id, oportunidadeId: s.card.id });
+    const a = await criarPrazo(s.anaA, { titulo: "A", dia: "2026-10-30", responsavelId: s.ana.id, projetoId: s.card.id });
+    const b = await criarPrazo(s.gilA, { titulo: "B", dia: "2026-10-29", responsavelId: s.bruno.id, projetoId: s.card.id });
     if (!a.ok || !b.ok) throw new Error("setup");
     expect(await excluirPrazo(s.anaA, a.id)).toEqual({ ok: true });
     expect(await excluirPrazo(s.anaA, a.id)).toMatchObject({ ok: false, erro: "PRAZO_NAO_ENCONTRADO" });

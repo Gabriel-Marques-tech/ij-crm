@@ -1,4 +1,4 @@
-import { obterVinculosDoCard } from "@/lib/oportunidades/vinculos";
+import { obterVinculosDoCard } from "@/lib/projetos/vinculos";
 import { VinculosCliente } from "./vinculos-cliente";
 
 /**

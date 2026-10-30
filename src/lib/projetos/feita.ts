@@ -8,7 +8,7 @@
 import { db } from "@/lib/db";
 import { diaEmFuso } from "./aging";
 import { formatarDia } from "./formatar";
-import { aplicarPatch, ErroDeRegra } from "./oportunidades";
+import { aplicarPatch, ErroDeRegra } from "./projetos";
 
 export type DecisaoProxima = { tipo: "nova"; proximaAcao: string; proximaAcaoEm: Date } | { tipo: "nenhuma" };
 
@@ -35,7 +35,7 @@ export async function marcarAcaoFeita(
     await db.$transaction(async (tx) => {
       const travado = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM oportunidade WHERE id = ${id} AND deletado_em IS NULL FOR UPDATE`;
       if (travado.length === 0) throw new Recusa("CARD_NAO_ENCONTRADO");
-      const atual = await tx.oportunidade.findUniqueOrThrow({ where: { id }, select: { proximaAcao: true, proximaAcaoEm: true } });
+      const atual = await tx.projeto.findUniqueOrThrow({ where: { id }, select: { proximaAcao: true, proximaAcaoEm: true } });
       const diaAtual = atual.proximaAcaoEm ? diaEmFuso(atual.proximaAcaoEm) : null;
       if (atual.proximaAcao === null && diaAtual === null) throw new Recusa("SEM_PROXIMA_ACAO");
       // Outra aba/pessoa mudou a ação: não marca como feita algo que o usuário não viu.
@@ -48,7 +48,7 @@ export async function marcarAcaoFeita(
       const base = Date.now();
       await tx.timeline.create({
         data: {
-          oportunidadeId: id,
+          projetoId: id,
           tipo: "NOTA",
           payload: { texto, feito: { acao: atual.proximaAcao, dia: diaAtual }, proxima },
           usuarioId: por.id,
@@ -87,7 +87,7 @@ export async function definirProximaAcao(
     await db.$transaction(async (tx) => {
       const travado = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM oportunidade WHERE id = ${id} AND deletado_em IS NULL FOR UPDATE`;
       if (travado.length === 0) throw new Recusa("CARD_NAO_ENCONTRADO");
-      const atual = await tx.oportunidade.findUniqueOrThrow({ where: { id }, select: { proximaAcao: true, proximaAcaoEm: true } });
+      const atual = await tx.projeto.findUniqueOrThrow({ where: { id }, select: { proximaAcao: true, proximaAcaoEm: true } });
       if (atual.proximaAcao !== null || atual.proximaAcaoEm !== null) throw new Recusa("ACAO_MUDOU");
       await aplicarPatch(tx, id, { proximaAcao: valores.proximaAcao, proximaAcaoEm: valores.proximaAcaoEm }, por);
     });

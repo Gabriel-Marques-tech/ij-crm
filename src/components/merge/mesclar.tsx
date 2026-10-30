@@ -15,8 +15,8 @@ import type { PreviaMerge } from "@/lib/merge/merge";
 type Tipo = "contato" | "empresa";
 
 const TEXTO: Record<Tipo, { duplicado: string; itens: (c: PreviaMerge["resultado"]) => string }> = {
-  contato: { duplicado: "contato duplicado", itens: (c) => `${c.pontos} telefone(s)/email(s) · ${c.oportunidades} oportunidade(s)` },
-  empresa: { duplicado: "empresa duplicada", itens: (c) => `${c.contatos} contato(s) · ${c.oportunidades} oportunidade(s)` },
+  contato: { duplicado: "contato duplicado", itens: (c) => `${c.pontos} telefone(s)/email(s) · ${c.projetos} projeto(s)` },
+  empresa: { duplicado: "empresa duplicada", itens: (c) => `${c.contatos} contato(s) · ${c.projetos} projeto(s)` },
 };
 
 /**

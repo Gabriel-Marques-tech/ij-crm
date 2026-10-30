@@ -52,7 +52,7 @@ export async function editarContatoCampoAction(contatoId: string, campo: string,
     const r = await editarContato(contatoId, campo, bruto);
     if (!r.ok) return mensagemFalhaContato(r);
     revalidar(contatoId);
-    revalidatePath("/kanban/[id]", "page");
+    revalidatePath("/projetos/[id]", "page");
     return { ok: true };
   });
 }

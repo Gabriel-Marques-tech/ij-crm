@@ -96,11 +96,11 @@ export async function apagarEntidadeDefinitivo(
       const mesclados = await tabela(tx, tipo).updateMany({ where: { mergedIntoId: id, deletadoEm: null }, data: { mergedIntoId: null, deletadoEm: agora } });
 
       const campoFk = tipo === "contato" ? "contatoId" : "empresaId";
-      const cards = await tx.oportunidade.findMany({ where: { [campoFk]: id }, select: { id: true } });
+      const cards = await tx.projeto.findMany({ where: { [campoFk]: id }, select: { id: true } });
       if (cards.length > 0) {
         await tx.timeline.createMany({
           data: cards.map((c) => ({
-            oportunidadeId: c.id,
+            projetoId: c.id,
             tipo: "CAMPO_ALTERADO" as const,
             payload: { campo: tipo, antes: alvo.nome, depois: null, motivo: "apagado_definitivamente" },
             usuarioId: por.id,
@@ -108,7 +108,7 @@ export async function apagarEntidadeDefinitivo(
           })),
         });
       }
-      // FKs: oportunidade.{contato,empresa}_id e contato.empresa_id → SET NULL; contato_ponto → CASCADE.
+      // FKs: projeto.{contato,empresa}_id e contato.empresa_id → SET NULL; contato_ponto → CASCADE.
       await tabela(tx, tipo).delete({ where: { id } });
       return { cardsAfetados: cards.length, mescladosParaLixeira: mesclados.count };
     });

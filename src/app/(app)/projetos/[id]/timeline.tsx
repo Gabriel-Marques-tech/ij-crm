@@ -1,10 +1,10 @@
 import Link from "next/link";
 import { ArrowRightLeft, MessageSquareText, Pencil, Plus, Download, MessageCircle, Link2, Trash2, ArchiveRestore, Flag } from "lucide-react";
 import type { TipoTimeline } from "@prisma/client";
-import { ehCampoEditavel, ROTULO_CAMPO } from "@/lib/oportunidades/campos";
-import { ROTULO_CAMPO_TERMINAL, ehCampoTerminal, formatarCampoTerminal, formatarDataHora, formatarDia, formatarValorCampo } from "@/lib/oportunidades/formatar";
-import type { DetalheCard } from "@/lib/oportunidades/oportunidades";
-import { ehCampoVinculo, ROTULO_VINCULO } from "@/lib/oportunidades/vinculos";
+import { ehCampoEditavel, ROTULO_CAMPO } from "@/lib/projetos/campos";
+import { ROTULO_CAMPO_TERMINAL, ehCampoTerminal, formatarCampoTerminal, formatarDataHora, formatarDia, formatarValorCampo } from "@/lib/projetos/formatar";
+import type { DetalheCard } from "@/lib/projetos/projetos";
+import { ehCampoVinculo, ROTULO_VINCULO } from "@/lib/projetos/vinculos";
 import { MensagemWhatsapp } from "./mensagem-whatsapp";
 
 type Entrada = DetalheCard["timeline"][number];
@@ -36,7 +36,7 @@ function LinkCard({ id, relacionados, rotulo }: { id: unknown; relacionados: Rea
   const c = typeof id === "string" ? relacionados.get(id) : undefined;
   if (!c || typeof id !== "string") return <>{rotulo} (removido)</>;
   return (
-    <Link href={`/kanban/${id}`} className="font-medium text-foreground underline decoration-fg-faint underline-offset-2 hover:decoration-foreground">
+    <Link href={`/projetos/${id}`} className="font-medium text-foreground underline decoration-fg-faint underline-offset-2 hover:decoration-foreground">
       {c.titulo}
     </Link>
   );

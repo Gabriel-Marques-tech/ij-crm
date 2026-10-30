@@ -11,7 +11,7 @@
  * relatório. Falha inesperada fora disso interrompe o import e devolve o
  * relatório parcial (`interrompido`, com a ref do log).
  *
- * Card novo: pelo núcleo do `criarCard` (`inserirCard`): Oportunidade em
+ * Card novo: pelo núcleo do `criarCard` (`inserirCard`): Projeto em
  * Vendas com `criado_via=IMPORT`, TransicaoFase de entrada (`de_fase_id`
  * null, `em` = criação, origem IMPORT) e Timeline `IMPORT`. Histórico no CSV
  * → transições retroativas (uma por fase, na ordem de entrada); sem
@@ -40,17 +40,17 @@
  * pré-carga e o INSERT) → o card volta ao SAVEPOINT, refaz o match e vincula
  * ao registro que já existe.
  */
-import type { Fase, Oportunidade, Origem, Prisma } from "@prisma/client";
+import type { Fase, Projeto, Origem, Prisma } from "@prisma/client";
 import { QUEM_ATUA } from "@/lib/auth/papeis";
 import { db } from "@/lib/db";
 import { travarPipelines } from "@/lib/fases/fases";
 import { resolverContatos, resolverEmpresas } from "@/lib/contatos/match";
 import { ehDominioPublico, formatarCnpj, normalizarDominio } from "@/lib/normalizacao";
 import { registrarErro } from "@/lib/erros/registrar";
-import { mudancaDescricao } from "@/lib/oportunidades/descricao";
-import { ErroDeRegra } from "@/lib/oportunidades/erros";
-import { inserirCard, registrarMovimento } from "@/lib/oportunidades/oportunidades";
-import { aoEntrarEmTerminal, ehConflitoDeProjetoDaVenda } from "@/lib/oportunidades/terminal";
+import { mudancaDescricao } from "@/lib/projetos/descricao";
+import { ErroDeRegra } from "@/lib/projetos/erros";
+import { inserirCard, registrarMovimento } from "@/lib/projetos/projetos";
+import { aoEntrarEmTerminal, ehConflitoDeCardProjetosDaVenda } from "@/lib/projetos/terminal";
 import {
   DETALHE_PERDA_MAX,
   FASE_INICIAL_PROJETOS,
@@ -59,7 +59,7 @@ import {
   motivoDeTexto,
   valorParaCampo,
   type DadosTerminal,
-} from "@/lib/oportunidades/terminal-regras";
+} from "@/lib/projetos/terminal-regras";
 import type { CardPipefy, HistoricoFase, Ocorrencia } from "./interpretar";
 import { emLotes } from "./lotes";
 import { resolverResponsavel, type Mapeamento, type UsuarioCrm } from "./mapeamento";
@@ -106,12 +106,12 @@ type Dono = { contatoId: string; deletado: boolean; empresa: EmpresaRef | null }
 
 /** O que o lote lê antes do lock (e mantém atualizado com o que ele mesmo grava). */
 type PreCarga = {
-  existentes: Map<string, Oportunidade>;
+  existentes: Map<string, Projeto>;
   /** `TIPO:valor` → dono resolvido (merge seguido). Ausente = livre. */
   donos: Map<string, Dono>;
   /** CNPJ → empresa resolvida (viva ou não). */
   cnpjs: Map<string, EmpresaRef & { viva: boolean }>;
-  /** Oportunidade → instante da última mudança feita fora do import, se for depois do último import. */
+  /** Projeto → instante da última mudança feita fora do import, se for depois do último import. */
   editadoEm: Map<string, Date>;
 };
 
@@ -184,20 +184,20 @@ function cadeia(passos: Passo[], inicial: string | null): Transicao[] {
  * outra entrada no funil) e grava as que faltam. Transições de outra origem
  * (Kanban, WhatsApp, sistema) nunca são tocadas. Devolve quantas mudaram.
  */
-async function sincronizarTransicoes(ctx: Ctx, oportunidadeId: string, esperadas: Transicao[]): Promise<number> {
+async function sincronizarTransicoes(ctx: Ctx, projetoId: string, esperadas: Transicao[]): Promise<number> {
   if (esperadas.length === 0) return 0;
   const chave = (para: string, em: Date) => `${para}@${em.getTime()}`;
   const alvo = new Set(esperadas.map((t) => chave(t.para, t.em)));
   const paras = new Set(esperadas.map((t) => t.para));
   const temEntrada = esperadas.some((t) => t.de === null);
-  const existentes = await ctx.tx.transicaoFase.findMany({ where: { oportunidadeId, origem: "IMPORT" }, select: { id: true, deFaseId: true, paraFaseId: true, em: true } });
+  const existentes = await ctx.tx.transicaoFase.findMany({ where: { projetoId, origem: "IMPORT" }, select: { id: true, deFaseId: true, paraFaseId: true, em: true } });
   const divergentes = existentes.filter((e) => !alvo.has(chave(e.paraFaseId, e.em)) && (paras.has(e.paraFaseId) || (temEntrada && e.deFaseId === null)));
   if (divergentes.length > 0) await ctx.tx.transicaoFase.deleteMany({ where: { id: { in: divergentes.map((d) => d.id) } } });
   const ja = new Set(existentes.filter((e) => !divergentes.includes(e)).map((e) => chave(e.paraFaseId, e.em)));
   const novas = esperadas.filter((t) => !ja.has(chave(t.para, t.em)));
   if (novas.length > 0) {
     await ctx.tx.transicaoFase.createMany({
-      data: novas.map((t) => ({ oportunidadeId, deFaseId: t.de, paraFaseId: t.para, usuarioId: ctx.admin.id, origem: "IMPORT" as const, em: t.em })),
+      data: novas.map((t) => ({ projetoId, deFaseId: t.de, paraFaseId: t.para, usuarioId: ctx.admin.id, origem: "IMPORT" as const, em: t.em })),
     });
   }
   return novas.length + divergentes.length;
@@ -221,11 +221,11 @@ function dadosTerminal(ctx: Ctx, destino: Fase, card: CardPipefy): DadosTerminal
 }
 
 /** Card novo que já nasce em fase terminal (o Pipefy fechou antes do go-live): só o gancho, sem MOVIMENTACAO. */
-async function entrarTerminal(ctx: Ctx, oportunidadeId: string, pipelineChave: string, deFaseId: string, destino: Fase, em: Date, card: CardPipefy) {
+async function entrarTerminal(ctx: Ctx, projetoId: string, pipelineChave: string, deFaseId: string, destino: Fase, em: Date, card: CardPipefy) {
   let passo = 0;
   await aoEntrarEmTerminal({
     tx: ctx.tx,
-    oportunidadeId,
+    projetoId,
     pipelineChave,
     deFaseId,
     destino,
@@ -237,10 +237,10 @@ async function entrarTerminal(ctx: Ctx, oportunidadeId: string, pipelineChave: s
 }
 
 /** Movimento feito pelo import: núcleo do `moverCard` com a data do Pipefy e origem IMPORT. */
-async function moverImportado(ctx: Ctx, oportunidadeId: string, pipelineChave: string, deFaseId: string, destino: Fase, em: Date, passos: Passo[], card: CardPipefy) {
+async function moverImportado(ctx: Ctx, projetoId: string, pipelineChave: string, deFaseId: string, destino: Fase, em: Date, passos: Passo[], card: CardPipefy) {
   const origem = ctx.fases.get(deFaseId) ?? (await ctx.tx.fase.findUniqueOrThrow({ where: { id: deFaseId } }));
   await registrarMovimento(ctx.tx, {
-    oportunidadeId,
+    projetoId,
     pipelineChave,
     origem,
     destino,
@@ -255,8 +255,8 @@ async function moverImportado(ctx: Ctx, oportunidadeId: string, pipelineChave: s
 }
 
 /** Leva o projeto da venda para a fase de Projetos em que o Pipefy está. true = mudou algo. */
-async function posicionarProjeto(ctx: Ctx, vendaId: string, destino: Fase, passos: Passo[], card: CardPipefy, avisos: string[]): Promise<boolean> {
-  const proj = await ctx.tx.oportunidade.findUnique({ where: { origemOportunidadeId: vendaId }, select: { id: true, faseId: true, faseDesde: true, deletadoEm: true } });
+async function posicionarCardProjetos(ctx: Ctx, vendaId: string, destino: Fase, passos: Passo[], card: CardPipefy, avisos: string[]): Promise<boolean> {
+  const proj = await ctx.tx.projeto.findUnique({ where: { vendaOrigemId: vendaId }, select: { id: true, faseId: true, faseDesde: true, deletadoEm: true } });
   if (!proj) {
     avisos.push("Venda sem card de projeto: a fase de Projetos do Pipefy não foi aplicada.");
     return false;
@@ -275,7 +275,7 @@ async function posicionarProjeto(ctx: Ctx, vendaId: string, destino: Fase, passo
       mudou = true;
     }
   } else if (desdeHist && proj.faseDesde.getTime() !== desdeHist.getTime()) {
-    await ctx.tx.oportunidade.update({ where: { id: proj.id }, data: { faseDesde: desdeHist } });
+    await ctx.tx.projeto.update({ where: { id: proj.id }, data: { faseDesde: desdeHist } });
     mudou = true;
   }
   const inicial = [...ctx.fases.values()].find((f) => f.pipelineId === ctx.projetosId && f.chave === FASE_INICIAL_PROJETOS)?.id ?? null;
@@ -380,9 +380,9 @@ async function resolverContato(
 }
 
 /** Último instante gravado no card (Timeline/TransicaoFase): marco do import para detectar edição posterior no CRM. */
-async function marcoDoImport(ctx: Ctx, oportunidadeId: string): Promise<Date> {
-  const t = await ctx.tx.timeline.aggregate({ where: { oportunidadeId }, _max: { em: true } });
-  const f = await ctx.tx.transicaoFase.aggregate({ where: { oportunidadeId }, _max: { em: true } });
+async function marcoDoImport(ctx: Ctx, projetoId: string): Promise<Date> {
+  const t = await ctx.tx.timeline.aggregate({ where: { projetoId }, _max: { em: true } });
+  const f = await ctx.tx.transicaoFase.aggregate({ where: { projetoId }, _max: { em: true } });
   return new Date(Math.max(ctx.agora.getTime(), t._max.em?.getTime() ?? 0, f._max.em?.getTime() ?? 0));
 }
 
@@ -458,7 +458,7 @@ async function aplicarCard(ctx: Ctx, card: CardPipefy): Promise<Desfecho> {
   }
   const empresaId = empresa?.id ?? null;
 
-  const contarProjetos = async (id: string) => tx.oportunidade.count({ where: { origemOportunidadeId: id } });
+  const contarProjetos = async (id: string) => tx.projeto.count({ where: { vendaOrigemId: id } });
 
   if (!existente) {
     if (!responsavel) avisos.push(card.responsavel ? `Responsável "${card.responsavel}" sem usuário no CRM: ficou com quem importou.` : "Sem responsável no Pipefy: ficou com quem importou.");
@@ -503,9 +503,9 @@ async function aplicarCard(ctx: Ctx, card: CardPipefy): Promise<Desfecho> {
       await entrarTerminal(ctx, id, PIPELINE_VENDAS, anterior, faseVenda, desdeVenda, card);
       projetoCriado = (await contarProjetos(id)) > antes;
     }
-    if (emProjetos) await posicionarProjeto(ctx, id, destino, passosProj, card, avisos);
+    if (emProjetos) await posicionarCardProjetos(ctx, id, destino, passosProj, card, avisos);
     // Marco: tudo o que este import gravou no card vem antes dele (edição no CRM vem depois).
-    const tl = await tx.timeline.findFirstOrThrow({ where: { oportunidadeId: id, tipo: "IMPORT" }, select: { id: true, payload: true } });
+    const tl = await tx.timeline.findFirstOrThrow({ where: { projetoId: id, tipo: "IMPORT" }, select: { id: true, payload: true } });
     await tx.timeline.update({ where: { id: tl.id }, data: { payload: { ...(tl.payload as object), marco: (await marcoDoImport(ctx, id)).toISOString() } } });
     return { tipo: "criado", projetoCriado, avisos };
   }
@@ -513,7 +513,7 @@ async function aplicarCard(ctx: Ctx, card: CardPipefy): Promise<Desfecho> {
   // ---------------------------------------------------------------- atualização
   type Mudanca = { campo: string; antes: string | null; depois: string | null; truncado?: true };
   const mudancas: Mudanca[] = [];
-  const data: Prisma.OportunidadeUncheckedUpdateInput = {};
+  const data: Prisma.ProjetoUncheckedUpdateInput = {};
   const comparar = (campo: keyof typeof data & string, atual: string | null, novo: string | null) => {
     if (novo === null || novo === atual) return;
     // Descrição (até 5000): o histórico do import guarda só a prévia.
@@ -532,7 +532,7 @@ async function aplicarCard(ctx: Ctx, card: CardPipefy): Promise<Desfecho> {
   comparar("empresaId", existente.empresaId, empresaId);
   comparar("contatoId", existente.contatoId, contatoId);
   if (revisar && !existente.revisar) data.revisar = true;
-  if (Object.keys(data).length > 0) await tx.oportunidade.update({ where: { id: existente.id }, data });
+  if (Object.keys(data).length > 0) await tx.projeto.update({ where: { id: existente.id }, data });
 
   let projetoCriado = false;
   if (fechadoNoCrm) {
@@ -543,21 +543,21 @@ async function aplicarCard(ctx: Ctx, card: CardPipefy): Promise<Desfecho> {
     projetoCriado = (await contarProjetos(existente.id)) > antes;
     mudancas.push({ campo: "fase", antes: existente.faseId, depois: faseVenda.id });
   } else if (desdeHist && existente.faseDesde.getTime() !== desdeHist.getTime()) {
-    await tx.oportunidade.update({ where: { id: existente.id }, data: { faseDesde: desdeHist } });
+    await tx.projeto.update({ where: { id: existente.id }, data: { faseDesde: desdeHist } });
     mudancas.push({ campo: "faseDesde", antes: existente.faseDesde.toISOString(), depois: desdeHist.toISOString() });
   }
   // Com histórico, a entrada no funil é a 1ª fase dele, na criação do card.
   const esperadas = primeira ? [{ de: null, para: primeira, em: existente.criadoEm }, ...cadeia(passosVenda, primeira)] : [];
   const n = await sincronizarTransicoes(ctx, existente.id, esperadas);
   if (n > 0) mudancas.push({ campo: "historico", antes: null, depois: `${n} transições` });
-  if (emProjetos && !fechadoNoCrm && (await posicionarProjeto(ctx, existente.id, destino, passosProj, card, avisos))) {
+  if (emProjetos && !fechadoNoCrm && (await posicionarCardProjetos(ctx, existente.id, destino, passosProj, card, avisos))) {
     mudancas.push({ campo: "projeto", antes: null, depois: destino.id });
   }
   if (mudancas.length === 0) return { tipo: "semMudanca", projetoCriado: false, avisos };
   const marco = await marcoDoImport(ctx, existente.id);
   await tx.timeline.create({
     data: {
-      oportunidadeId: existente.id,
+      projetoId: existente.id,
       tipo: "IMPORT",
       payload: { acao: "atualizado", pipefyId: card.pipefyId, linha: card.linha, mudancas, marco: marco.toISOString() },
       usuarioId: ctx.admin.id,
@@ -572,7 +572,7 @@ async function aplicarCard(ctx: Ctx, card: CardPipefy): Promise<Desfecho> {
 async function preCarregar(tx: Tx, cards: CardPipefy[]): Promise<PreCarga> {
   const ids = cards.map((c) => c.pipefyId);
   const existentes = new Map(
-    (await emLotes(ids, (l) => tx.oportunidade.findMany({ where: { pipefyId: { in: l } } }))).map((o) => [o.pipefyId!, o] as const),
+    (await emLotes(ids, (l) => tx.projeto.findMany({ where: { pipefyId: { in: l } } }))).map((o) => [o.pipefyId!, o] as const),
   );
 
   const valores = [...new Set(cards.flatMap((c) => c.pontos.map((p) => p.valorNormalizado)))];
@@ -606,20 +606,20 @@ async function preCarregar(tx: Tx, cards: CardPipefy[]): Promise<PreCarga> {
   const opIds = [...existentes.values()].map((o) => o.id);
   const editadoEm = new Map<string, Date>();
   if (opIds.length > 0) {
-    const imports = await emLotes(opIds, (l) => tx.timeline.findMany({ where: { oportunidadeId: { in: l }, tipo: "IMPORT" }, select: { oportunidadeId: true, em: true, payload: true } }));
+    const imports = await emLotes(opIds, (l) => tx.timeline.findMany({ where: { projetoId: { in: l }, tipo: "IMPORT" }, select: { projetoId: true, em: true, payload: true } }));
     const marco = new Map<string, number>();
     for (const t of imports) {
       const m = (t.payload as { marco?: unknown } | null)?.marco;
       const v = typeof m === "string" ? Date.parse(m) : t.em.getTime();
-      marco.set(t.oportunidadeId, Math.max(marco.get(t.oportunidadeId) ?? 0, Number.isNaN(v) ? t.em.getTime() : v));
+      marco.set(t.projetoId, Math.max(marco.get(t.projetoId) ?? 0, Number.isNaN(v) ? t.em.getTime() : v));
     }
-    const tl = await emLotes(opIds, (l) => tx.timeline.groupBy({ by: ["oportunidadeId"], where: { oportunidadeId: { in: l }, tipo: { not: "IMPORT" } }, _max: { em: true } }));
-    const tr = await emLotes(opIds, (l) => tx.transicaoFase.groupBy({ by: ["oportunidadeId"], where: { oportunidadeId: { in: l }, origem: { not: "IMPORT" } }, _max: { em: true } }));
+    const tl = await emLotes(opIds, (l) => tx.timeline.groupBy({ by: ["projetoId"], where: { projetoId: { in: l }, tipo: { not: "IMPORT" } }, _max: { em: true } }));
+    const tr = await emLotes(opIds, (l) => tx.transicaoFase.groupBy({ by: ["projetoId"], where: { projetoId: { in: l }, origem: { not: "IMPORT" } }, _max: { em: true } }));
     for (const g of [...tl, ...tr]) {
       const em = g._max.em;
-      if (!em || em.getTime() <= (marco.get(g.oportunidadeId) ?? 0)) continue;
-      const atual = editadoEm.get(g.oportunidadeId);
-      if (!atual || em > atual) editadoEm.set(g.oportunidadeId, em);
+      if (!em || em.getTime() <= (marco.get(g.projetoId) ?? 0)) continue;
+      const atual = editadoEm.get(g.projetoId);
+      if (!atual || em > atual) editadoEm.set(g.projetoId, em);
     }
   }
   return { existentes, donos, cnpjs: cnpjsMap, editadoEm };
@@ -749,7 +749,7 @@ export async function aplicarCards(
     try {
       return await executarLote(lote);
     } catch (e) {
-      if (!ehConflitoDeProjetoDaVenda(e)) throw e;
+      if (!ehConflitoDeCardProjetosDaVenda(e)) throw e;
       return executarLote(lote);
     }
   }

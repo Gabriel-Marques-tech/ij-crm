@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Avatar } from "@/components/avatar";
-import { FUSO_NEGOCIO } from "@/lib/oportunidades/aging";
+import { FUSO_NEGOCIO } from "@/lib/projetos/aging";
 import type { ItemFeed } from "@/lib/ranking/calculo";
 
 const QUANDO = new Intl.DateTimeFormat("pt-BR", { timeZone: FUSO_NEGOCIO, day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
@@ -15,7 +15,7 @@ export function FeedRanking({ itens, vazio }: { itens: ItemFeed[]; vazio: string
       ) : (
         <ul className="space-y-3">
           {itens.map((i) => (
-            <li key={`${i.tipo}-${i.oportunidadeId}-${i.em.getTime()}`} className="flex gap-3 text-sm">
+            <li key={`${i.tipo}-${i.projetoId}-${i.em.getTime()}`} className="flex gap-3 text-sm">
               <Avatar nome={i.usuario.nome} usuarioId={i.usuario.id} fotoEm={i.usuario.fotoEm} tamanho="xs" className="mt-0.5" />
               <div className="min-w-0 flex-1">
                 <p className="text-fg-soft">
@@ -28,7 +28,7 @@ export function FeedRanking({ itens, vazio }: { itens: ItemFeed[]; vazio: string
                   ) : (
                     "avançou "
                   )}
-                  <Link href={`/kanban/${encodeURIComponent(i.oportunidadeId)}`} className="text-foreground hover:underline">
+                  <Link href={`/projetos/${encodeURIComponent(i.projetoId)}`} className="text-foreground hover:underline">
                     {i.titulo}
                   </Link>
                   {i.tipo === "AVANCO" && i.faseNome ? <span className="text-fg-mute"> → {i.faseNome}</span> : null}

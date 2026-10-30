@@ -16,7 +16,7 @@ import {
   type ChaveMotivoPerda,
   type DadosTerminal,
   type ErroDadosTerminal,
-} from "@/lib/oportunidades/terminal-regras";
+} from "@/lib/projetos/terminal-regras";
 
 /**
  * `tipo` = qual diálogo (ver `dialogoTerminal`): ganho pede valor, perdido pede

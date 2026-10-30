@@ -22,16 +22,16 @@ function responder(r: ResultadoPrazo): EstadoPrazoAcao {
   if (r.ok) {
     revalidatePath("/calendario");
     revalidatePath("/semana");
-    revalidatePath("/kanban/[id]", "page");
+    revalidatePath("/projetos/[id]", "page");
     return { ok: true };
   }
   return { erro: r.erro === "INVALIDO" ? (r.mensagem ?? "Dados inválidos.") : MENSAGEM[r.erro] };
 }
 
-export async function criarPrazoAction(entrada: { titulo: string; dia: string; responsavelId: string; oportunidadeId?: string | null }): Promise<EstadoPrazoAcao> {
+export async function criarPrazoAction(entrada: { titulo: string; dia: string; responsavelId: string; projetoId?: string | null }): Promise<EstadoPrazoAcao> {
   return comTratamento("calendario.criarPrazo", async (): Promise<EstadoPrazoAcao> => {
     const ator = await exigirEscrita();
-    const p = dados.extend({ oportunidadeId: id.nullable().optional() }).safeParse(entrada);
+    const p = dados.extend({ projetoId: id.nullable().optional() }).safeParse(entrada);
     if (!p.success) return { erro: "Dados inválidos." };
     return responder(await criarPrazo(ator, p.data));
   });

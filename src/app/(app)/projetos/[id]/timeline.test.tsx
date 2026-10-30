@@ -4,7 +4,7 @@ import { Timeline } from "./timeline";
 
 const entrada = (payload: object) => ({
   id: "t1",
-  oportunidadeId: "c1",
+  projetoId: "c1",
   tipo: "PRAZO" as const,
   payload,
   usuarioId: "u1",

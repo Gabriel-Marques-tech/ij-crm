@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { cn } from "cn";
 import { BORDA_AGING, DiasNaFase } from "@/components/kanban/aging";
-import { diaEmFuso, diasNaFase, nivelAging } from "@/lib/oportunidades/aging";
+import { diaEmFuso, diasNaFase, nivelAging } from "@/lib/projetos/aging";
 import { quandoRotulo, type FaixaSemana } from "@/lib/semana/agrupar";
 import type { CardSemana } from "@/lib/semana/semana";
 import { MarcarFeita } from "./marcar-feita";
@@ -34,7 +34,7 @@ export function Destaque({ c, faixa, agora, hoje }: { c: CardSemana; faixa: Faix
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
           <p className="text-2xl leading-tight font-semibold tracking-tight text-foreground md:text-3xl">{c.proximaAcao ?? "Próxima ação sem descrição"}</p>
-          <Link id="destaque-titulo" href={`/kanban/${c.id}`} className="mt-2 inline-block text-base text-fg-soft hover:text-foreground hover:underline">
+          <Link id="destaque-titulo" href={`/projetos/${c.id}`} className="mt-2 inline-block text-base text-fg-soft hover:text-foreground hover:underline">
             {c.titulo}
           </Link>
           <Meta c={c} className="mt-1" />
@@ -70,7 +70,7 @@ export function Linha({ c, agora, hoje }: { c: CardSemana; agora: Date; hoje: st
         )}
       </div>
       <div className="min-w-0 flex-1 basis-56">
-        <Link href={`/kanban/${c.id}`} className="block truncate text-sm font-medium text-foreground hover:underline">
+        <Link href={`/projetos/${c.id}`} className="block truncate text-sm font-medium text-foreground hover:underline">
           {c.titulo}
         </Link>
         <Meta c={c} />

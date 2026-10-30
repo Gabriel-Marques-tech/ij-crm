@@ -23,11 +23,11 @@ async function bruta(texto: string, extra: Record<string, unknown> = {}) {
 
 async function card(titulo: string, extra: Record<string, unknown> = {}, pipeline = "vendas") {
   const fase = await dbT.fase.findFirstOrThrow({ where: { pipeline: { chave: pipeline } }, orderBy: { ordem: "asc" } });
-  return dbT.oportunidade.create({ data: { pipelineId: fase.pipelineId, faseId: fase.id, titulo, responsavelId: joao.id, criadoVia: "UI", ...extra } });
+  return dbT.projeto.create({ data: { pipelineId: fase.pipelineId, faseId: fase.id, titulo, responsavelId: joao.id, criadoVia: "UI", ...extra } });
 }
 
-async function mexeu(mensagemBrutaId: string, oportunidadeId: string) {
-  await dbT.timeline.create({ data: { oportunidadeId, tipo: "MENSAGEM_WHATSAPP", mensagemBrutaId, usuarioId: joao.id } });
+async function mexeu(mensagemBrutaId: string, projetoId: string) {
+  await dbT.timeline.create({ data: { projetoId, tipo: "MENSAGEM_WHATSAPP", mensagemBrutaId, usuarioId: joao.id } });
 }
 
 beforeEach(async () => {

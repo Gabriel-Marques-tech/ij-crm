@@ -25,7 +25,7 @@ describe("ProximaSemana (o que era 'Próximos 7 dias' e passou do domingo)", () 
     const itens = screen.getAllByRole("listitem");
     expect(itens[0]).toHaveTextContent("Entregar proposta");
     expect(itens[1]).toHaveTextContent("Ligar para o Zé");
-    expect(screen.getByRole("link", { name: /Ligar para o Zé/ })).toHaveAttribute("href", "/kanban/c1");
+    expect(screen.getByRole("link", { name: /Ligar para o Zé/ })).toHaveAttribute("href", "/projetos/c1");
     expect(screen.getByText("SEG 02/11")).toHaveClass("font-mono");
     expect(screen.getByRole("button", { name: /Entregar proposta/ })).toBeInTheDocument();
     expect(screen.getByText(/\+2 cards com próxima ação depois de 05\/11/)).toBeInTheDocument();

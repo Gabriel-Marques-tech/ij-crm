@@ -4,7 +4,7 @@
  */
 import type { Papel } from "@prisma/client";
 import { podeEscrever, temPapelMinimo } from "@/lib/auth/papeis";
-import { inicioDoDia } from "@/lib/oportunidades/campos";
+import { inicioDoDia } from "@/lib/projetos/campos";
 
 export const TITULO_PRAZO_MAX = 200;
 

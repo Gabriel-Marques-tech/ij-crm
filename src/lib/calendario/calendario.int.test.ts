@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { dbTeste, limparBanco } from "@/test/db";
 import { invalidarCachePipelines } from "@/lib/fases/cache";
-import { inicioDoDia } from "@/lib/oportunidades/campos";
+import { inicioDoDia } from "@/lib/projetos/campos";
 import { criarPrazo, marcarPrazoFeito } from "@/lib/prazos/prazos";
 import { carregarItens, carregarItensDaSemana, resolverVisao } from "./calendario";
 import { resolverPeriodo } from "./periodo";
@@ -35,7 +35,7 @@ async function semear() {
   const mesclada = await db.empresa.create({ data: { nome: "Padaria do Zé", mergedIntoId: principal.id } });
   const fase = (chave: string) => vendas.fases.find((f) => f.chave === chave)!.id;
   const card = (titulo: string, dia: string | null, extra: { resp?: string; fase?: string; deletado?: boolean; empresaId?: string } = {}) =>
-    db.oportunidade.create({
+    db.projeto.create({
       data: {
         titulo,
         pipelineId: vendas.id,
@@ -88,7 +88,7 @@ describe("carregarItensDaSemana", () => {
     const vivo = await s.card("vivo", null);
     const lixo = await s.card("lixo", null);
     const mk = async (titulo: string, dia: string, resp = s.ana.id, cardId?: string) => {
-      const r = await criarPrazo(gil, { titulo, dia, responsavelId: resp, oportunidadeId: cardId ?? null });
+      const r = await criarPrazo(gil, { titulo, dia, responsavelId: resp, projetoId: cardId ?? null });
       if (!r.ok) throw new Error(r.erro);
       return r.id;
     };
@@ -99,7 +99,7 @@ describe("carregarItensDaSemana", () => {
     await mk("do Bruno", "2026-10-29", s.bruno.id);
     await mk("no lixo", "2026-10-29", s.ana.id, lixo.id);
     await mk("fora", "2026-11-02");
-    await db.oportunidade.update({ where: { id: lixo.id }, data: { deletadoEm: new Date() } });
+    await db.projeto.update({ where: { id: lixo.id }, data: { deletadoEm: new Date() } });
 
     const meu = await carregarItensDaSemana({ responsavelIds: [s.ana.id] }, SEMANA, ana);
     expect(meu.prazos.map((p) => [p.titulo, p.dia, p.estado])).toEqual([

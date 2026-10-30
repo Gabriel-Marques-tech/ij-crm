@@ -1,6 +1,6 @@
 /**
  * Alvo de `ATUALIZAR` (design doc §4.3 "Alvo de ATUALIZAR"). Puro: recebe as
- * oportunidades candidatas já relidas do banco (dentro da transação, depois
+ * projetos candidatos já relidos do banco (dentro da transação, depois
  * do lock) e decide qual card a mensagem atualiza.
  *
  * Ordem:

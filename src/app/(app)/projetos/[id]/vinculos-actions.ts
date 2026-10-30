@@ -8,12 +8,12 @@ import { criarContato } from "@/lib/contatos/contatos";
 import { criarEmpresa } from "@/lib/empresas/empresas";
 import { MENSAGEM_VINCULO, mensagemFalhaContato, mensagemFalhaEmpresa, type EstadoEntidade } from "@/lib/entidades/mensagens";
 import { db } from "@/lib/db";
-import { ehCampoVinculo, vincularAoCard } from "@/lib/oportunidades/vinculos";
+import { ehCampoVinculo, vincularAoCard } from "@/lib/projetos/vinculos";
 
 const id = z.string().min(1).max(64);
 
 function revalidar(cardId: string) {
-  revalidatePath(`/kanban/${cardId}`);
+  revalidatePath(`/projetos/${cardId}`);
   revalidatePath("/kanban");
   revalidatePath("/empresas", "layout");
   revalidatePath("/contatos", "layout");
@@ -36,7 +36,7 @@ export async function criarEVincularEmpresaAction(cardId: string, nome: string):
   return comTratamento("kanban.criarEmpresa", async (): Promise<EstadoEntidade> => {
     const ator = await exigirEscrita();
     if (!id.safeParse(cardId).success || typeof nome !== "string" || nome.length > 1000) return { erro: "Dados inválidos." };
-    const card = await db.oportunidade.findFirst({ where: { id: cardId, deletadoEm: null }, select: { id: true } });
+    const card = await db.projeto.findFirst({ where: { id: cardId, deletadoEm: null }, select: { id: true } });
     if (!card) return { erro: MENSAGEM_VINCULO.CARD_NAO_ENCONTRADO };
     const e = await criarEmpresa({ nome });
     if (!e.ok) return mensagemFalhaEmpresa(e);
@@ -66,7 +66,7 @@ export async function criarEVincularContatoAction(cardId: string, dados: z.input
     const ator = await exigirEscrita();
     const p = NovoContato.safeParse(dados);
     if (!id.safeParse(cardId).success || !p.success) return { erro: "Dados inválidos." };
-    const card = await db.oportunidade.findFirst({ where: { id: cardId, deletadoEm: null }, select: { empresaId: true } });
+    const card = await db.projeto.findFirst({ where: { id: cardId, deletadoEm: null }, select: { empresaId: true } });
     if (!card) return { erro: MENSAGEM_VINCULO.CARD_NAO_ENCONTRADO };
     if (p.data.empresaId && p.data.empresaId !== card.empresaId) return { erro: "A empresa do card mudou. Recarregue a página." };
     const c = await criarContato({ nome: p.data.nome, empresaId: p.data.empresaId ?? null, pontos: [p.data.telefone ?? "", p.data.email ?? ""] });

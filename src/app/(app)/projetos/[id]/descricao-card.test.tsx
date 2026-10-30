@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DescricaoCard } from "./descricao-card";
 
 const { editarCampoAction } = vi.hoisted(() => ({ editarCampoAction: vi.fn() }));
-vi.mock("../actions", () => ({ editarCampoAction }));
+vi.mock("../../kanban/actions", () => ({ editarCampoAction }));
 
 beforeEach(() => {
   editarCampoAction.mockReset();

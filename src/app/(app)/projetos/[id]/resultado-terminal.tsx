@@ -1,15 +1,15 @@
 import Link from "next/link";
 import { FolderKanban, Handshake } from "lucide-react";
-import { formatarDataHora, formatarDinheiro } from "@/lib/oportunidades/formatar";
-import type { DetalheCard } from "@/lib/oportunidades/oportunidades";
-import { ROTULO_ALERTA_VENDA, alertaDaVenda } from "@/lib/oportunidades/terminal-regras";
+import { formatarDataHora, formatarDinheiro } from "@/lib/projetos/formatar";
+import type { DetalheCard } from "@/lib/projetos/projetos";
+import { ROTULO_ALERTA_VENDA, alertaDaVenda } from "@/lib/projetos/terminal-regras";
 
 type Vinculado = { id: string; titulo: string; deletadoEm: Date | null; pipeline: { chave: string } };
 
 function LinkVinculado({ c }: { c: Vinculado }) {
   if (c.deletadoEm) return <span className="text-fg-mute">{c.titulo} (removido)</span>;
   return (
-    <Link href={`/kanban/${c.id}`} className="text-foreground underline decoration-fg-faint underline-offset-2 hover:decoration-foreground">
+    <Link href={`/projetos/${c.id}`} className="text-foreground underline decoration-fg-faint underline-offset-2 hover:decoration-foreground">
       {c.titulo}
     </Link>
   );
@@ -50,23 +50,23 @@ export function ResultadoTerminal({ card }: { card: DetalheCard }) {
       </Item>,
     );
   }
-  if (card.projeto) {
+  if (card.cardProjetos) {
     itens.push(
       <Item key="projeto" rotulo="Projeto">
         <span className="inline-flex items-center gap-1.5">
           <FolderKanban aria-hidden className="size-3.5 shrink-0 text-fg-mute" />
-          <LinkVinculado c={card.projeto} />
+          <LinkVinculado c={card.cardProjetos} />
         </span>
       </Item>,
     );
   }
-  if (card.origemOportunidade) {
-    const alerta = alertaDaVenda(card.origemOportunidade);
+  if (card.vendaOrigem) {
+    const alerta = alertaDaVenda(card.vendaOrigem);
     itens.push(
       <Item key="venda" rotulo="Venda de origem">
         <span className="inline-flex items-center gap-1.5">
           <Handshake aria-hidden className="size-3.5 shrink-0 text-fg-mute" />
-          <LinkVinculado c={card.origemOportunidade} />
+          <LinkVinculado c={card.vendaOrigem} />
           {alerta ? (
             <span
               className="rounded-full border border-danger/60 px-1.5 font-mono text-[10px] leading-4 text-fg-soft uppercase"

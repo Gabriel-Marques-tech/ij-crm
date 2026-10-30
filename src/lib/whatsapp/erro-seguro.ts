@@ -8,7 +8,7 @@
  */
 import { Prisma } from "@prisma/client";
 import { ErroLlm } from "@/lib/llm/tipos";
-import { ErroDeRegra } from "@/lib/oportunidades/erros";
+import { ErroDeRegra } from "@/lib/projetos/erros";
 
 export function erroSeguro(e: unknown): unknown {
   if (e instanceof ErroLlm || e instanceof ErroDeRegra || e instanceof Prisma.PrismaClientKnownRequestError) return e;

@@ -333,7 +333,7 @@ GAB-38, design §4.3 "Alvo de ATUALIZAR". Prompt `extracao.v2` (mesmas chaves da
 contexto). Só o pipeline **Vendas**; `projetos` é UI.
 
 - **Candidatas** no contexto (`candidatas.ts`, só leitura): cards de Vendas dos contatos/empresas casados
-  por identificador exato (CNPJ; domínio só como sugestão) + as **3 últimas oportunidades que o remetente
+  por identificador exato (CNPJ; domínio só como sugestão) + os **3 últimos projetos que o remetente
   tocou** (Timeline com o usuário dele) nos 30 min antes da mensagem — cobre mensagens picadas
   ("falei com o Gustavo" / "é da Economia Sensata" / "mando proposta sexta").
 - **Alvo** (`alvo.ts`, puro): reply a uma confirmação do bot → o card dela (`MensagemEnviada.oportunidade_id`,
@@ -469,8 +469,8 @@ Passos (`src/lib/cron/manutencao.ts`, cada um isolado, erro ⇒ ref + HTTP 500):
 
 ## Kanban
 
-`/kanban` (Vendas; `?quadro=projetos` para Projetos) e detalhe em `/kanban/[id]`. Serviço em
-`src/lib/oportunidades/`: criar/mover tomam o lock de pipeline (`travarPipelines`, ordem por id;
+`/kanban` (Vendas; `?quadro=projetos` para Projetos) e detalhe em `/projetos/[id]` (links antigos `/kanban/:id` e `/oportunidades/:id` redirecionam, ver `src/lib/rotas/antigas.ts`). Serviço em
+`src/lib/projetos/`: criar/mover tomam o lock de pipeline (`travarPipelines`, ordem por id;
 ganho em vendas trava também projetos) e recusam fase arquivada ou de outro quadro; card não nasce
 em fase terminal; todo movimento grava `TransicaoFase` (origem `UI`) + Timeline
 `MOVIMENTACAO`, e cada campo editado vira `CAMPO_ALTERADO { campo, antes, depois }`. Cor de
@@ -528,7 +528,7 @@ quadros de todos os cards envolvidos (`travarPipelines`) antes da linha.
 
 Merge (gestor+, nunca automático) fica na seção "Duplicados" do detalhe de contato/empresa:
 escolhe o outro registro e qual fica como principal, vê a prévia (quantos pontos/contatos/
-oportunidades o principal vai mostrar) e confirma. É só o ponteiro `merged_into_id` no
+projetos o principal vai mostrar) e confirma. É só o ponteiro `merged_into_id` no
 perdedor: nada é copiado nem apagado; o principal lê o grupo (`idsDoGrupo` em
 `src/lib/merge/merge.ts`), o perdedor some de listas/autocomplete e o link dele redireciona ao
 principal. Um nível só: principal vivo e não mesclado, perdedor vivo, não mesclado e sem
@@ -539,14 +539,14 @@ mesclados nele (sem cadeia, sem ciclo). "Desfazer merge" limpa o ponteiro.
 `/semana` lista os cards abertos (vivos, fora de fase terminal) em que o usuário é responsável, por
 faixa da próxima ação em dias civis de São Paulo — vencidas, hoje, próximos 7 dias (sem hoje),
 sem próxima ação — com a mais urgente em destaque. As faixas vêm de `faixaProximaAcao`
-(`src/lib/oportunidades/proxima-acao.ts`), a mesma do filtro do Kanban. "Marcar feita"
-(`src/lib/oportunidades/feita.ts`) grava, numa transação, a NOTA "Feito: …" e a próxima ação
+(`src/lib/projetos/proxima-acao.ts`), a mesma do filtro do Kanban. "Marcar feita"
+(`src/lib/projetos/feita.ts`) grava, numa transação, a NOTA "Feito: …" e a próxima ação
 (ou "sem próxima ação", só por escolha explícita) como `CAMPO_ALTERADO`. `?vendedor=<id>` só vale
 para gestor/admin e usuário ativo; para os demais o servidor ignora e mostra a própria semana.
 
 ## Tabela
 
-`/tabela`: todas as oportunidades vivas (qualquer responsável e quadro: carteira é filtro, não parede), 50 por página, com filtro, ordenação e busca feitos no banco (`src/lib/tabela/`).
+`/tabela`: todos os projetos vivos (qualquer responsável e quadro: carteira é filtro, não parede), 50 por página, com filtro, ordenação e busca feitos no banco (`src/lib/tabela/`).
 
 - **Estado na URL** (`src/lib/tabela/params.ts`), compartilhável e igual ao Kanban onde coincide: `quadro` (chaves de pipeline), `fase` (ids), `resp`, `origem` (`SEM` = sem origem), `revisar` e `terminais` (`sim`/`nao`), `acao` (`vencida,hoje,semana,sem`, mesmas faixas da Minha Semana), `de`/`ate` (criação, `YYYY-MM-DD` em SP, inclusivo), `q` (título, empresa ou contato vivos; sem acento, sem caixa e com espaços colapsados como no Kanban, via `public.unaccent` da migration `20261024174500_review_fixes`; `%`/`_` literais), `ordem`/`dir` (lista branca, desempate por id) e `pagina`. Valor inválido é ignorado.
 - **CSV**: `GET /tabela/csv?<mesmos parâmetros>` exporta todas as linhas filtradas (sem limite de página), em streaming: UTF-8 com BOM, `;`, vírgula decimal e datas dd/mm/aaaa (abre direto no Excel pt-BR). Texto que começa com `= + - @`, tab ou CR (mesmo depois de espaços) ganha um `'` visível (mitigação padrão OWASP contra formula injection). Erro antes do primeiro byte → 500 com `ref`; erro no meio do streaming não vira 500 (o 200 já saiu): o arquivo termina com a linha `EXPORTAÇÃO INCOMPLETA: erro no servidor (ref: …)`, que é o sinal de arquivo truncado. Cada lote reaplica os filtros: toda linha exportada ainda batia neles no momento do lote, sem duplicar (não é um retrato único no tempo).
@@ -943,7 +943,7 @@ Vitest. Um container de app, um Postgres, Evolution API no mesmo compose (GAB-28
 ## Convenções
 
 - Tema escuro único; tokens em `src/app/globals.css`, nunca hex solto em componente.
-- Domínio em português (`Oportunidade`, `Fase`, `Contato`); tabelas `snake_case` via `@map`.
+- Domínio em português (`Projeto`, `Fase`, `Contato`); tabelas `snake_case` via `@map`. O model `Projeto` (ex-`Oportunidade`, GAB-80) continua na tabela física `oportunidade`.
 - `NOTIFICATIONS_ENABLED` **nunca** `true` fora de produção — envios só são logados.
 - **Toda página que lê dados e toda server action chama `exigirUsuario()` /
   `exigirPapel()`** (`src/lib/auth/atual.ts`). O guard do layout `(app)` não

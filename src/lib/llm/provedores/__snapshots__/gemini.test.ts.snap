@@ -252,7 +252,7 @@ exports[`paraSchemaGemini (subconjunto de JSON Schema do responseJsonSchema) > t
       "description": "chave de uma das fases listadas no contexto, se a mensagem indicar a etapa; senão null.",
     },
     "intencao": {
-      "description": "CRIAR = lead/oportunidade nova; ATUALIZAR = novidade sobre um card que já existe (uma das OPORTUNIDADES CANDIDATAS); IGNORAR = não é sobre venda.",
+      "description": "CRIAR = lead/projeto novo; ATUALIZAR = novidade sobre um card que já existe (um dos PROJETOS CANDIDATOS); IGNORAR = não é sobre venda.",
       "enum": [
         "CRIAR",
         "ATUALIZAR",
@@ -269,7 +269,7 @@ exports[`paraSchemaGemini (subconjunto de JSON Schema do responseJsonSchema) > t
           "type": "null",
         },
       ],
-      "description": "Em ATUALIZAR: id de uma das OPORTUNIDADES CANDIDATAS do contexto (copie exatamente). Em CRIAR/IGNORAR: null. Nunca invente ids.",
+      "description": "Em ATUALIZAR: id de um dos PROJETOS CANDIDATOS do contexto (copie exatamente). Em CRIAR/IGNORAR: null. Nunca invente ids.",
     },
     "responsavel_nome": {
       "anyOf": [

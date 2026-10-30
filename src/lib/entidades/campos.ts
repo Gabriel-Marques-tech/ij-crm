@@ -4,7 +4,7 @@
  * decide o valor. Identificadores passam pela normalização compartilhada.
  */
 import { ehDominioPublico, normalizarCnpj, normalizarDominio } from "@/lib/normalizacao";
-import { UFS } from "@/lib/oportunidades/campos";
+import { UFS } from "@/lib/projetos/campos";
 
 export const NOME_MAX = 200;
 

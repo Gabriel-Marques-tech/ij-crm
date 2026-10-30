@@ -41,7 +41,7 @@ class ErroDeRegra extends Error {
  *
  * GAB-29 (criar/mover card): tome ESTE mesmo lock na transação e, dentro dela,
  * releia a fase destino e recuse se `arquivadaEm != null` ou se
- * `fase.pipelineId != oportunidade.pipelineId`. Sem isso, um card pode cair
+ * `fase.pipelineId != projeto.pipelineId`. Sem isso, um card pode cair
  * numa fase que acabou de ser arquivada aqui (a contagem pós-migração abaixo
  * só pega o caso, não o evita). Ordene fases por (ordem, criadoEm); nunca
  * assuma `ordem == índice`.
@@ -95,7 +95,7 @@ export type PipelineParaGestao = Omit<PipelineComFases, "fases"> & { fases: Fase
 export async function listarPipelinesParaGestao(): Promise<PipelineParaGestao[]> {
   const [lista, cards, de, para] = await Promise.all([
     listarPipelines({ incluirArquivadas: true }),
-    db.oportunidade.groupBy({ by: ["faseId"], where: { deletadoEm: null }, _count: { _all: true } }),
+    db.projeto.groupBy({ by: ["faseId"], where: { deletadoEm: null }, _count: { _all: true } }),
     db.transicaoFase.groupBy({ by: ["deFaseId"], _count: { _all: true } }),
     db.transicaoFase.groupBy({ by: ["paraFaseId"], _count: { _all: true } }),
   ]);
@@ -200,7 +200,7 @@ export async function editarFase(
       if (fase.arquivadaEm) throw new ErroDeRegra("FASE_ARQUIVADA");
       if (dados.tipoTerminal !== undefined && dados.tipoTerminal !== fase.tipoTerminal) {
         // Contado sob o lock do quadro: criar/mover card toma o mesmo lock.
-        const qtdCards = await tx.oportunidade.count({ where: { faseId, deletadoEm: null } });
+        const qtdCards = await tx.projeto.count({ where: { faseId, deletadoEm: null } });
         const erroCards = validarMudancaTerminal({ de: fase.tipoTerminal, para: dados.tipoTerminal, qtdCards });
         if (erroCards) throw new ErroDeRegra(erroCards);
         const ativas = await tx.fase.findMany({ where: { pipelineId: fase.pipelineId, arquivadaEm: null }, select: { id: true, tipoTerminal: true } });
@@ -289,8 +289,8 @@ export async function removerFase(
 
       // Tudo lido DEPOIS do lock, inclusive o destino (pode ter sido arquivado).
       const [qtdCards, qtdCardsDeletados, qtdTransicoes, destino] = await Promise.all([
-        tx.oportunidade.count({ where: { faseId, deletadoEm: null } }),
-        tx.oportunidade.count({ where: { faseId, deletadoEm: { not: null } } }),
+        tx.projeto.count({ where: { faseId, deletadoEm: null } }),
+        tx.projeto.count({ where: { faseId, deletadoEm: { not: null } } }),
         tx.transicaoFase.count({ where: { OR: [{ deFaseId: faseId }, { paraFaseId: faseId }] } }),
         opts.destinoFaseId
           ? tx.fase.findUnique({ where: { id: opts.destinoFaseId }, select: { id: true, pipelineId: true, arquivadaEm: true, tipoTerminal: true } })
@@ -301,23 +301,23 @@ export async function removerFase(
 
       if (qtdCards > 0 && destino) {
         const agora = new Date();
-        const cards = await tx.oportunidade.findMany({ where: { faseId, deletadoEm: null }, select: { id: true } });
+        const cards = await tx.projeto.findMany({ where: { faseId, deletadoEm: null }, select: { id: true } });
         const motivo = decisao.acao === "EXCLUIR" ? "fase_removida" : "fase_arquivada";
         await tx.transicaoFase.createMany({
-          data: cards.map((c) => ({ oportunidadeId: c.id, deFaseId: faseId, paraFaseId: destino.id, origem: "SISTEMA" as const, usuarioId: por.id, em: agora })),
+          data: cards.map((c) => ({ projetoId: c.id, deFaseId: faseId, paraFaseId: destino.id, origem: "SISTEMA" as const, usuarioId: por.id, em: agora })),
         });
         await tx.timeline.createMany({
           data: cards.map((c) => ({
-            oportunidadeId: c.id,
+            projetoId: c.id,
             tipo: "MOVIMENTACAO" as const,
             payload: { deFaseId: faseId, paraFaseId: destino.id, motivo },
             usuarioId: por.id,
             em: agora,
           })),
         });
-        await tx.oportunidade.updateMany({ where: { faseId, deletadoEm: null }, data: { faseId: destino.id, faseDesde: agora } });
+        await tx.projeto.updateMany({ where: { faseId, deletadoEm: null }, data: { faseId: destino.id, faseDesde: agora } });
         // Escritor que não tomou o lock pode ter criado card no meio: não arquiva com card vivo dentro.
-        if ((await tx.oportunidade.count({ where: { faseId, deletadoEm: null } })) > 0) throw new ErroDeRegra("FASE_EM_USO");
+        if ((await tx.projeto.count({ where: { faseId, deletadoEm: null } })) > 0) throw new ErroDeRegra("FASE_EM_USO");
       }
 
       if (decisao.acao === "EXCLUIR") {

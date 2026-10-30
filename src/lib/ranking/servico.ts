@@ -105,15 +105,15 @@ export async function carregarDados({ inicio, fim }: Intervalo, cliente: Consult
   for (const l of linhas) {
     switch (l.tipo) {
       case "GANHO":
-        d.ganhos.push({ oportunidadeId: l.op!, titulo: l.titulo!, responsavelId: l.usuario!, dataGanho: l.em!, valorFechado: l.valor, criadoEm: l.criado!, origem: l.origem });
+        d.ganhos.push({ projetoId: l.op!, titulo: l.titulo!, responsavelId: l.usuario!, dataGanho: l.em!, valorFechado: l.valor, criadoEm: l.criado!, origem: l.origem });
         break;
       case "PERDIDO":
-        d.perdas.push({ oportunidadeId: l.op!, responsavelId: l.usuario!, em: l.em!, origem: l.origem });
+        d.perdas.push({ projetoId: l.op!, responsavelId: l.usuario!, em: l.em!, origem: l.origem });
         break;
       case "TRANSICAO":
         d.transicoes.push({
           id: l.tid!,
-          oportunidadeId: l.op!,
+          projetoId: l.op!,
           titulo: l.titulo!,
           usuarioId: l.usuario,
           origem: l.origem!,
@@ -126,10 +126,10 @@ export async function carregarDados({ inicio, fim }: Intervalo, cliente: Consult
         });
         break;
       case "ACAO":
-        d.acoes.push({ oportunidadeId: l.op!, usuarioId: l.usuario!, em: l.em! });
+        d.acoes.push({ projetoId: l.op!, usuarioId: l.usuario!, em: l.em! });
         break;
       case "CRIACAO":
-        d.criacoes.push({ oportunidadeId: l.op!, usuarioId: l.usuario!, em: l.em! });
+        d.criacoes.push({ projetoId: l.op!, usuarioId: l.usuario!, em: l.em! });
         break;
       case "ABERTO":
         d.abertos.push({ responsavelId: l.usuario!, quantidade: l.qtd ?? 0, orcamento: l.valor ?? 0 });
@@ -151,7 +151,7 @@ export async function listarParticipantes(): Promise<{ participantes: Participan
     where: {
       OR: [
         { ativo: false },
-        { ativo: true, ...QUEM_ATUA, OR: [{ papel: "VENDEDOR" }, { oportunidades: { some: { deletadoEm: null, pipeline: { chave: QUADRO_VENDAS } } } }] },
+        { ativo: true, ...QUEM_ATUA, OR: [{ papel: "VENDEDOR" }, { projetos: { some: { deletadoEm: null, pipeline: { chave: QUADRO_VENDAS } } } }] },
       ],
     },
     orderBy: { nome: "asc" },

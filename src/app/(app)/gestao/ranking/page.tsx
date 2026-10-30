@@ -4,8 +4,8 @@ import { exigirPapel } from "@/lib/auth/atual";
 import { obterConfiguracao } from "@/lib/configuracao/servico";
 import { comTratamento, ehInesperado } from "@/lib/erros/registrar";
 import { CONFIG_RANKING } from "@/lib/ranking/config";
-import { formatarDataHora } from "@/lib/oportunidades/formatar";
-import { nomesDeUsuarios } from "@/lib/oportunidades/oportunidades";
+import { formatarDataHora } from "@/lib/projetos/formatar";
+import { nomesDeUsuarios } from "@/lib/projetos/projetos";
 import { ConfigRankingForm } from "./config-form";
 
 export const metadata = { title: "Ranking · Gestão" };

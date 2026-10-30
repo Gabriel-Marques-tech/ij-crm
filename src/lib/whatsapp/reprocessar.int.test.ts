@@ -87,7 +87,7 @@ describe("reprocessarMensagem (botão do painel e cron)", () => {
     const m = await bruta({ status: "FALHA", tentativas: 1, erro: "LLM HTTP ref=abc12345" });
     const r = await reprocessarMensagem(m.id, ["FALHA", "PENDENTE_REVISAO"]);
     expect(r).toMatchObject({ tipo: "PROCESSADA", confirmacao: expect.stringMatching(/^✅ Reprocessada:/u) });
-    expect(await dbT.oportunidade.count()).toBe(1);
+    expect(await dbT.projeto.count()).toBe(1);
     expect(await dbT.mensagemBruta.findUniqueOrThrow({ where: { id: m.id } })).toMatchObject({ status: "PROCESSADA", tentativas: 2 });
   });
 
@@ -98,7 +98,7 @@ describe("reprocessarMensagem (botão do painel e cron)", () => {
     const rs = await Promise.all([reprocessarMensagem(m.id, ["FALHA"]), reprocessarMensagem(m.id, ["FALHA"])]);
     expect(rs.map((r) => r.tipo).sort()).toEqual(expect.arrayContaining(["PROCESSADA"]));
     expect(chamadas).toHaveBeenCalledTimes(1);
-    expect(await dbT.oportunidade.count()).toBe(1);
+    expect(await dbT.projeto.count()).toBe(1);
   });
 
   it("PROCESSADA nunca é reprocessada (não duplica card)", async () => {

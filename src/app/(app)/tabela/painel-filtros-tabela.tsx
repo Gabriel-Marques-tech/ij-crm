@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
-import { formatarDia } from "@/lib/oportunidades/formatar";
+import { formatarDia } from "@/lib/projetos/formatar";
 import {
   FILTROS_TABELA_VAZIOS,
   OPCOES_ACAO,
@@ -100,7 +100,7 @@ export function BarraFiltrosTabela(props: Props) {
         </Button>
       ) : null}
       <span className={cn("font-mono text-xs text-fg-faint tabular", pendente && "animate-pulse")} aria-live="polite">
-        {pendente ? "atualizando…" : `${total} oportunidade(s)`}
+        {pendente ? "atualizando…" : `${total} projeto(s)`}
       </span>
     </div>
   );
@@ -227,7 +227,7 @@ function PainelFiltros({ filtros, pipelines, pessoas, meuId, total, ativos, muda
           <Button variant="ghost" size="sm" disabled={ativos === 0} onClick={() => mudar(FILTROS_TABELA_VAZIOS)}>
             Limpar filtros
           </Button>
-          <span className="font-mono text-xs text-fg-faint tabular">{total} oportunidade(s)</span>
+          <span className="font-mono text-xs text-fg-faint tabular">{total} projeto(s)</span>
         </SheetFooter>
       </SheetContent>
     </Sheet>

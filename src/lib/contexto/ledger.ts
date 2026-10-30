@@ -19,7 +19,7 @@
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import type { EntradaHistorico, SituacaoHistorico } from "@/lib/llm/prompts/extracao.v2";
-import { PIPELINE_VENDAS } from "@/lib/oportunidades/terminal-regras";
+import { PIPELINE_VENDAS } from "@/lib/projetos/terminal-regras";
 import type { Janela } from "./janela";
 
 type Cliente = Prisma.TransactionClient | typeof db;
@@ -64,14 +64,14 @@ export async function ledgerDaJanela(e: Recorte, cliente: Cliente = db): Promise
       recebidaEm: true,
       status: true,
       timeline: {
-        where: { tipo: "MENSAGEM_WHATSAPP", oportunidade: CARD_VIVO_EM_VENDAS },
+        where: { tipo: "MENSAGEM_WHATSAPP", projeto: CARD_VIVO_EM_VENDAS },
         orderBy: { em: "desc" },
         take: 1,
-        select: { oportunidade: { select: { id: true, titulo: true } } },
+        select: { projeto: { select: { id: true, titulo: true } } },
       },
     },
   });
-  return linhas.map((l) => ({ id: l.id, em: l.recebidaEm, texto: l.texto, card: l.timeline[0]?.oportunidade ?? null, situacao: SITUACAO[l.status] ?? null }));
+  return linhas.map((l) => ({ id: l.id, em: l.recebidaEm, texto: l.texto, card: l.timeline[0]?.projeto ?? null, situacao: SITUACAO[l.status] ?? null }));
 }
 
 /**
@@ -81,13 +81,13 @@ export async function ledgerDaJanela(e: Recorte, cliente: Cliente = db): Promise
  */
 export async function cardsDaJanela(e: Recorte, max = MAX_CARDS_LEDGER, cliente: Cliente = db): Promise<string[]> {
   const toques = await cliente.timeline.findMany({
-    where: { tipo: "MENSAGEM_WHATSAPP", oportunidade: CARD_VIVO_EM_VENDAS, mensagemBruta: filtroLedger(e) },
+    where: { tipo: "MENSAGEM_WHATSAPP", projeto: CARD_VIVO_EM_VENDAS, mensagemBruta: filtroLedger(e) },
     orderBy: [{ em: "desc" }, { id: "desc" }],
-    distinct: ["oportunidadeId"],
+    distinct: ["projetoId"],
     take: max,
-    select: { oportunidadeId: true },
+    select: { projetoId: true },
   });
-  return toques.map((t) => t.oportunidadeId);
+  return toques.map((t) => t.projetoId);
 }
 
 /** Cards distintos mexidos num ledger já lido, do mais recente (para o resumo). */

@@ -7,8 +7,8 @@ import { Switch } from "@/components/ui/switch";
 import { MensagemErro } from "@/components/erros/mensagem-erro";
 import { executarAcao, type FalhaUI } from "@/lib/erros/cliente";
 import { hrefSeguro } from "@/lib/href";
-import type { CampoEditavel } from "@/lib/oportunidades/campos";
-import { editarCampoAction } from "../actions";
+import type { CampoEditavel } from "@/lib/projetos/campos";
+import { editarCampoAction } from "../../kanban/actions";
 
 export type TipoCampo = "texto" | "textarea" | "url" | "dinheiro" | "data" | "select";
 

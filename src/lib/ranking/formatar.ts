@@ -1,5 +1,5 @@
 /** Formatação dos números do ranking (GAB-44). Sem dado → "—". */
-import { formatarDinheiro } from "@/lib/oportunidades/formatar";
+import { formatarDinheiro } from "@/lib/projetos/formatar";
 import type { Destaque } from "./calculo";
 
 export const TRACO = "—";

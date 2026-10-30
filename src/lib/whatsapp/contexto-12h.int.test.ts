@@ -69,8 +69,8 @@ describe("ledger da janela atual no contexto", () => {
   it("mensagens picadas horas depois: histórico no prompt, card do ledger candidato (aplicado, com revisar)", async () => {
     const base = new Date("2026-10-27T11:00:00Z"); // 08:00 SP
     const c = await enviar("#crm falei com o Gustavo da Economia Sensata", base, () => saida({ contato: { nome: "Gustavo" }, empresa: { nome: "Economia Sensata" } }));
-    const id = (c.r as { oportunidadeId: string }).oportunidadeId;
-    await dbT.timeline.updateMany({ where: { oportunidadeId: id }, data: { em: base } });
+    const id = (c.r as { projetoId: string }).projetoId;
+    await dbT.timeline.updateMany({ where: { projetoId: id }, data: { em: base } });
     await bruta("da Maria, outro lead", new Date(base.getTime() + MIN), { remetenteUsuarioId: maria.id, status: "PROCESSADA" });
     await bruta("bom dia grupo", new Date(base.getTime() + 2 * MIN), { status: "CLASSIFICADA_IRRELEVANTE" });
 
@@ -82,50 +82,50 @@ describe("ledger da janela atual no contexto", () => {
     expect(a.prompt).not.toContain("da Maria");
     expect(a.prompt).not.toContain("bom dia grupo");
     expect(a.prompt).toMatch(new RegExp(`- id=${id} .* via=ledger `));
-    expect(a.r).toMatchObject({ tipo: "PROCESSADA", oportunidadeId: id });
-    const card = await dbT.oportunidade.findUniqueOrThrow({ where: { id } });
+    expect(a.r).toMatchObject({ tipo: "PROCESSADA", projetoId: id });
+    const card = await dbT.projeto.findUniqueOrThrow({ where: { id } });
     expect(card).toMatchObject({ proximaAcao: "mandar proposta", revisar: true });
   });
 
   it("dentro dos 30 min e um card só na janela → ✅ sem revisar (regra do GAB-38 mantida)", async () => {
     const base = new Date("2026-10-27T11:00:00Z");
     const c = await enviar("#crm falei com o Gustavo da Economia Sensata", base, () => saida({ contato: { nome: "Gustavo" }, empresa: { nome: "Economia Sensata" } }));
-    const id = (c.r as { oportunidadeId: string }).oportunidadeId;
-    await dbT.timeline.updateMany({ where: { oportunidadeId: id }, data: { em: base } });
+    const id = (c.r as { projetoId: string }).projetoId;
+    await dbT.timeline.updateMany({ where: { projetoId: id }, data: { em: base } });
     const a = await enviar("#crm mando proposta sexta", new Date(base.getTime() + 5 * MIN), (p) =>
       saida({ intencao: "ATUALIZAR", oportunidade_id: idVia(p, "recente"), campos: { proxima_acao: "mandar proposta" } }),
     );
     expect(a.prompt).toMatch(new RegExp(`- id=${id} .* via=recente,ledger `));
-    expect((await dbT.oportunidade.findUniqueOrThrow({ where: { id } })).revisar).toBe(false);
+    expect((await dbT.projeto.findUniqueOrThrow({ where: { id } })).revisar).toBe(false);
   });
 
   it("outro card do remetente na janela → o ✅ do único recente vira revisar", async () => {
     const base = new Date("2026-10-27T11:00:00Z");
     const ana = await enviar("#crm falei com a Ana da Alfa", base, () => saida({ contato: { nome: "Ana" }, empresa: { nome: "Alfa" } }));
-    const idAna = (ana.r as { oportunidadeId: string }).oportunidadeId;
-    await dbT.timeline.updateMany({ where: { oportunidadeId: idAna }, data: { em: base } });
+    const idAna = (ana.r as { projetoId: string }).projetoId;
+    await dbT.timeline.updateMany({ where: { projetoId: idAna }, data: { em: base } });
     const g = await enviar("#crm falei com o Gustavo da Economia Sensata", new Date(base.getTime() + 60 * MIN), () =>
       saida({ contato: { nome: "Gustavo" }, empresa: { nome: "Economia Sensata" } }),
     );
-    const idG = (g.r as { oportunidadeId: string }).oportunidadeId;
-    await dbT.timeline.updateMany({ where: { oportunidadeId: idG }, data: { em: new Date(base.getTime() + 60 * MIN) } });
+    const idG = (g.r as { projetoId: string }).projetoId;
+    await dbT.timeline.updateMany({ where: { projetoId: idG }, data: { em: new Date(base.getTime() + 60 * MIN) } });
     const a = await enviar("#crm mando proposta sexta", new Date(base.getTime() + 65 * MIN), (p) =>
       saida({ intencao: "ATUALIZAR", oportunidade_id: idVia(p, "recente"), campos: { proxima_acao: "mandar proposta" } }),
     );
-    expect(a.r).toMatchObject({ tipo: "PROCESSADA", oportunidadeId: idG });
-    expect((await dbT.oportunidade.findUniqueOrThrow({ where: { id: idG } })).revisar).toBe(true);
+    expect(a.r).toMatchObject({ tipo: "PROCESSADA", projetoId: idG });
+    expect((await dbT.projeto.findUniqueOrThrow({ where: { id: idG } })).revisar).toBe(true);
   });
 
   it("valor/data que só estão no histórico não são copiados pelo ATUALIZAR (campo cai, revisar)", async () => {
     const base = new Date("2026-10-27T11:00:00Z");
     const c = await enviar("#crm falei com o Gustavo da Economia Sensata", base, () => saida({ contato: { nome: "Gustavo" }, empresa: { nome: "Economia Sensata" } }));
-    const id = (c.r as { oportunidadeId: string }).oportunidadeId;
+    const id = (c.r as { projetoId: string }).projetoId;
     await enviar("#crm orçamento uns 15k, proposta sexta", new Date(base.getTime() + MIN), () => saida({ intencao: "ATUALIZAR", oportunidade_id: id, confianca: 0.9 }));
     const r = await enviar("#crm ele pediu o case também", new Date(base.getTime() + 2 * MIN), (p) =>
       saida({ intencao: "ATUALIZAR", oportunidade_id: idVia(p, "recente"), campos: { orcamento_previsto: "uns 15k", proxima_acao: "mandar o case", proxima_acao_em: "sexta" } }),
     );
-    expect(r.r).toMatchObject({ tipo: "PROCESSADA", oportunidadeId: id });
-    const card = await dbT.oportunidade.findUniqueOrThrow({ where: { id } });
+    expect(r.r).toMatchObject({ tipo: "PROCESSADA", projetoId: id });
+    const card = await dbT.projeto.findUniqueOrThrow({ where: { id } });
     expect(card).toMatchObject({ orcamentoPrevisto: null, proximaAcaoEm: null, proximaAcao: "mandar o case", revisar: true });
   });
 

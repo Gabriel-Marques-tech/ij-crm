@@ -123,7 +123,7 @@ describe("avaliarSemTag", () => {
     expect(envios()).toBe(1); // agiu: confirma no grupo
     const bruta = await dbT.mensagemBruta.findUniqueOrThrow({ where: { id: r.mensagemId } });
     expect(bruta).toMatchObject({ semTag: true, status: "PROCESSADA", texto: RELEVANTE_COM_ID.texto });
-    expect(await dbT.oportunidade.count()).toBe(1);
+    expect(await dbT.projeto.count()).toBe(1);
     expect(await contador()).toEqual({ dias: 0, total: 0, naoClassificadas: 0 });
   });
 
@@ -131,14 +131,14 @@ describe("avaliarSemTag", () => {
     definirRespostaMock(() => saida({ contato: { nome: "Carla" }, empresa: { nome: "Carla Consultoria" }, confianca: 0.95 }));
     const criado = await avaliarSemTag(msg(RELEVANTE_COM_ID.texto), joao.id);
     if (criado.tipo !== "PERSISTIDA" || criado.processamento.tipo !== "PROCESSADA") throw new Error("card não criado");
-    await dbT.mensagemEnviada.create({ data: { eventoId: "BOTCONF1", grupoJid: GRUPO, texto: "✅ Carla", oportunidadeId: criado.processamento.oportunidadeId } });
+    await dbT.mensagemEnviada.create({ data: { eventoId: "BOTCONF1", grupoJid: GRUPO, texto: "✅ Carla", projetoId: criado.processamento.projetoId } });
     definirClassificacaoMock(() => ({ relevante: true, confianca: 0.9 }));
     definirRespostaMock(() => saida({ intencao: "ATUALIZAR", campos: { proxima_acao: "ligar", proxima_acao_em: "quinta" }, confianca: 0.95 }));
     const r = await avaliarSemTag(msg("ela pediu pra ligar quinta", { respondendoEventoId: "BOTCONF1" }), joao.id);
-    expect(r).toMatchObject({ tipo: "PERSISTIDA", processamento: { tipo: "PROCESSADA", oportunidadeId: criado.processamento.oportunidadeId } });
+    expect(r).toMatchObject({ tipo: "PERSISTIDA", processamento: { tipo: "PROCESSADA", projetoId: criado.processamento.projetoId } });
     if (r.tipo !== "PERSISTIDA" || r.processamento.tipo !== "PROCESSADA") return;
     expect(r.processamento.confirmacao).toMatch(/^↪️ entendi como atualização: /);
-    expect(await dbT.oportunidade.count()).toBe(1);
+    expect(await dbT.projeto.count()).toBe(1);
   });
 
   it("relevante + extração com confiança abaixo de LLM_LIMIAR_SEM_TAG → PENDENTE_REVISAO em silêncio, nenhum card", async () => {
@@ -152,7 +152,7 @@ describe("avaliarSemTag", () => {
     const bruta = await dbT.mensagemBruta.findUniqueOrThrow({ where: { id: r.mensagemId } });
     expect(bruta.status).toBe("PENDENTE_REVISAO");
     expect(bruta.resultadoLlm).toMatchObject({ aplicacao: { tipo: "PENDENTE", motivo: "SEM_TAG_INCERTO" } });
-    expect(await dbT.oportunidade.count()).toBe(0);
+    expect(await dbT.projeto.count()).toBe(0);
 
     // Limiar configurável: 0.75 → a mesma extração age (com identificador no texto).
     process.env.LLM_LIMIAR_SEM_TAG = "0.75";
@@ -170,7 +170,7 @@ describe("avaliarSemTag", () => {
     expect(envios()).toBe(0);
     const bruta = await dbT.mensagemBruta.findUniqueOrThrow({ where: { id: r.mensagemId } });
     expect(bruta.resultadoLlm).toMatchObject({ aplicacao: { tipo: "PENDENTE", motivo: "SEM_TAG_SEM_IDENTIFICADOR" } });
-    expect(await dbT.oportunidade.count()).toBe(0);
+    expect(await dbT.projeto.count()).toBe(0);
   });
 
   it("extração diz IGNORAR com confiança baixa → não apaga: PENDENTE_REVISAO", async () => {

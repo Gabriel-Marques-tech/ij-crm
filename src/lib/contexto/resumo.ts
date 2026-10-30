@@ -119,7 +119,7 @@ async function gerar(
   try {
     const [usuario, cards] = await Promise.all([
       db.usuario.findUnique({ where: { id: usuarioId }, select: { nome: true } }),
-      db.oportunidade.findMany({ where: { id: { in: cardsDoLedger(ledger, MAX_CARDS_RESUMO) } }, select: { titulo: true, fase: { select: { nome: true } } } }),
+      db.projeto.findMany({ where: { id: { in: cardsDoLedger(ledger, MAX_CARDS_RESUMO) } }, select: { titulo: true, fase: { select: { nome: true } } } }),
     ]);
     const r = await resumirJanela(
       { vendedor: usuario?.nome ?? "vendedor", mensagens: ledger, cards: cards.map((c) => ({ titulo: c.titulo, fase: c.fase.nome })) },

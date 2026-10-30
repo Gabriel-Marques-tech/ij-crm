@@ -48,7 +48,7 @@ export default async function EmpresasPage({ searchParams }: { searchParams: Pro
                   <td className="hidden px-4 py-2.5 font-mono text-xs text-fg-soft sm:table-cell">{e.dominioEmail ?? "—"}</td>
                   <td className="hidden px-4 py-2.5 text-fg-soft lg:table-cell">{[e.cidade, e.estado].filter(Boolean).join(" · ") || "—"}</td>
                   <td className="px-4 py-2.5 text-right font-mono tabular text-fg-soft">{e._count.contatos}</td>
-                  <td className="px-4 py-2.5 text-right font-mono tabular text-fg-soft">{e._count.oportunidades}</td>
+                  <td className="px-4 py-2.5 text-right font-mono tabular text-fg-soft">{e._count.projetos}</td>
                 </tr>
               ))}
             </tbody>

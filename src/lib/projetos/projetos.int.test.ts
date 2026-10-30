@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { dbTeste, limparBanco } from "@/test/db";
 import { invalidarCachePipelines } from "@/lib/fases/cache";
 import { travarPipelines } from "@/lib/fases/fases";
-import { adicionarNota, criarCard, editarCard, listarQuadro, moverCard, obterCard } from "./oportunidades";
+import { adicionarNota, criarCard, editarCard, listarQuadro, moverCard, obterCard } from "./projetos";
 
 const db = dbTeste();
 
@@ -52,16 +52,16 @@ describe("criarCard", () => {
     expect(r.ok).toBe(true);
     if (!r.ok) return;
 
-    const op = await db.oportunidade.findUniqueOrThrow({ where: { id: r.id } });
+    const op = await db.projeto.findUniqueOrThrow({ where: { id: r.id } });
     expect(op.titulo).toBe("Padaria do Zé");
     expect(op.criadoVia).toBe("UI");
     expect(op.responsavelId).toBe(vendedora.id);
     expect(op.faseId).toBe(fase(vendas, "em_negociacao").id);
     expect(op.faseDesde.getTime()).toBeGreaterThanOrEqual(antes - 1000);
 
-    const trans = await db.transicaoFase.findMany({ where: { oportunidadeId: op.id } });
+    const trans = await db.transicaoFase.findMany({ where: { projetoId: op.id } });
     expect(trans).toMatchObject([{ deFaseId: null, paraFaseId: op.faseId, origem: "UI", usuarioId: vendedora.id }]);
-    const tl = await db.timeline.findMany({ where: { oportunidadeId: op.id } });
+    const tl = await db.timeline.findMany({ where: { projetoId: op.id } });
     expect(tl).toMatchObject([{ tipo: "CRIACAO", usuarioId: vendedora.id, payload: { faseId: op.faseId, via: "UI" } }]);
   });
 
@@ -75,7 +75,7 @@ describe("criarCard", () => {
       ok: false,
       erro: "FASE_TERMINAL",
     });
-    expect(await db.oportunidade.count()).toBe(0);
+    expect(await db.projeto.count()).toBe(0);
     expect(await db.transicaoFase.count()).toBe(0);
   });
 
@@ -85,7 +85,7 @@ describe("criarCard", () => {
     expect(await criarCard({ pipelineId: vendas.id, faseId: fase(projetos, "em_execucao").id, titulo: "X" }, vendedora)).toEqual({ ok: false, erro: "FASE_DE_OUTRO_PIPELINE" });
     await db.fase.update({ where: { id: fase(vendas, "em_negociacao").id }, data: { arquivadaEm: new Date() } });
     expect(await criarCard({ pipelineId: vendas.id, faseId: fase(vendas, "em_negociacao").id, titulo: "X" }, vendedora)).toEqual({ ok: false, erro: "FASE_ARQUIVADA" });
-    expect(await db.oportunidade.count()).toBe(0);
+    expect(await db.projeto.count()).toBe(0);
   });
 });
 
@@ -95,21 +95,21 @@ describe("moverCard", () => {
     const c = await criarCard({ pipelineId: vendas.id, faseId: fase(vendas, "em_negociacao").id, titulo: "Acme" }, vendedora);
     if (!c.ok) throw new Error(c.erro);
     const velho = new Date("2026-01-01T00:00:00Z");
-    await db.oportunidade.update({ where: { id: c.id }, data: { faseDesde: velho } });
+    await db.projeto.update({ where: { id: c.id }, data: { faseDesde: velho } });
 
     // qualquer direção: para trás
     const r = await moverCard(c.id, fase(vendas, "primeiro_contato").id, outro);
     expect(r).toEqual({ ok: true, mudou: true, terminal: null });
 
-    const op = await db.oportunidade.findUniqueOrThrow({ where: { id: c.id } });
+    const op = await db.projeto.findUniqueOrThrow({ where: { id: c.id } });
     expect(op.faseId).toBe(fase(vendas, "primeiro_contato").id);
     expect(op.faseDesde.getTime()).toBeGreaterThan(velho.getTime());
 
-    const t = await db.transicaoFase.findFirstOrThrow({ where: { oportunidadeId: c.id, deFaseId: { not: null } } });
+    const t = await db.transicaoFase.findFirstOrThrow({ where: { projetoId: c.id, deFaseId: { not: null } } });
     expect(t).toMatchObject({ deFaseId: fase(vendas, "em_negociacao").id, paraFaseId: fase(vendas, "primeiro_contato").id, usuarioId: outro.id, origem: "UI" });
     expect(t.em.getTime()).toBe(op.faseDesde.getTime());
 
-    const tl = await db.timeline.findFirstOrThrow({ where: { oportunidadeId: c.id, tipo: "MOVIMENTACAO" } });
+    const tl = await db.timeline.findFirstOrThrow({ where: { projetoId: c.id, tipo: "MOVIMENTACAO" } });
     expect(tl).toMatchObject({ usuarioId: outro.id, payload: { deFaseId: fase(vendas, "em_negociacao").id, paraFaseId: fase(vendas, "primeiro_contato").id } });
   });
 
@@ -140,10 +140,10 @@ describe("moverCard", () => {
     expect(await moverCard(c.id, fase(vendas, "primeiro_contato").id, vendedora)).toEqual({ ok: false, erro: "FASE_ARQUIVADA" });
     expect(await moverCard(c.id, "nao-existe", vendedora)).toEqual({ ok: false, erro: "FASE_NAO_ENCONTRADA" });
 
-    await db.oportunidade.update({ where: { id: c.id }, data: { deletadoEm: new Date() } });
+    await db.projeto.update({ where: { id: c.id }, data: { deletadoEm: new Date() } });
     expect(await moverCard(c.id, fase(vendas, "perdido").id, vendedora)).toEqual({ ok: false, erro: "CARD_NAO_ENCONTRADO" });
 
-    const op = await db.oportunidade.findUniqueOrThrow({ where: { id: c.id } });
+    const op = await db.projeto.findUniqueOrThrow({ where: { id: c.id } });
     expect(op.faseId).toBe(fase(vendas, "em_negociacao").id);
     expect(await db.transicaoFase.count()).toBe(1); // só a de criação
   });
@@ -194,12 +194,12 @@ describe("editarCard", () => {
     );
     expect(r2).toEqual({ ok: true, alterados: ["orcamentoPrevisto", "responsavelId", "revisar", "proximaAcaoEm"] });
 
-    const op = await db.oportunidade.findUniqueOrThrow({ where: { id: c.id } });
+    const op = await db.projeto.findUniqueOrThrow({ where: { id: c.id } });
     expect(op.orcamentoPrevisto?.toFixed(2)).toBe("13000.00");
     expect(op.responsavelId).toBe(outro.id);
     expect(op.revisar).toBe(true);
 
-    const tl = await db.timeline.findMany({ where: { oportunidadeId: c.id, tipo: "CAMPO_ALTERADO" }, orderBy: { em: "asc" } });
+    const tl = await db.timeline.findMany({ where: { projetoId: c.id, tipo: "CAMPO_ALTERADO" }, orderBy: { em: "asc" } });
     const payloads = tl.map((t) => t.payload);
     expect(payloads).toEqual([
       { campo: "dor", antes: null, depois: "Site lento" },
@@ -221,7 +221,7 @@ describe("editarCard", () => {
     await db.usuario.update({ where: { id: outro.id }, data: { ativo: false } });
     expect(await editarCard(c.id, { responsavelId: outro.id }, vendedora)).toEqual({ ok: false, erro: "RESPONSAVEL_INVALIDO" });
     expect(await editarCard(c.id, { titulo: "" }, vendedora)).toEqual({ ok: false, erro: "TITULO_INVALIDO" });
-    await db.oportunidade.update({ where: { id: c.id }, data: { deletadoEm: new Date() } });
+    await db.projeto.update({ where: { id: c.id }, data: { deletadoEm: new Date() } });
     expect(await editarCard(c.id, { dor: "x" }, vendedora)).toEqual({ ok: false, erro: "CARD_NAO_ENCONTRADO" });
     expect(await db.timeline.count({ where: { tipo: "CAMPO_ALTERADO" } })).toBe(0);
   });
@@ -234,7 +234,7 @@ describe("adicionarNota", () => {
     if (!c.ok) throw new Error(c.erro);
     expect(await adicionarNota(c.id, "   ", vendedora)).toEqual({ ok: false, erro: "NOTA_INVALIDA" });
     expect(await adicionarNota(c.id, " Ligou, pediu proposta até sexta ", vendedora)).toEqual({ ok: true });
-    const nota = await db.timeline.findFirstOrThrow({ where: { oportunidadeId: c.id, tipo: "NOTA" } });
+    const nota = await db.timeline.findFirstOrThrow({ where: { projetoId: c.id, tipo: "NOTA" } });
     expect(nota).toMatchObject({ usuarioId: vendedora.id, payload: { texto: "Ligou, pediu proposta até sexta" } });
     expect(nota.em).toBeInstanceOf(Date);
   });
@@ -247,7 +247,7 @@ describe("leitura", () => {
     const b = await criarCard({ pipelineId: vendas.id, faseId: fase(vendas, "primeiro_contato").id, titulo: "Apagado" }, vendedora);
     await criarCard({ pipelineId: projetos.id, faseId: fase(projetos, "em_execucao").id, titulo: "Projeto" }, vendedora);
     if (!a.ok || !b.ok) throw new Error();
-    await db.oportunidade.update({ where: { id: b.id }, data: { deletadoEm: new Date() } });
+    await db.projeto.update({ where: { id: b.id }, data: { deletadoEm: new Date() } });
     await db.fase.update({ where: { id: fase(vendas, "em_negociacao").id }, data: { arquivadaEm: new Date() } });
     invalidarCachePipelines();
 
@@ -267,7 +267,7 @@ describe("leitura", () => {
     const d = await obterCard(c.id);
     expect(d?.timeline.map((t) => t.tipo)).toEqual(["CRIACAO", "MOVIMENTACAO", "NOTA"]);
     expect(d?.timeline[2].usuario?.nome).toBe("Ana Vendas");
-    await db.oportunidade.update({ where: { id: c.id }, data: { deletadoEm: new Date() } });
+    await db.projeto.update({ where: { id: c.id }, data: { deletadoEm: new Date() } });
     expect(await obterCard(c.id)).toBeNull();
   });
 });

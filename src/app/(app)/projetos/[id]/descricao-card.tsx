@@ -4,8 +4,8 @@ import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { MensagemErro } from "@/components/erros/mensagem-erro";
 import { executarAcao, type FalhaUI } from "@/lib/erros/cliente";
-import { DESCRICAO_MAX } from "@/lib/oportunidades/descricao";
-import { editarCampoAction } from "../actions";
+import { DESCRICAO_MAX } from "@/lib/projetos/descricao";
+import { editarCampoAction } from "../../kanban/actions";
 
 /**
  * Bloco "Descrição" do card: texto puro (React escapa; sem HTML/markdown),

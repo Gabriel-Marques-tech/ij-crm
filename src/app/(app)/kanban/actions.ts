@@ -4,12 +4,12 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { exigirEscrita, exigirUsuario } from "@/lib/auth/atual";
 import { comTratamento, type Inesperado } from "@/lib/erros/registrar";
-import { descricaoSchema, ehCampoEditavel, interpretarCampo } from "@/lib/oportunidades/campos";
-import { adicionarNota, criarCard, editarCard, moverCard, type ErroOportunidade } from "@/lib/oportunidades/oportunidades";
-import { DETALHE_PERDA_MAX, type DadosTerminal } from "@/lib/oportunidades/terminal-regras";
+import { descricaoSchema, ehCampoEditavel, interpretarCampo } from "@/lib/projetos/campos";
+import { adicionarNota, criarCard, editarCard, moverCard, type ErroProjeto } from "@/lib/projetos/projetos";
+import { DETALHE_PERDA_MAX, type DadosTerminal } from "@/lib/projetos/terminal-regras";
 import { salvarVisualizacaoKanban } from "@/lib/preferencias/servico";
 
-const MENSAGEM: Record<ErroOportunidade, string> = {
+const MENSAGEM: Record<ErroProjeto, string> = {
   CARD_NAO_ENCONTRADO: "Card não encontrado (pode ter sido excluído). Recarregue a página.",
   PIPELINE_NAO_ENCONTRADO: "Quadro não encontrado.",
   FASE_NAO_ENCONTRADA: "Fase não encontrada. Recarregue a página.",
@@ -41,7 +41,7 @@ const id = z.string().min(1).max(64);
 
 function revalidar(cardId?: string) {
   revalidatePath("/kanban");
-  if (cardId) revalidatePath(`/kanban/${cardId}`);
+  if (cardId) revalidatePath(`/projetos/${cardId}`);
 }
 
 /** `descricao`: opcional (formulário do + no Kanban). */

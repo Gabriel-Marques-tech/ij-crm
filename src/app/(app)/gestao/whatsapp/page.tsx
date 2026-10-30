@@ -4,7 +4,7 @@ import { ErroCarregamento } from "@/components/erro-carregamento";
 import { PageHeader } from "@/components/shell/page-header";
 import { exigirPapel } from "@/lib/auth/atual";
 import { comTratamento, ehInesperado } from "@/lib/erros/registrar";
-import { formatarDataHora } from "@/lib/oportunidades/formatar";
+import { formatarDataHora } from "@/lib/projetos/formatar";
 import { carregarPainel, listarFila, opcoesDoPainel, type ItemFila } from "@/lib/whatsapp/painel";
 import { AcoesMensagem } from "./acoes-mensagem";
 import { VincularRemetente } from "./vincular-remetente";
@@ -208,7 +208,7 @@ export default async function WhatsappPage({ searchParams }: { searchParams: Pro
                     </td>
                     <td className={`${TD} text-xs`}>
                       {r.card && !r.card.excluido ? (
-                        <Link href={`/kanban/${encodeURIComponent(r.card.id)}`} className={LINK}>
+                        <Link href={`/projetos/${encodeURIComponent(r.card.id)}`} className={LINK}>
                           {r.card.titulo}
                         </Link>
                       ) : r.card ? (
