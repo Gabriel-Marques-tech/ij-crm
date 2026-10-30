@@ -273,7 +273,11 @@ perdida depois do ganho) e o card de projetos está vivo, os dois **ficam
 separados** — a venda em Vendas, o projeto em Projetos —, com o
 `origem_oportunidade_id` intacto e uma Timeline `ciclo_unico_nao_unido` em cada
 um. A 2ª saída de `scripts/verificar-ciclo-unico.sql` lista esses pares (id,
-título, fase e responsável de cada lado), antes e depois.
+título, fase e responsável de cada lado), antes e depois. Na Timeline, cada um
+linka o outro. Se a venda de um par não unido for **ganha de novo**, ela segue
+para o Handoff como card próprio (o projeto da v1 não é mexido) e os dois cards
+ganham um aviso `reganho_projeto_existente` com link um para o outro — a gestão
+decide se arquiva um deles.
 
 Neste deploy, na ordem:
 

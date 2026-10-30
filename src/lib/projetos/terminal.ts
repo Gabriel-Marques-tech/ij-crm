@@ -143,4 +143,16 @@ async function seguirParaHandoff(ctx: ContextoTerminal) {
       em,
     },
   });
+  // Par "não unido" da migração (GAB-81): a venda foi reaberta/perdida e o card de
+  // projetos da v1 continuou vivo. Re-ganho não mexe nele: só avisa nos dois cards.
+  const anterior = await tx.projeto.findFirst({ where: { vendaOrigemId: ctx.projetoId, deletadoEm: null, absorvidoPorId: null }, select: { id: true } });
+  if (anterior) {
+    const aviso = ctx.instante();
+    await tx.timeline.createMany({
+      data: [
+        { projetoId: ctx.projetoId, tipo: "VINCULO_PROJETO", payload: { evento: "reganho_projeto_existente", projetoId: anterior.id }, usuarioId: ctx.porUsuarioId, em: aviso },
+        { projetoId: anterior.id, tipo: "VINCULO_PROJETO", payload: { evento: "reganho_projeto_existente", vendaId: ctx.projetoId }, usuarioId: ctx.porUsuarioId, em: aviso },
+      ],
+    });
+  }
 }

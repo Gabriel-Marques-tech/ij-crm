@@ -146,6 +146,20 @@ describe("ganho em vendas (ciclo único, GAB-81)", () => {
     await expect(db.projeto.create({ data: dados })).rejects.toMatchObject({ code: "P2002" });
   });
 
+  it("re-ganho de venda de par NÃO unido: segue para o Handoff e avisa nos dois cards; o projeto anterior não é mexido", async () => {
+    const { vendas, projetos, ana, bruno, vendaId } = await semear();
+    const anterior = await db.projeto.create({
+      data: { pipelineId: projetos.id, faseId: fase(projetos, "em_execucao").id, titulo: "Site (projeto v1)", responsavelId: bruno.id, criadoVia: "UI", vendaOrigemId: vendaId },
+    });
+    expect(await moverCard(vendaId, fase(vendas, "contrato_assinado").id, ana, { dadosTerminal: {} })).toMatchObject({ ok: true, mudou: true });
+    expect(await db.projeto.findUniqueOrThrow({ where: { id: vendaId } })).toMatchObject({ faseId: fase(projetos, "recepcao").id, vendedorId: ana.id });
+    expect(await db.projeto.findUniqueOrThrow({ where: { id: anterior.id } })).toMatchObject({ faseId: fase(projetos, "em_execucao").id, deletadoEm: null, vendaOrigemId: vendaId });
+    expect((await tl(vendaId)).at(-1)).toMatchObject({ tipo: "VINCULO_PROJETO", usuarioId: ana.id, payload: { evento: "reganho_projeto_existente", projetoId: anterior.id } });
+    expect((await tl(anterior.id)).at(-1)).toMatchObject({ tipo: "VINCULO_PROJETO", usuarioId: ana.id, payload: { evento: "reganho_projeto_existente", vendaId } });
+    // Sem par anterior vivo (ou absorvido), nada de aviso.
+    expect(await db.timeline.count({ where: { tipo: "VINCULO_PROJETO" } })).toBe(2);
+  });
+
   it("marco Handoff arquivado ou ausente → erro de regra, nada muda", async () => {
     const { vendas, projetos, ana, vendaId } = await semear();
     const ganho = fase(vendas, "contrato_assinado").id;
