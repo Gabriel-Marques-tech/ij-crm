@@ -345,6 +345,26 @@ describe("PERDIDO sem motivo em Projetos", () => {
   });
 });
 
+describe("casca do ciclo único (GAB-81)", () => {
+  it("pipefy_id que ficou no card de projetos absorvido: prévia e import recusam com mensagem própria", async () => {
+    const { admin } = await preparar();
+    const vendas = await fase("vendas", "primeiro_contato");
+    const em = await fase("projetos", "em_execucao");
+    const venda = await db.projeto.create({ data: { pipelineId: vendas.pipelineId, faseId: vendas.id, titulo: "Venda", responsavelId: admin.id, criadoVia: "UI", pipefyId: "500" } });
+    await db.projeto.create({
+      data: { pipelineId: em.pipelineId, faseId: em.id, titulo: "Casca", responsavelId: admin.id, criadoVia: "UI", pipefyId: "1", absorvidoPorId: venda.id, deletadoEm: new Date() },
+    });
+    const arq = mini("1;Projeto;Primeiro Contato;10/01/2026 10:00;;;;;;;;");
+    const msg = `Este ID do Pipefy é de um card de projetos unido ao Projeto ${venda.id} no ciclo único: não é reimportado (o histórico está nesse Projeto).`;
+    const p = await calcularPrevia(arq, { nomeArquivo: "x.csv" });
+    if (!p.ok) throw new Error(p.erro);
+    expect(p.previa.erros.map((e) => e.mensagem)).toEqual([msg]);
+    const r = await importarConteudo(arq, undefined, admin, AGORA);
+    if (!r.ok) throw new Error(r.erro);
+    expect(r.relatorio.erros.map((e) => e.mensagem)).toEqual([msg]);
+  });
+});
+
 describe("transições do import", () => {
   it("histórico corrigido no arquivo: troca só as transições IMPORT divergentes, nunca as de outra origem", async () => {
     const { admin } = await preparar();

@@ -140,6 +140,15 @@ type Transicao = { de: string | null; para: string; em: Date };
 
 const chavePonto = (tipo: string, valor: string) => `${tipo}:${valor}`;
 
+/**
+ * GAB-81: `pipefy_id` que ficou na casca de um card de projetos unido pela migração
+ * do ciclo único (a venda já tinha outro `pipefy_id`). Não reimporta, e não confunde
+ * com lixeira: o histórico desse card está no Projeto que o absorveu.
+ */
+export function mensagemCardAbsorvido(absorvidoPorId: string): string {
+  return `Este ID do Pipefy é de um card de projetos unido ao Projeto ${absorvidoPorId} no ciclo único: não é reimportado (o histórico está nesse Projeto).`;
+}
+
 function pulado(motivo: string): Desfecho {
   return { tipo: "pulado", motivo };
 }
@@ -408,6 +417,7 @@ async function aplicarCard(ctx: Ctx, card: CardPipefy): Promise<Desfecho> {
   const primeira = cadeiaVenda[0]?.para ?? null;
 
   const existente = ctx.pre.existentes.get(card.pipefyId) ?? null;
+  if (existente?.absorvidoPorId) return pulado(mensagemCardAbsorvido(existente.absorvidoPorId));
   if (existente?.deletadoEm) return pulado("Card excluído no CRM (está na lixeira): não é reimportado.");
   if (existente && existente.pipelineId !== ctx.vendasId && existente.pipelineId !== ctx.projetosId) {
     return pulado("Este ID do Pipefy pertence a um card fora de Vendas/Projetos.");
