@@ -35,6 +35,7 @@ import { ehDominioPublico, normalizarDominio } from "@/lib/normalizacao";
 import { ErroDeRegra } from "@/lib/projetos/erros";
 import { criarCardTravado } from "@/lib/projetos/projetos";
 import { PIPELINE_VENDAS } from "@/lib/projetos/terminal-regras";
+import { FASES_DO_WHATSAPP } from "./ciclo-vendas";
 import { aplicarAtualizacao, pipelinesParaTravar } from "./atualizar";
 import {
   FASE_PADRAO_CRIAR,
@@ -149,7 +150,7 @@ export async function aplicarExtracao(tx: Tx, e: EntradaAplicacao): Promise<Desf
 
   // ---- PLANO: fase
   const fases = await tx.fase.findMany({
-    where: { pipelineId: vendas.id, arquivadaEm: null },
+    where: { pipelineId: vendas.id, arquivadaEm: null, ...FASES_DO_WHATSAPP },
     orderBy: [{ ordem: "asc" }, { criadoEm: "asc" }],
     select: { id: true, chave: true, nome: true, isTerminal: true },
   });

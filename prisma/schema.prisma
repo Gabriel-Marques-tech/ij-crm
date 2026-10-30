@@ -34,6 +34,20 @@ enum TipoTerminal {
   PERDIDO
 }
 
+/// GAB-81: marcos FIXOS do ciclo único do Projeto (spec fase 2 §4.2). Cada marco é
+/// uma fase só (único no banco) num quadro fixo: Vendas = PROPOSTA,
+/// MONTANDO_CONTRATO, GANHO, PERDIDO; Projetos = HANDOFF, EXECUCAO, FINALIZADO.
+/// Fase sem marco = subfase livre da Gestão. Regras em src/lib/fases/marcos.ts.
+enum Marco {
+  PROPOSTA
+  MONTANDO_CONTRATO
+  GANHO
+  PERDIDO
+  HANDOFF
+  EXECUCAO
+  FINALIZADO
+}
+
 enum Origem {
   COLD_CALL
   RD
@@ -100,6 +114,8 @@ model Usuario {
   atualizadoEm      DateTime  @updatedAt @map("atualizado_em")
 
   projetos     Projeto[]   @relation("responsavel")
+  /// GAB-81: Projetos que esta pessoa ganhou (vendedor no momento do ganho).
+  vendas            Projeto[]   @relation("vendedor")
   transicoes        TransicaoFase[]
   timeline          Timeline[]
   mensagensBrutas   MensagemBruta[]
@@ -237,6 +253,9 @@ model Fase {
   tipoTerminal      TipoTerminal? @map("tipo_terminal")
   cor               String?
   limiteDiasAlerta  Int?          @map("limite_dias_alerta")
+  /// GAB-81: marco fixo do ciclo (null = subfase). Marco não é apagado, arquivado,
+  /// reordenado fora da ordem canônica nem muda de tipo terminal.
+  marco             Marco?        @unique
   // Fase com histórico (transicao_fase.de_fase_id é RESTRICT) não pode ser
   // apagada: é arquivada. Some do Kanban e da criação de cards, mantém o histórico.
   arquivadaEm       DateTime?     @map("arquivada_em")
@@ -279,11 +298,19 @@ model Projeto {
   revisar               Boolean    @default(false)
   faseDesde             DateTime   @default(now()) @map("fase_desde")
   criadoVia             CriadoVia  @map("criado_via")
-  // Único: uma venda gera no máximo UM card de projeto, mesmo reaberta e ganha de novo (GAB-32).
+  // v1 (GAB-32): card de projetos gerado pelo ganho desta venda. GAB-81: o ganho não cria mais
+  // card; só cards absorvidos pela migração ainda têm este campo. Coluna fica até a limpeza.
   vendaOrigemId         String?    @unique @map("origem_oportunidade_id")
   reabertaDeId          String?    @map("reaberta_de_id")
   pipefyId              String?    @unique @map("pipefy_id")
   deletadoEm            DateTime?  @map("deletado_em")
+  /// GAB-81: card de projetos da v1 que a migração do ciclo único uniu à venda de
+  /// origem (Timeline/TransicaoFase/prazos foram para ela). Fica soft-deletado e
+  /// fora da lixeira, só como registro, até o ticket de limpeza.
+  absorvidoPorId        String?    @map("absorvido_por_id")
+  /// GAB-81: responsável no momento do GANHO (o card segue para Projetos e pode
+  /// mudar de responsável). O ranking credita ganho/perda a ele.
+  vendedorId            String?    @map("vendedor_id")
   criadoEm              DateTime   @default(now()) @map("criado_em")
   atualizadoEm          DateTime   @updatedAt @map("atualizado_em")
 
@@ -292,12 +319,16 @@ model Projeto {
   empresa               Empresa?   @relation(fields: [empresaId], references: [id])
   contato               Contato?   @relation(fields: [contatoId], references: [id])
   responsavel           Usuario    @relation("responsavel", fields: [responsavelId], references: [id])
+  vendedor              Usuario?  @relation("vendedor", fields: [vendedorId], references: [id], onDelete: SetNull)
   vendaOrigem           Projeto?  @relation("vendaParaCardProjetos", fields: [vendaOrigemId], references: [id])
-  // Card do quadro Projetos gerado pelo ganho desta venda (conceito da v1; o ciclo único é o GAB-81).
+  // Card de projetos da v1 gerado pelo ganho desta venda (hoje: só a casca absorvida, GAB-81).
   cardProjetos          Projeto?  @relation("vendaParaCardProjetos")
   // SET NULL explícito: card reaberto é histórico e sobrevive à deleção definitiva da origem (GAB-36).
   reabertaDe            Projeto?  @relation("reabertura", fields: [reabertaDeId], references: [id], onDelete: SetNull)
   reaberturas           Projeto[] @relation("reabertura")
+  // Apagar de vez o Projeto leva junto a casca absorvida (não tem mais histórico próprio).
+  absorvidoPor          Projeto?  @relation("absorcao", fields: [absorvidoPorId], references: [id], onDelete: Cascade)
+  absorvidos            Projeto[] @relation("absorcao")
   transicoes            TransicaoFase[]
   timeline              Timeline[]
   mensagensEnviadas     MensagemEnviada[]
@@ -309,6 +340,8 @@ model Projeto {
   @@index([contatoId])
   @@index([proximaAcaoEm])
   @@index([reabertaDeId])
+  @@index([absorvidoPorId])
+  @@index([vendedorId])
   @@map("oportunidade")
 }
 

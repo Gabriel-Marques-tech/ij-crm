@@ -23,7 +23,6 @@ const base: CardCliente = {
   estado: null,
   valorFechado: null,
   motivoPerda: null,
-  alertaVenda: null,
 };
 
 describe("CardVisual: prévia da descrição", () => {

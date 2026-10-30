@@ -5,7 +5,7 @@ import { removerFase } from "@/lib/fases/fases";
 import { adicionarPonto, criarContato } from "@/lib/contatos/contatos";
 import { encontrarContatoPorIdentificador } from "@/lib/contatos/match";
 import { criarEmpresa } from "@/lib/empresas/empresas";
-import { criarCard, moverCard, obterCard } from "@/lib/projetos/projetos";
+import { criarCard, obterCard } from "@/lib/projetos/projetos";
 import { listarQuadro } from "@/lib/projetos/projetos";
 import { listarCardsDoVendedor } from "@/lib/semana/semana";
 import { travarPipelines } from "@/lib/fases/fases";
@@ -47,6 +47,14 @@ async function semear() {
 }
 
 const fase = (p: { fases: { chave: string; id: string }[] }, chave: string) => p.fases.find((f) => f.chave === chave)!;
+
+/** Card de projetos ligado à venda como a v1 deixava (o ganho não cria mais, GAB-81; dados antigos têm). */
+async function projetoLegado(projetos: { id: string; fases: { chave: string; id: string }[] }, vendaId: string, extra: { absorvidoPorId?: string; deletadoEm?: Date } = {}) {
+  const v = await db.projeto.findUniqueOrThrow({ where: { id: vendaId } });
+  return db.projeto.create({
+    data: { pipelineId: projetos.id, faseId: fase(projetos, "em_execucao").id, titulo: v.titulo, responsavelId: v.responsavelId, criadoVia: "UI", vendaOrigemId: vendaId, ...extra },
+  });
+}
 const tipos = async (id: string) => (await db.timeline.findMany({ where: { projetoId: id }, orderBy: [{ em: "asc" }, { id: "asc" }] })).map((t) => t.tipo);
 
 beforeEach(async () => {
@@ -101,22 +109,23 @@ describe("soft-delete e restauração de card", () => {
     expect(await db.transicaoFase.count({ where: { projetoId: cardId, deFaseId: fase(vendas, "proposta").id } })).toBe(1);
   });
 
-  it("excluir venda com projeto vivo: projeto vê a venda removida; restaurar limpa o aviso", async () => {
-    const { vendas, vend, gestor, cardId } = await semear();
-    expect(await moverCard(cardId, fase(vendas, "contrato_assinado").id, vend, { dadosTerminal: {} })).toMatchObject({ ok: true });
-    const projeto = await db.projeto.findFirstOrThrow({ where: { vendaOrigemId: cardId } });
+  it("casca absorvida pelo ciclo único (GAB-81) não aparece na lixeira, não restaura nem é apagada sozinha; vai junto com o Projeto", async () => {
+    const { projetos, vend, gestor, admin, cardId } = await semear();
+    const casca = await projetoLegado(projetos, cardId, { absorvidoPorId: cardId, deletadoEm: new Date() });
+    expect((await listarCardsNaLixeira()).map((c) => c.id)).toEqual([]);
+    expect(await restaurarCard(casca.id, gestor)).toMatchObject({ ok: false, erro: "CARD_NAO_ENCONTRADO" });
+    expect(await apagarCardDefinitivo(casca.id, admin, casca.titulo)).toMatchObject({ ok: false, erro: "CARD_NAO_ENCONTRADO" });
     await excluirCard(cardId, vend);
-    expect((await obterCard(projeto.id))!.vendaOrigem!.deletadoEm).not.toBeNull();
-    await restaurarCard(cardId, gestor);
-    expect((await obterCard(projeto.id))!.vendaOrigem!.deletadoEm).toBeNull();
+    expect((await listarCardsNaLixeira()).map((c) => c.id)).toEqual([cardId]);
+    expect(await apagarCardDefinitivo(cardId, admin, "Site da padaria")).toEqual({ ok: true });
+    expect(await db.projeto.count({ where: { id: { in: [cardId, casca.id] } } })).toBe(0);
   });
 });
 
 describe("deleção definitiva de card", () => {
   it("só admin, só da lixeira, com o título digitado; leva Timeline/transições; projeto fica sem vínculo e com nota", async () => {
-    const { vendas, vend, gestor, admin, cardId } = await semear();
-    await moverCard(cardId, fase(vendas, "contrato_assinado").id, vend, { dadosTerminal: {} });
-    const projeto = await db.projeto.findFirstOrThrow({ where: { vendaOrigemId: cardId } });
+    const { projetos, vend, gestor, admin, cardId } = await semear();
+    const projeto = await projetoLegado(projetos, cardId);
 
     expect(await apagarCardDefinitivo(cardId, admin, "Site da padaria")).toMatchObject({ ok: false, erro: "NAO_ESTA_NA_LIXEIRA" });
     await excluirCard(cardId, vend);
@@ -218,8 +227,8 @@ describe("review do PR #12", () => {
   });
 
   it("apagar card de vez espera o lock do quadro do card ligado (pipeline → linha)", async () => {
-    const { vendas, projetos, vend, admin, cardId } = await semear();
-    await moverCard(cardId, fase(vendas, "contrato_assinado").id, vend, { dadosTerminal: {} });
+    const { projetos, vend, admin, cardId } = await semear();
+    await projetoLegado(projetos, cardId);
     await excluirCard(cardId, vend);
 
     let soltar!: () => void;
@@ -248,13 +257,12 @@ describe("review do PR #12", () => {
   });
 
   it("apagar card de vez em paralelo com troca de vínculo no card ligado: os dois terminam", async () => {
-    const { vendas, vend, admin } = await semear();
+    const { vendas, projetos, vend, admin } = await semear();
     const empresas = await Promise.all(["E0", "E1", "E2", "E3", "E4"].map((nome) => criarEmpresa({ nome })));
     for (let i = 0; i < 5; i++) {
       const c = await criarCard({ pipelineId: vendas.id, faseId: fase(vendas, "proposta").id, titulo: `Venda ${i}` }, vend);
       if (!c.ok) throw new Error(c.erro);
-      await moverCard(c.id, fase(vendas, "contrato_assinado").id, vend, { dadosTerminal: {} });
-      const projeto = await db.projeto.findFirstOrThrow({ where: { vendaOrigemId: c.id } });
+      const projeto = await projetoLegado(projetos, c.id);
       await excluirCard(projeto.id, vend);
       const e = empresas[i];
       if (!e.ok) throw new Error("setup");

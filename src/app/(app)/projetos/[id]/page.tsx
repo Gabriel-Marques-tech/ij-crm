@@ -53,10 +53,15 @@ export default async function CardPage({ params }: { params: Promise<{ id: strin
   const nomesFases = new Map(todasFases.map((f) => [f.id, f.nome]));
   const fasesDoQuadro = (pipelines.find((p) => p.id === card.pipelineId)?.fases ?? []).filter((f) => f.arquivadaEm === null || f.id === card.faseId);
 
-  // Venda ↔ projeto (GAB-32): links da Timeline. Soft-deletado fica de fora → "removido".
+  // Ciclo único (GAB-81): a Timeline herdada da v1 cita a venda/o card de projetos que
+  // agora são este mesmo card (`mesmoCard`). Pares NÃO unidos seguem como dois cards: o
+  // irmão vivo e não absorvido vira link; o resto aparece como "removido".
   const relacionados = new Map<string, CardRelacionado>(
-    [card.cardProjetos, card.vendaOrigem].flatMap((c) => (c && !c.deletadoEm ? [[c.id, { titulo: c.titulo, quadro: c.pipeline.chave }] as const] : [])),
+    [card.vendaOrigem, card.cardProjetos].flatMap((c) =>
+      c && !c.deletadoEm && !c.absorvidoPorId ? [[c.id, { titulo: c.titulo, quadro: c.pipeline.chave }] as const] : [],
+    ),
   );
+  const mesmoCard = new Set([card.id, ...card.absorvidos.map((a) => a.id)]);
 
   const dias = diasNaFase(card.faseDesde, agora);
   const nivel = nivelAging(dias, card.fase.limiteDiasAlerta);
@@ -208,7 +213,7 @@ export default async function CardPage({ params }: { params: Promise<{ id: strin
 
         <section className="rounded-xl border border-border bg-surface p-4">
           <h2 className="mb-4 text-sm font-medium">Timeline</h2>
-          <Timeline entradas={card.timeline} fases={nomesFases} nomes={nomes} relacionados={relacionados} />
+          <Timeline entradas={card.timeline} fases={nomesFases} nomes={nomes} relacionados={relacionados} mesmoCard={mesmoCard} />
         </section>
       </div>
     </>

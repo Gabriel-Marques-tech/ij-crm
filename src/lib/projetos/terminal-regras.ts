@@ -7,8 +7,6 @@ import type { TipoTerminal } from "@prisma/client";
 
 export const PIPELINE_VENDAS = "vendas";
 export const PIPELINE_PROJETOS = "projetos";
-/** Fase onde nasce o card de projeto. Achada pela chave, nunca pela posição (§4.2). */
-export const FASE_INICIAL_PROJETOS = "em_execucao";
 
 export const MOTIVOS_PERDA = [
   { chave: "preco", rotulo: "Preço" },
@@ -119,23 +117,3 @@ export function motivoDeTexto(texto: string | null): { motivo: ChaveMotivoPerda 
   }
   return { motivo: "outro", detalhe: texto };
 }
-
-export type AlertaVenda = "reaberta" | "perdida" | "removida";
-
-/**
- * Aviso do card de PROJETO enquanto a venda de origem não está em ganho
- * (reaberta, perdida ou removida). O projeto nunca é movido/apagado sozinho:
- * o aviso é para alguém decidir. Card sem venda de origem → null.
- */
-export function alertaDaVenda(origem: { deletadoEm: Date | null; fase: { tipoTerminal: TipoTerminal | null } } | null): AlertaVenda | null {
-  if (!origem) return null;
-  if (origem.deletadoEm) return "removida";
-  if (origem.fase.tipoTerminal === "GANHO") return null;
-  return origem.fase.tipoTerminal === "PERDIDO" ? "perdida" : "reaberta";
-}
-
-export const ROTULO_ALERTA_VENDA: Record<AlertaVenda, string> = {
-  reaberta: "venda reaberta",
-  perdida: "venda perdida",
-  removida: "venda removida",
-};

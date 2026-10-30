@@ -17,8 +17,9 @@
  * → transições retroativas (uma por fase, na ordem de entrada); sem
  * histórico, só a entrada e `fase_desde`. Movimentos e fases terminais pelo
  * núcleo do `moverCard` (`registrarMovimento` → ganchos do GAB-32): ganho em
- * Vendas cria o projeto pelo mesmo caminho do Kanban (um por venda). Card do
- * Pipefy numa fase de Projetos = venda ganha + projeto movido para lá.
+ * Vendas leva o MESMO card para o Handoff de Projetos, como no Kanban (ciclo
+ * único, GAB-81). Card do Pipefy numa fase de Projetos = ganho em Vendas e o
+ * card segue de Handoff até a fase de lá (histórico do Pipefy, se houver).
  *
  * PERDIDO sem motivo: nunca inventa. O card é pulado ("PERDIDO sem motivo no
  * export."), salvo se o gestor escolheu na prévia um motivo padrão.
@@ -27,7 +28,8 @@
  * campos com valor no CSV sobrescrevem, campo vazio mantém o do CRM —
  * MAS: se o card foi mexido no CRM (Timeline/TransicaoFase que não são do
  * import) depois do último import e depois do "Atualizado em" do CSV, ele não
- * é tocado e vai para o relatório; e card em fase terminal nunca sai dela.
+ * é tocado e vai para o relatório; card em fase terminal nunca sai dela; card
+ * que já seguiu para Projetos no CRM nunca volta para Vendas.
  * Transições IMPORT que divergem do histórico do arquivo são trocadas; as de
  * outra origem nunca. Card na lixeira não volta.
  *
@@ -50,10 +52,9 @@ import { registrarErro } from "@/lib/erros/registrar";
 import { mudancaDescricao } from "@/lib/projetos/descricao";
 import { ErroDeRegra } from "@/lib/projetos/erros";
 import { inserirCard, registrarMovimento } from "@/lib/projetos/projetos";
-import { aoEntrarEmTerminal, ehConflitoDeCardProjetosDaVenda } from "@/lib/projetos/terminal";
+import { aoEntrarEmTerminal } from "@/lib/projetos/terminal";
 import {
   DETALHE_PERDA_MAX,
-  FASE_INICIAL_PROJETOS,
   PIPELINE_PROJETOS,
   PIPELINE_VENDAS,
   motivoDeTexto,
@@ -83,6 +84,7 @@ export type Relatorio = {
   /** Linhas/cards não gravados (erro de linha do CSV ou do card). */
   pulados: number;
   duplicadas: number;
+  /** Cards que seguiram para o quadro Projetos neste import (ganho → Handoff). Nome da v1 mantido. */
   projetosCriados: number;
   erros: Ocorrencia[];
   avisos: Ocorrencia[];
@@ -138,6 +140,15 @@ type Transicao = { de: string | null; para: string; em: Date };
 
 const chavePonto = (tipo: string, valor: string) => `${tipo}:${valor}`;
 
+/**
+ * GAB-81: `pipefy_id` que ficou na casca de um card de projetos unido pela migração
+ * do ciclo único (a venda já tinha outro `pipefy_id`). Não reimporta, e não confunde
+ * com lixeira: o histórico desse card está no Projeto que o absorveu.
+ */
+export function mensagemCardAbsorvido(absorvidoPorId: string): string {
+  return `Este ID do Pipefy é de um card de projetos unido ao Projeto ${absorvidoPorId} no ciclo único: não é reimportado (o histórico está nesse Projeto).`;
+}
+
 function pulado(motivo: string): Desfecho {
   return { tipo: "pulado", motivo };
 }
@@ -147,12 +158,12 @@ function faseDoMapa(ctx: Ctx, chave: string): Fase | null {
   return id ? (ctx.fases.get(id) ?? null) : null;
 }
 
-/** Ganho de Vendas para onde vai a venda de um card que o Pipefy já pôs em Projetos. */
+/** Ganho de Vendas por onde passa um card que o Pipefy já pôs em Projetos: o marco Ganho. */
 function faseGanhoVendas(ctx: Ctx): Fase | null {
   const ganhos = [...ctx.fases.values()]
     .filter((f) => f.pipelineId === ctx.vendasId && f.tipoTerminal === "GANHO" && !f.arquivadaEm)
     .sort((a, b) => a.ordem - b.ordem);
-  return ganhos.find((f) => f.chave === "contrato_assinado") ?? ganhos[0] ?? null;
+  return ganhos.find((f) => f.marco === "GANHO") ?? ganhos.find((f) => f.chave === "contrato_assinado") ?? ganhos[0] ?? null;
 }
 
 const entradaDe = (passos: Passo[], faseId: string): Date | null => {
@@ -162,8 +173,8 @@ const entradaDe = (passos: Passo[], faseId: string): Date | null => {
 
 /**
  * Cadeia de transições retroativas: uma por fase com data de entrada, na
- * ordem. `inicial` = fase de onde a cadeia parte (entrada no funil, ou
- * em_execucao do projeto); a própria inicial não gera transição.
+ * ordem. `inicial` = fase de onde a cadeia parte (entrada no funil, ou o
+ * Handoff, por onde o card entra em Projetos); a própria inicial não gera transição.
  */
 function cadeia(passos: Passo[], inicial: string | null): Transicao[] {
   const comData = passos
@@ -254,15 +265,11 @@ async function moverImportado(ctx: Ctx, projetoId: string, pipelineChave: string
   });
 }
 
-/** Leva o projeto da venda para a fase de Projetos em que o Pipefy está. true = mudou algo. */
-async function posicionarCardProjetos(ctx: Ctx, vendaId: string, destino: Fase, passos: Passo[], card: CardPipefy, avisos: string[]): Promise<boolean> {
-  const proj = await ctx.tx.projeto.findUnique({ where: { vendaOrigemId: vendaId }, select: { id: true, faseId: true, faseDesde: true, deletadoEm: true } });
-  if (!proj) {
-    avisos.push("Venda sem card de projeto: a fase de Projetos do Pipefy não foi aplicada.");
-    return false;
-  }
-  if (proj.deletadoEm) {
-    avisos.push("O card de projeto desta venda está na lixeira: não foi movido.");
+/** Leva o card (que já seguiu para Projetos pelo ganho) até a fase de Projetos em que o Pipefy está. true = mudou algo. */
+async function posicionarEmProjetos(ctx: Ctx, projetoId: string, destino: Fase, passos: Passo[], card: CardPipefy, avisos: string[]): Promise<boolean> {
+  const proj = await ctx.tx.projeto.findUniqueOrThrow({ where: { id: projetoId }, select: { id: true, pipelineId: true, faseId: true, faseDesde: true } });
+  if (proj.pipelineId !== ctx.projetosId) {
+    avisos.push(`O card não está em Projetos no CRM: não foi movido para "${destino.nome}".`);
     return false;
   }
   let mudou = false;
@@ -278,7 +285,7 @@ async function posicionarCardProjetos(ctx: Ctx, vendaId: string, destino: Fase, 
     await ctx.tx.projeto.update({ where: { id: proj.id }, data: { faseDesde: desdeHist } });
     mudou = true;
   }
-  const inicial = [...ctx.fases.values()].find((f) => f.pipelineId === ctx.projetosId && f.chave === FASE_INICIAL_PROJETOS)?.id ?? null;
+  const inicial = [...ctx.fases.values()].find((f) => f.marco === "HANDOFF")?.id ?? null;
   const n = await sincronizarTransicoes(ctx, proj.id, cadeia(passos, inicial));
   return mudou || n > 0;
 }
@@ -410,8 +417,13 @@ async function aplicarCard(ctx: Ctx, card: CardPipefy): Promise<Desfecho> {
   const primeira = cadeiaVenda[0]?.para ?? null;
 
   const existente = ctx.pre.existentes.get(card.pipefyId) ?? null;
+  if (existente?.absorvidoPorId) return pulado(mensagemCardAbsorvido(existente.absorvidoPorId));
   if (existente?.deletadoEm) return pulado("Card excluído no CRM (está na lixeira): não é reimportado.");
-  if (existente && existente.pipelineId !== ctx.vendasId) return pulado("Este ID do Pipefy pertence a um card fora de Vendas.");
+  if (existente && existente.pipelineId !== ctx.vendasId && existente.pipelineId !== ctx.projetosId) {
+    return pulado("Este ID do Pipefy pertence a um card fora de Vendas/Projetos.");
+  }
+  // Ciclo único: o card já seguiu para Projetos (ganho) e não volta para Vendas pelo import.
+  const jaEmProjetos = existente?.pipelineId === ctx.projetosId;
   if (existente) {
     const editado = ctx.pre.editadoEm.get(existente.id);
     if (editado && !(card.atualizadoEm && card.atualizadoEm > editado)) {
@@ -419,8 +431,8 @@ async function aplicarCard(ctx: Ctx, card: CardPipefy): Promise<Desfecho> {
     }
   }
   const faseCrm = existente ? ctx.fases.get(existente.faseId) : undefined;
-  const fechadoNoCrm = !!existente && !!faseCrm?.isTerminal && faseVenda.id !== existente.faseId;
-  const entraNaVenda = !existente || (!fechadoNoCrm && faseVenda.id !== existente.faseId);
+  const fechadoNoCrm = !!existente && !jaEmProjetos && !!faseCrm?.isTerminal && faseVenda.id !== existente.faseId;
+  const entraNaVenda = !existente || (!fechadoNoCrm && !jaEmProjetos && faseVenda.id !== existente.faseId);
   if (((entraNaVenda && semMotivo(faseVenda, card)) || (emProjetos && semMotivo(destino, card))) && !ctx.opcoes.motivoPerdaPadrao) {
     return pulado("PERDIDO sem motivo no export.");
   }
@@ -458,7 +470,7 @@ async function aplicarCard(ctx: Ctx, card: CardPipefy): Promise<Desfecho> {
   }
   const empresaId = empresa?.id ?? null;
 
-  const contarProjetos = async (id: string) => tx.projeto.count({ where: { vendaOrigemId: id } });
+  const emProjetosAgora = async (id: string) => (await tx.projeto.findUniqueOrThrow({ where: { id }, select: { pipelineId: true } })).pipelineId === ctx.projetosId;
 
   if (!existente) {
     if (!responsavel) avisos.push(card.responsavel ? `Responsável "${card.responsavel}" sem usuário no CRM: ficou com quem importou.` : "Sem responsável no Pipefy: ficou com quem importou.");
@@ -496,14 +508,12 @@ async function aplicarCard(ctx: Ctx, card: CardPipefy): Promise<Desfecho> {
     });
     const retro = cadeia(passosVenda, entrada);
     await sincronizarTransicoes(ctx, id, [{ de: null, para: entrada, em: criadoEm }, ...retro]);
-    let projetoCriado = false;
     if (faseVenda.isTerminal) {
-      const antes = await contarProjetos(id);
       const anterior = retro.filter((t) => t.para !== faseVenda.id).at(-1)?.para ?? entrada;
       await entrarTerminal(ctx, id, PIPELINE_VENDAS, anterior, faseVenda, desdeVenda, card);
-      projetoCriado = (await contarProjetos(id)) > antes;
     }
-    if (emProjetos) await posicionarCardProjetos(ctx, id, destino, passosProj, card, avisos);
+    const projetoCriado = await emProjetosAgora(id);
+    if (emProjetos) await posicionarEmProjetos(ctx, id, destino, passosProj, card, avisos);
     // Marco: tudo o que este import gravou no card vem antes dele (edição no CRM vem depois).
     const tl = await tx.timeline.findFirstOrThrow({ where: { projetoId: id, tipo: "IMPORT" }, select: { id: true, payload: true } });
     await tx.timeline.update({ where: { id: tl.id }, data: { payload: { ...(tl.payload as object), marco: (await marcoDoImport(ctx, id)).toISOString() } } });
@@ -535,12 +545,14 @@ async function aplicarCard(ctx: Ctx, card: CardPipefy): Promise<Desfecho> {
   if (Object.keys(data).length > 0) await tx.projeto.update({ where: { id: existente.id }, data });
 
   let projetoCriado = false;
-  if (fechadoNoCrm) {
+  if (jaEmProjetos) {
+    // Ganho no Pipefy = coerente com o card em Projetos; outra fase de Vendas não o traz de volta.
+    if (faseVenda.tipoTerminal !== "GANHO") avisos.push(`Card já seguiu para Projetos no CRM: não voltou para "${faseVenda.nome}".`);
+  } else if (fechadoNoCrm) {
     avisos.push(`Card fechado no CRM (fase terminal): não foi movido para "${faseVenda.nome}".`);
   } else if (faseVenda.id !== existente.faseId) {
-    const antes = await contarProjetos(existente.id);
     await moverImportado(ctx, existente.id, PIPELINE_VENDAS, existente.faseId, faseVenda, desdeVenda, passosVenda, card);
-    projetoCriado = (await contarProjetos(existente.id)) > antes;
+    projetoCriado = await emProjetosAgora(existente.id);
     mudancas.push({ campo: "fase", antes: existente.faseId, depois: faseVenda.id });
   } else if (desdeHist && existente.faseDesde.getTime() !== desdeHist.getTime()) {
     await tx.projeto.update({ where: { id: existente.id }, data: { faseDesde: desdeHist } });
@@ -550,7 +562,7 @@ async function aplicarCard(ctx: Ctx, card: CardPipefy): Promise<Desfecho> {
   const esperadas = primeira ? [{ de: null, para: primeira, em: existente.criadoEm }, ...cadeia(passosVenda, primeira)] : [];
   const n = await sincronizarTransicoes(ctx, existente.id, esperadas);
   if (n > 0) mudancas.push({ campo: "historico", antes: null, depois: `${n} transições` });
-  if (emProjetos && !fechadoNoCrm && (await posicionarCardProjetos(ctx, existente.id, destino, passosProj, card, avisos))) {
+  if (emProjetos && !fechadoNoCrm && (await posicionarEmProjetos(ctx, existente.id, destino, passosProj, card, avisos))) {
     mudancas.push({ campo: "projeto", antes: null, depois: destino.id });
   }
   if (mudancas.length === 0) return { tipo: "semMudanca", projetoCriado: false, avisos };
@@ -663,7 +675,7 @@ async function aplicarCardIsolado(ctx: Ctx, card: CardPipefy): Promise<Desfecho>
 // ---------------------------------------------------------------- lotes
 
 const MENSAGEM_REGRA: Partial<Record<string, string>> = {
-  FASE_INICIAL_PROJETOS_INDISPONIVEL: `Projetos não tem a fase "${FASE_INICIAL_PROJETOS}" ativa: o projeto da venda ganha não pôde ser criado.`,
+  FASE_HANDOFF_INDISPONIVEL: "Projetos não tem o marco Handoff ativo: o card ganho não pôde seguir para lá.",
   MOTIVO_PERDA_OBRIGATORIO: "PERDIDO sem motivo no export.",
   MOTIVO_PERDA_INVALIDO: "Motivo da perda inválido.",
   VALOR_FECHADO_INVALIDO: "Valor fechado inválido.",
@@ -744,16 +756,6 @@ export async function aplicarCards(
     return r;
   }
 
-  /** P2002 no projeto da venda (outro escritor sem o lock): refaz uma vez, o gancho vê "já existe". */
-  async function comRetentativa(lote: CardPipefy[]): Promise<Desfecho[]> {
-    try {
-      return await executarLote(lote);
-    } catch (e) {
-      if (!ehConflitoDeCardProjetosDaVenda(e)) throw e;
-      return executarLote(lote);
-    }
-  }
-
   const contar = (card: CardPipefy, d: Desfecho) => {
     if (d.tipo === "pulado") {
       rel.pulados++;
@@ -774,13 +776,13 @@ export async function aplicarCards(
       await opts.ganchosTeste?.antesDoLote?.(n);
       const lote = cards.slice(i, i + tamanho);
       try {
-        const ds = await comRetentativa(lote);
+        const ds = await executarLote(lote);
         lote.forEach((c, j) => contar(c, ds[j]));
       } catch {
         // O lote voltou inteiro: refaz card a card para isolar quem falha.
         for (const c of lote) {
           try {
-            contar(c, (await comRetentativa([c]))[0]);
+            contar(c, (await executarLote([c]))[0]);
           } catch (e) {
             contar(c, pulado(mensagemDeFalha(e)));
           }

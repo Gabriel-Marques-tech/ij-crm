@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { dbTeste, limparBanco } from "@/test/db";
 import { invalidarCachePipelines } from "@/lib/fases/cache";
-import { criarCard, moverCard } from "./projetos";
+import { criarCard, listarQuadro, moverCard } from "./projetos";
 
 const db = dbTeste();
 
@@ -15,14 +15,14 @@ async function semear() {
         create: [
           { chave: "primeiro_contato", nome: "Primeiro Contato", ordem: 0 },
           { chave: "em_negociacao", nome: "Em negociação", ordem: 1 },
-          { chave: "contrato_assinado", nome: "Contrato assinado", ordem: 2, isTerminal: true, tipoTerminal: "GANHO" },
-          { chave: "perdido", nome: "Perdido", ordem: 3, isTerminal: true, tipoTerminal: "PERDIDO" },
+          { chave: "contrato_assinado", nome: "Contrato assinado", ordem: 2, isTerminal: true, tipoTerminal: "GANHO", marco: "GANHO" },
+          { chave: "perdido", nome: "Perdido", ordem: 3, isTerminal: true, tipoTerminal: "PERDIDO", marco: "PERDIDO" },
         ],
       },
     },
     include: { fases: true },
   });
-  // `em_execucao` NÃO é a primeira por posição: a regra acha pela chave.
+  // GAB-81: o ganho leva o card ao marco Handoff, achado pelo marco (não pela chave/posição).
   const projetos = await db.pipeline.create({
     data: {
       chave: "projetos",
@@ -30,9 +30,9 @@ async function semear() {
       ordem: 1,
       fases: {
         create: [
-          { chave: "kickoff", nome: "Kickoff", ordem: 0 },
+          { chave: "recepcao", nome: "Recepção", ordem: 0, marco: "HANDOFF" },
           { chave: "em_execucao", nome: "Em execução", ordem: 1 },
-          { chave: "finalizado", nome: "Finalizado", ordem: 2, isTerminal: true, tipoTerminal: "GANHO" },
+          { chave: "finalizado", nome: "Finalizado", ordem: 2, isTerminal: true, tipoTerminal: "GANHO", marco: "FINALIZADO" },
         ],
       },
     },
@@ -57,45 +57,35 @@ beforeEach(async () => {
   invalidarCachePipelines();
 });
 
-describe("ganho em vendas", () => {
-  it("grava data_ganho e cria UM card de projeto em em_execucao, ligado à venda, com histórico nos dois", async () => {
-    const { vendas, projetos, ana, bruno, empresa, contato, vendaId } = await semear();
-    // Quem move (Bruno) não é o responsável (Ana): o projeto herda o responsável da venda.
+describe("ganho em vendas (ciclo único, GAB-81)", () => {
+  it("grava data_ganho e o MESMO card segue para o Handoff de Projetos; nenhum card novo", async () => {
+    const { vendas, projetos, ana, bruno, empresa, vendaId } = await semear();
     const antes = Date.now();
     const r = await moverCard(vendaId, fase(vendas, "contrato_assinado").id, bruno, { dadosTerminal: {} });
     expect(r).toEqual({ ok: true, mudou: true, terminal: "GANHO" });
 
-    const venda = await db.projeto.findUniqueOrThrow({ where: { id: vendaId } });
-    expect(venda.valorFechado).toBeNull();
-    expect(venda.dataGanho!.getTime()).toBeGreaterThanOrEqual(antes - 1000);
+    const card = await db.projeto.findUniqueOrThrow({ where: { id: vendaId } });
+    expect(card).toMatchObject({ pipelineId: projetos.id, faseId: fase(projetos, "recepcao").id, responsavelId: ana.id, empresaId: empresa.id, valorFechado: null });
+    expect(card.dataGanho!.getTime()).toBeGreaterThanOrEqual(antes - 1000);
+    expect(card.faseDesde.getTime()).toBeGreaterThan(card.dataGanho!.getTime());
+    expect(await db.projeto.count()).toBe(1);
 
-    const ps = await projetosDe(vendaId);
-    expect(ps).toHaveLength(1);
-    const p = ps[0];
-    expect(p).toMatchObject({
-      pipelineId: projetos.id,
-      faseId: fase(projetos, "em_execucao").id,
-      titulo: "Site da padaria",
-      responsavelId: ana.id,
-      empresaId: empresa.id,
-      contatoId: contato.id,
-      estado: "SP",
-      cidade: "Campinas",
-      criadoVia: "UI",
-      vendaOrigemId: vendaId,
-    });
-    expect(p.faseDesde.getTime()).toBe(venda.dataGanho!.getTime());
-
-    expect(await db.transicaoFase.findMany({ where: { projetoId: p.id } })).toMatchObject([
-      { deFaseId: null, paraFaseId: fase(projetos, "em_execucao").id, usuarioId: bruno.id, origem: "SISTEMA" },
-    ]);
-    expect(await tl(p.id)).toMatchObject([
-      { tipo: "CRIACAO", usuarioId: bruno.id, payload: { faseId: fase(projetos, "em_execucao").id, via: "GANHO", origemOportunidadeId: vendaId } },
+    const ts = await db.transicaoFase.findMany({ where: { projetoId: vendaId }, orderBy: { em: "asc" } });
+    expect(ts.map((t) => [t.deFaseId, t.paraFaseId, t.origem])).toEqual([
+      [null, fase(vendas, "em_negociacao").id, "UI"],
+      [fase(vendas, "em_negociacao").id, fase(vendas, "contrato_assinado").id, "UI"],
+      [fase(vendas, "contrato_assinado").id, fase(projetos, "recepcao").id, "SISTEMA"],
     ]);
     const tv = await tl(vendaId);
-    expect(tv.map((t) => t.tipo)).toEqual(["CRIACAO", "MOVIMENTACAO", "CAMPO_ALTERADO", "VINCULO_PROJETO"]);
-    expect(tv[2].payload).toMatchObject({ campo: "dataGanho", antes: null, depois: venda.dataGanho!.toISOString() });
-    expect(tv[3].payload).toEqual({ projetoId: p.id, criado: true });
+    expect(tv.map((t) => t.tipo)).toEqual(["CRIACAO", "MOVIMENTACAO", "CAMPO_ALTERADO", "MOVIMENTACAO"]);
+    expect(tv[2].payload).toMatchObject({ campo: "dataGanho", antes: null, depois: card.dataGanho!.toISOString() });
+    expect(tv[3]).toMatchObject({
+      usuarioId: bruno.id,
+      payload: { deFaseId: fase(vendas, "contrato_assinado").id, paraFaseId: fase(projetos, "recepcao").id, motivo: "ganho_handoff" },
+    });
+    // Aparece em exatamente um quadro.
+    expect((await listarQuadro("vendas"))!.cards.map((c) => c.id)).toEqual([]);
+    expect((await listarQuadro("projetos"))!.cards.map((c) => c.id)).toEqual([vendaId]);
   });
 
   it("sem o objeto de dados do fechamento (chamada direta, sem diálogo) o ganho é recusado e nada muda", async () => {
@@ -127,123 +117,57 @@ describe("ganho em vendas", () => {
     ]);
   });
 
-  it("idempotente: ganho → reabrir → ganho de novo = 1 card de projeto; reabrir MANTÉM data/valor; re-ganho atualiza a data", async () => {
-    const { vendas, ana, bruno, vendaId } = await semear();
-    const ganho = fase(vendas, "contrato_assinado").id;
-    const negociacao = fase(vendas, "em_negociacao").id;
-
-    await moverCard(vendaId, ganho, ana, { dadosTerminal: { valorFechado: "10.000" } });
-    const [projeto] = await projetosDe(vendaId);
-    const dataPrimeiroGanho = (await db.projeto.findUniqueOrThrow({ where: { id: vendaId } })).dataGanho!;
-
-    expect(await moverCard(vendaId, negociacao, bruno)).toEqual({ ok: true, mudou: true, terminal: null });
-    const reaberta = await db.projeto.findUniqueOrThrow({ where: { id: vendaId } });
-    expect(reaberta.dataGanho).toEqual(dataPrimeiroGanho);
-    expect(reaberta.valorFechado?.toFixed(2)).toBe("10000.00");
-    // Na venda, só o movimento; nenhum campo mexido.
-    expect((await tl(vendaId)).at(-1)!.tipo).toBe("MOVIMENTACAO");
-    // O projeto continua onde estava, e a Timeline dele avisa quem reabriu a venda.
-    expect(await db.projeto.findUniqueOrThrow({ where: { id: projeto.id } })).toMatchObject({ deletadoEm: null });
-    expect((await tl(projeto.id)).at(-1)).toMatchObject({
-      tipo: "VINCULO_PROJETO",
-      usuarioId: bruno.id,
-      payload: { vendaId, evento: "reaberta", paraFaseId: negociacao },
-    });
-
-    await new Promise((r) => setTimeout(r, 5));
-    // Diálogo pré-preenche o valor guardado; o usuário confirma igual.
-    expect((await moverCard(vendaId, ganho, ana, { dadosTerminal: { valorFechado: "10.000,00" } })).ok).toBe(true);
-    expect(await projetosDe(vendaId)).toHaveLength(1);
-    expect(await db.projeto.count()).toBe(2);
-    const reganha = await db.projeto.findUniqueOrThrow({ where: { id: vendaId } });
-    expect(reganha.dataGanho!.getTime()).toBeGreaterThan(dataPrimeiroGanho.getTime());
-    expect(reganha.valorFechado?.toFixed(2)).toBe("10000.00");
-    const finais = (await tl(vendaId)).slice(-3);
-    expect(finais.map((t) => t.tipo)).toEqual(["MOVIMENTACAO", "CAMPO_ALTERADO", "VINCULO_PROJETO"]);
-    expect(finais[1].payload).toEqual({ campo: "dataGanho", antes: dataPrimeiroGanho.toISOString(), depois: reganha.dataGanho!.toISOString() });
-    expect(finais[2].payload).toEqual({ projetoId: projeto.id, criado: false });
-    expect((await tl(projeto.id)).map((t) => [t.tipo, t.payload])).toEqual([
-      ["CRIACAO", expect.objectContaining({ via: "GANHO", origemOportunidadeId: vendaId })],
-      ["VINCULO_PROJETO", { vendaId, evento: "reaberta", paraFaseId: negociacao }],
-      ["VINCULO_PROJETO", { vendaId, criado: false }],
-    ]);
-    // Histórico completo das transições da venda: criação, ganho, reabertura, ganho.
-    expect(await db.transicaoFase.count({ where: { projetoId: vendaId } })).toBe(4);
+  it("card ganho está em Projetos: fase de Vendas (reabrir, perder, ganhar de novo) não é destino pelo Kanban", async () => {
+    const { vendas, ana, vendaId } = await semear();
+    await moverCard(vendaId, fase(vendas, "contrato_assinado").id, ana, { dadosTerminal: { valorFechado: "10.000" } });
+    for (const chave of ["em_negociacao", "contrato_assinado", "perdido"]) {
+      expect(await moverCard(vendaId, fase(vendas, chave).id, ana, { dadosTerminal: { motivo: "timing" } })).toEqual({ ok: false, erro: "FASE_DE_OUTRO_PIPELINE" });
+    }
+    expect(await db.projeto.count()).toBe(1);
   });
 
-  it("dois ganhos concorrentes do mesmo card = 1 card de projeto (o segundo vira no-op)", async () => {
-    const { vendas, ana, bruno, vendaId } = await semear();
+  it("dois ganhos concorrentes do mesmo card: um só passa (o outro é recusado), um só Handoff", async () => {
+    const { vendas, projetos, ana, bruno, vendaId } = await semear();
     const ganho = fase(vendas, "contrato_assinado").id;
     const rs = await Promise.all([
       moverCard(vendaId, ganho, ana, { dadosTerminal: {} }),
       moverCard(vendaId, ganho, bruno, { dadosTerminal: {} }),
     ]);
-    expect(rs.every((r) => r.ok)).toBe(true);
-    expect(rs.map((r) => r.ok && r.mudou).sort()).toEqual([false, true]);
-    expect(await projetosDe(vendaId)).toHaveLength(1);
-    expect(await db.timeline.count({ where: { projetoId: vendaId, tipo: "VINCULO_PROJETO" } })).toBe(1);
+    expect(rs.filter((r) => r.ok && r.mudou)).toHaveLength(1);
+    expect(rs.filter((r) => !r.ok).map((r) => !r.ok && r.erro)).toEqual([expect.stringMatching(/^(CONFLITO_CONCORRENTE|FASE_DE_OUTRO_PIPELINE)$/)]);
+    expect(await db.projeto.count()).toBe(1);
+    expect(await db.transicaoFase.count({ where: { projetoId: vendaId, paraFaseId: fase(projetos, "recepcao").id } })).toBe(1);
   });
 
-  it("outro escritor liga um projeto à venda no meio do ganho (P2002 no índice único) → sucesso idempotente, sem duplicar", async () => {
-    const { vendas, projetos, ana, vendaId } = await semear();
-    // Um INSERT em projeto esbarra no lock de pipeline (FK → KEY SHARE na
-    // linha do pipeline), então a corrida real é de quem LIGA um card existente
-    // à venda (ex.: import/LLM preenchendo origem_oportunidade_id): o UPDATE não
-    // toca o pipeline. A transação dele segura a linha (não commitada): o ganho
-    // não a vê, bloqueia no índice único ao inserir e recebe P2002 no commit dela.
-    const solto = await db.projeto.create({
-      data: { pipelineId: projetos.id, faseId: fase(projetos, "em_execucao").id, titulo: "Import", responsavelId: ana.id, criadoVia: "IMPORT" },
-    });
-    let commitEm = 0;
-    const intruso = db.$transaction(async (tx) => {
-      await tx.projeto.update({ where: { id: solto.id }, data: { vendaOrigemId: vendaId } });
-      await tx.$executeRaw`SELECT pg_sleep(0.6)`;
-      commitEm = Date.now();
-    });
-    await new Promise((r) => setTimeout(r, 150));
-    const r = await moverCard(vendaId, fase(vendas, "contrato_assinado").id, ana, { dadosTerminal: { valorFechado: "100" } });
-    const fimEm = Date.now();
-    await intruso;
-    expect(commitEm).toBeGreaterThan(0);
-    expect(fimEm).toBeGreaterThanOrEqual(commitEm); // o ganho de fato esperou o intruso
-    expect(r).toEqual({ ok: true, mudou: true, terminal: "GANHO" });
-    const ps = await projetosDe(vendaId);
-    expect(ps.map((p) => p.id)).toEqual([solto.id]);
-    expect(await db.projeto.count()).toBe(2);
-    const venda = await db.projeto.findUniqueOrThrow({ where: { id: vendaId } });
-    expect(venda.faseId).toBe(fase(vendas, "contrato_assinado").id);
-    expect(venda.valorFechado?.toFixed(2)).toBe("100.00");
-    expect(await db.transicaoFase.count({ where: { projetoId: vendaId } })).toBe(2);
-    expect((await tl(vendaId)).at(-1)!.payload).toEqual({ projetoId: solto.id, criado: false });
-  });
-
-  it("projeto soft-deletado não é recriado no re-ganho (um projeto por venda, para sempre)", async () => {
-    const { vendas, ana, vendaId } = await semear();
-    const ganho = fase(vendas, "contrato_assinado").id;
-    await moverCard(vendaId, ganho, ana, { dadosTerminal: {} });
-    const [projeto] = await projetosDe(vendaId);
-    await db.projeto.update({ where: { id: projeto.id }, data: { deletadoEm: new Date() } });
-    await moverCard(vendaId, fase(vendas, "em_negociacao").id, ana);
-    expect((await moverCard(vendaId, ganho, ana, { dadosTerminal: {} })).ok).toBe(true);
-    expect(await projetosDe(vendaId)).toHaveLength(1);
-    expect((await tl(vendaId)).at(-1)!.payload).toEqual({ projetoId: projeto.id, criado: false });
-  });
-
-  it("o banco garante: dois projetos com a mesma origem → violação de unicidade", async () => {
+  it("o banco ainda garante (coluna da v1): dois projetos com a mesma origem → violação de unicidade", async () => {
     const { projetos, ana, vendaId } = await semear();
     const dados = { pipelineId: projetos.id, faseId: fase(projetos, "em_execucao").id, titulo: "P", responsavelId: ana.id, criadoVia: "UI" as const, vendaOrigemId: vendaId };
     await db.projeto.create({ data: dados });
     await expect(db.projeto.create({ data: dados })).rejects.toMatchObject({ code: "P2002" });
   });
 
-  it("fase inicial de projetos (em_execucao) arquivada ou ausente → erro de regra, nada muda", async () => {
+  it("re-ganho de venda de par NÃO unido: segue para o Handoff e avisa nos dois cards; o projeto anterior não é mexido", async () => {
+    const { vendas, projetos, ana, bruno, vendaId } = await semear();
+    const anterior = await db.projeto.create({
+      data: { pipelineId: projetos.id, faseId: fase(projetos, "em_execucao").id, titulo: "Site (projeto v1)", responsavelId: bruno.id, criadoVia: "UI", vendaOrigemId: vendaId },
+    });
+    expect(await moverCard(vendaId, fase(vendas, "contrato_assinado").id, ana, { dadosTerminal: {} })).toMatchObject({ ok: true, mudou: true });
+    expect(await db.projeto.findUniqueOrThrow({ where: { id: vendaId } })).toMatchObject({ faseId: fase(projetos, "recepcao").id, vendedorId: ana.id });
+    expect(await db.projeto.findUniqueOrThrow({ where: { id: anterior.id } })).toMatchObject({ faseId: fase(projetos, "em_execucao").id, deletadoEm: null, vendaOrigemId: vendaId });
+    expect((await tl(vendaId)).at(-1)).toMatchObject({ tipo: "VINCULO_PROJETO", usuarioId: ana.id, payload: { evento: "reganho_projeto_existente", projetoId: anterior.id } });
+    expect((await tl(anterior.id)).at(-1)).toMatchObject({ tipo: "VINCULO_PROJETO", usuarioId: ana.id, payload: { evento: "reganho_projeto_existente", vendaId } });
+    // Sem par anterior vivo (ou absorvido), nada de aviso.
+    expect(await db.timeline.count({ where: { tipo: "VINCULO_PROJETO" } })).toBe(2);
+  });
+
+  it("marco Handoff arquivado ou ausente → erro de regra, nada muda", async () => {
     const { vendas, projetos, ana, vendaId } = await semear();
     const ganho = fase(vendas, "contrato_assinado").id;
-    await db.fase.update({ where: { id: fase(projetos, "em_execucao").id }, data: { arquivadaEm: new Date() } });
-    expect(await moverCard(vendaId, ganho, ana, { dadosTerminal: {} })).toEqual({ ok: false, erro: "FASE_INICIAL_PROJETOS_INDISPONIVEL" });
+    await db.fase.update({ where: { id: fase(projetos, "recepcao").id }, data: { arquivadaEm: new Date() } });
+    expect(await moverCard(vendaId, ganho, ana, { dadosTerminal: {} })).toEqual({ ok: false, erro: "FASE_HANDOFF_INDISPONIVEL" });
 
-    await db.fase.delete({ where: { id: fase(projetos, "em_execucao").id } });
-    expect(await moverCard(vendaId, ganho, ana, { dadosTerminal: {} })).toEqual({ ok: false, erro: "FASE_INICIAL_PROJETOS_INDISPONIVEL" });
+    await db.fase.update({ where: { id: fase(projetos, "recepcao").id }, data: { arquivadaEm: null, marco: null } });
+    expect(await moverCard(vendaId, ganho, ana, { dadosTerminal: {} })).toEqual({ ok: false, erro: "FASE_HANDOFF_INDISPONIVEL" });
 
     const venda = await db.projeto.findUniqueOrThrow({ where: { id: vendaId } });
     expect(venda.faseId).toBe(fase(vendas, "em_negociacao").id);
@@ -285,29 +209,18 @@ describe("perdido", () => {
     await moverCard(vendaId, fase(vendas, "perdido").id, ana, { dadosTerminal: { motivo: "timing" } });
     expect((await tl(vendaId)).at(-1)!.payload).toEqual({ campo: "motivoPerda", antes: "Concorrente: fechou com a X", depois: "Timing" });
   });
-
-  it("ganho → perdido direto: mantém data/valor do ganho, grava motivo, mantém o projeto e avisa na Timeline dele", async () => {
-    const { vendas, ana, vendaId } = await semear();
-    await moverCard(vendaId, fase(vendas, "contrato_assinado").id, ana, { dadosTerminal: { valorFechado: "500" } });
-    expect((await moverCard(vendaId, fase(vendas, "perdido").id, ana, { dadosTerminal: { motivo: "timing" } })).ok).toBe(true);
-    const venda = await db.projeto.findUniqueOrThrow({ where: { id: vendaId } });
-    expect(venda.motivoPerda).toBe("Timing");
-    expect(venda.dataGanho).not.toBeNull();
-    expect(venda.valorFechado?.toFixed(2)).toBe("500.00");
-    const [projeto] = await projetosDe(vendaId);
-    expect((await tl(projeto.id)).at(-1)!.payload).toEqual({ vendaId, evento: "perdida", paraFaseId: fase(vendas, "perdido").id });
-  });
 });
 
 describe("projetos", () => {
-  it("mover projeto para o terminal (finalizado) não pede dados nem cria nada", async () => {
+  it("o card ganho segue em Projetos até o terminal (finalizado), sem pedir dados nem criar nada; data do ganho fica", async () => {
     const { vendas, projetos, ana, vendaId } = await semear();
-    await moverCard(vendaId, fase(vendas, "contrato_assinado").id, ana, { dadosTerminal: {} });
-    const [projeto] = await projetosDe(vendaId);
-    expect(await moverCard(projeto.id, fase(projetos, "finalizado").id, ana)).toEqual({ ok: true, mudou: true, terminal: "GANHO" });
-    const p = await db.projeto.findUniqueOrThrow({ where: { id: projeto.id } });
-    expect(p).toMatchObject({ faseId: fase(projetos, "finalizado").id, dataGanho: null, valorFechado: null });
-    expect(await db.projeto.count()).toBe(2);
-    expect(await projetosDe(projeto.id)).toHaveLength(0);
+    await moverCard(vendaId, fase(vendas, "contrato_assinado").id, ana, { dadosTerminal: { valorFechado: "500" } });
+    expect(await moverCard(vendaId, fase(projetos, "em_execucao").id, ana)).toEqual({ ok: true, mudou: true, terminal: null });
+    expect(await moverCard(vendaId, fase(projetos, "finalizado").id, ana)).toEqual({ ok: true, mudou: true, terminal: "GANHO" });
+    const p = await db.projeto.findUniqueOrThrow({ where: { id: vendaId } });
+    expect(p).toMatchObject({ faseId: fase(projetos, "finalizado").id });
+    expect(p.dataGanho).not.toBeNull();
+    expect(p.valorFechado?.toFixed(2)).toBe("500.00");
+    expect(await db.projeto.count()).toBe(1);
   });
 });

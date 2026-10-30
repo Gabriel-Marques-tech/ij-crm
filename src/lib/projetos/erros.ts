@@ -12,7 +12,7 @@ export type ErroProjeto =
   | "TITULO_INVALIDO"
   | "RESPONSAVEL_INVALIDO"
   | "NOTA_INVALIDA"
-  | "FASE_INICIAL_PROJETOS_INDISPONIVEL"
+  | "FASE_HANDOFF_INDISPONIVEL"
   /** Ator VISUALIZADOR (somente leitura). */
   | "SEM_PERMISSAO"
   | ErroDadosTerminal;

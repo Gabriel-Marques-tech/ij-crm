@@ -19,7 +19,11 @@ export type ErroFase =
   | "DESTINO_INVALIDO"
   | "DESTINO_TERMINAL_INCOMPATIVEL"
   | "FASE_COM_CARDS_TERMINAL"
-  | "FASE_EM_USO";
+  | "FASE_EM_USO"
+  // GAB-81: marco do ciclo não é apagado/arquivado nem muda de tipo terminal…
+  | "MARCO_FIXO"
+  // …nem sai da ordem canônica (ver `fases/marcos.ts`).
+  | "ORDEM_MARCOS";
 
 /** Pipeline cuja regra de negócio exige também uma fase PERDIDO (§4.2). */
 export const PIPELINE_VENDAS = "vendas";

@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import type { FaseComUso, PipelineParaGestao } from "@/lib/fases/fases";
 import { desarquivarFaseAction, moverFaseAction } from "./actions";
 import { FaseForm } from "./fase-form";
+import { ROTULO_MARCO } from "@/lib/fases/marcos";
 import { destinoCompativel } from "@/lib/fases/regras";
 import { RemoverForm } from "./remover-form";
 
@@ -64,6 +65,11 @@ export function QuadroFases({ pipeline }: { pipeline: PipelineParaGestao }) {
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-medium">{f.nome}</span>
+                {f.marco ? (
+                  <Badge variant="outline" className="border-border-strong text-fg-soft" title="Marco fixo do ciclo: não é removido nem sai da ordem dos marcos.">
+                    marco · {ROTULO_MARCO[f.marco]}
+                  </Badge>
+                ) : null}
                 {f.tipoTerminal === "GANHO" ? (
                   <Badge variant="outline" className="border-success/50 text-success">
                     ganho
@@ -91,16 +97,18 @@ export function QuadroFases({ pipeline }: { pipeline: PipelineParaGestao }) {
               <Button variant="ghost" size="icon-sm" aria-label="Editar" title="Editar" onClick={() => setEdicao({ modo: "editar", fase: f })}>
                 <Pencil />
               </Button>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label={f.uso.cards > 0 || f.uso.transicoes > 0 ? "Arquivar" : "Excluir"}
-                title={f.uso.cards > 0 || f.uso.transicoes > 0 ? "Arquivar" : "Excluir"}
-                className="text-fg-mute hover:text-danger"
-                onClick={() => setRemovendo(f)}
-              >
-                {f.uso.cards > 0 || f.uso.transicoes > 0 ? <Archive /> : <Trash2 />}
-              </Button>
+              {f.marco ? null : (
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={f.uso.cards > 0 || f.uso.transicoes > 0 ? "Arquivar" : "Excluir"}
+                  title={f.uso.cards > 0 || f.uso.transicoes > 0 ? "Arquivar" : "Excluir"}
+                  className="text-fg-mute hover:text-danger"
+                  onClick={() => setRemovendo(f)}
+                >
+                  {f.uso.cards > 0 || f.uso.transicoes > 0 ? <Archive /> : <Trash2 />}
+                </Button>
+              )}
             </div>
           </li>
         ))}

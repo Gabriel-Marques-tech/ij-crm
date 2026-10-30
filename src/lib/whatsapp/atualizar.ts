@@ -54,6 +54,7 @@ import {
   type Sugestao,
   type Tx,
 } from "./comum";
+import { CARD_VIVO_NO_CICLO_DE_VENDAS, FASES_DO_WHATSAPP } from "./ciclo-vendas";
 import { dadosDoFechamento } from "./fechamento";
 import { extrairIdentificadores } from "./identificadores";
 
@@ -143,13 +144,14 @@ export async function aplicarAtualizacao(tx: Tx, e: EntradaAplicacao, locks: { v
   // ---- PLANO: alvo (candidatas relidas depois do lock)
   const enviadas = new Map((e.candidatas ?? []).map((c) => [c.id, c]));
   if (alvoResposta && !enviadas.has(alvoResposta)) enviadas.set(alvoResposta, { id: alvoResposta, tocadaEm: new Date(0), via: ["resposta"] });
+  // GAB-81: inclui o card ganho que já seguiu para Projetos, visto como FECHADO (ciclo-vendas.ts).
   const vivas = enviadas.size
     ? await tx.projeto.findMany({
-        where: { id: { in: [...enviadas.keys()] }, pipelineId: locks.vendasId, deletadoEm: null },
-        select: { id: true, contatoId: true, empresaId: true, fase: { select: { isTerminal: true } } },
+        where: { id: { in: [...enviadas.keys()] }, ...CARD_VIVO_NO_CICLO_DE_VENDAS },
+        select: { id: true, pipelineId: true, contatoId: true, empresaId: true, fase: { select: { isTerminal: true } } },
       })
     : [];
-  const candidatas: Candidata[] = vivas.map((v) => ({ ...enviadas.get(v.id)!, terminal: v.fase.isTerminal }));
+  const candidatas: Candidata[] = vivas.map((v) => ({ ...enviadas.get(v.id)!, terminal: v.fase.isTerminal || v.pipelineId !== locks.vendasId }));
   candidatas.push(...(await abertasDaIdentidade(tx, locks.vendasId, vivas, enviadas)));
   const alvo = resolverAlvo({ alvoResposta, escolhaLlm: ex.oportunidade_id, candidatas });
   if (alvo.tipo === "NENHUM") return pendente(alvo.motivo === "FECHADO_SEM_IDENTIDADE" ? "ALVO_FECHADO_SEM_IDENTIDADE" : "ALVO_NAO_ENCONTRADO");
@@ -257,7 +259,7 @@ export async function aplicarAtualizacao(tx: Tx, e: EntradaAplicacao, locks: { v
   }
 
   // ---- PLANO: fase
-  const fases = await tx.fase.findMany({ where: { pipelineId: locks.vendasId, arquivadaEm: null }, orderBy: [{ ordem: "asc" }, { criadoEm: "asc" }] });
+  const fases = await tx.fase.findMany({ where: { pipelineId: locks.vendasId, arquivadaEm: null, ...FASES_DO_WHATSAPP }, orderBy: [{ ordem: "asc" }, { criadoEm: "asc" }] });
   const faseAtual = await tx.fase.findUniqueOrThrow({ where: { id: base.faseId } });
   let destino: Fase | undefined = ex.fase_chave ? fases.find((f) => f.chave === ex.fase_chave) : undefined;
   if (ex.fase_chave && !destino) motivos.push("fase indicada não reconhecida");
@@ -429,7 +431,8 @@ export async function aplicarAtualizacao(tx: Tx, e: EntradaAplicacao, locks: { v
     sugestoes,
     titulo: final.titulo,
     deFaseNome,
-    faseNome: final.fase.nome,
+    // Ganho leva o card para o Handoff de Projetos (GAB-81); a confirmação no grupo fala da venda: "→ Contrato assinado".
+    faseNome: deFaseNome !== null && destino?.tipoTerminal === "GANHO" ? destino.nome : final.fase.nome,
     proximaAcao: (campos.proximaAcao as string | undefined) ?? null,
     proximaAcaoEm,
     mudou: alterados.length > 0 || deFaseNome !== null,

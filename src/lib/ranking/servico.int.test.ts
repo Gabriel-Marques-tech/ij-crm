@@ -29,13 +29,22 @@ async function semear() {
     },
     include: { fases: true },
   });
-  await db.pipeline.create({ data: { chave: "projetos", nome: "Projetos", ordem: 1, fases: { create: [{ chave: "em_execucao", nome: "Em execução", ordem: 0 }] } } });
+  // GAB-81: o ganho leva o card ao Handoff de Projetos; a parte de vendas continua pontuando.
+  const projetos = await db.pipeline.create({
+    data: {
+      chave: "projetos",
+      nome: "Projetos",
+      ordem: 1,
+      fases: { create: [{ chave: "handoff", nome: "Handoff", ordem: 0, marco: "HANDOFF" }, { chave: "em_execucao", nome: "Em execução", ordem: 1 }] },
+    },
+    include: { fases: true },
+  });
   const ana = await db.usuario.create({ data: { nome: "Ana Vendas", email: "ana@ij.test" } });
   const bruno = await db.usuario.create({ data: { nome: "Bruno Lima", email: "bruno@ij.test" } });
   const gil = await db.usuario.create({ data: { nome: "Gil Gestor", email: "gil@ij.test", papel: "GESTOR" } });
   const gaia = await db.usuario.create({ data: { nome: "Gaia Sem Cards", email: "gaia@ij.test", papel: "GESTOR" } });
   const ivo = await db.usuario.create({ data: { nome: "Ivo Inativo", email: "ivo@ij.test", ativo: false } });
-  return { vendas, ana, bruno, gil, gaia, ivo };
+  return { vendas, projetos, ana, bruno, gil, gaia, ivo };
 }
 
 type S = Awaited<ReturnType<typeof semear>>;
@@ -91,7 +100,7 @@ describe("ranking a partir do histórico real (criar, mover, marcar feita, ganha
     expect(v.feed.map((i) => i.tipo)).toEqual(["GANHO", "AVANCO"]);
   });
 
-  it("venda reaberta deixa de contar o ganho; re-ganho conta de novo; card excluído não pontua", async () => {
+  it("ganho segue contando com o card em Projetos (sem pontuar o que anda lá); card excluído não pontua", async () => {
     const s = await semear();
     const id = await novoCard(s, s.ana, "Padaria");
     await ok(moverCard(id, fase(s, "contrato_assinado"), s.ana, { dadosTerminal: {} }));
@@ -101,17 +110,40 @@ describe("ranking a partir do histórico real (criar, mover, marcar feita, ganha
       if (v.modo !== "completo") throw new Error("modo");
       return v.ranking.linhas.find((l) => l.usuario.id === s.ana.id)!;
     };
-    expect((await pontosAna()).detalhe.ganho).toBe(100);
+    const antes = await pontosAna();
+    expect(antes.detalhe.ganho).toBe(100);
+    expect((await db.projeto.findUniqueOrThrow({ where: { id } })).pipelineId).toBe(s.projetos.id);
 
-    await ok(moverCard(id, fase(s, "em_negociacao"), s.ana)); // reabre (avanço de 0 → 1 também é 1ª entrada)
-    expect((await pontosAna()).detalhe.ganho).toBe(0);
-    await ok(moverCard(id, fase(s, "contrato_assinado"), s.ana, { dadosTerminal: {} }));
+    // Andar em Projetos não pontua (nem avanço, nem nada); o ganho continua.
+    await ok(moverCard(id, s.projetos.fases.find((f) => f.chave === "em_execucao")!.id, s.ana));
     const l = await pontosAna();
-    expect(l.detalhe.ganho).toBe(100);
+    expect(l.detalhe).toEqual(antes.detalhe);
     expect(l.ganhos).toBe(1);
+    expect(l.abertos).toBe(0);
 
     await db.projeto.update({ where: { id }, data: { deletadoEm: new Date() } });
     expect((await pontosAna()).pontos).toBe(0);
+  });
+
+  it("card ganho e depois reatribuído em Projetos: o ganho continua do vendedor (vendedor_id, GAB-81)", async () => {
+    const s = await semear();
+    const id = await novoCard(s, s.ana, "Padaria");
+    await ok(moverCard(id, fase(s, "contrato_assinado"), s.bruno, { dadosTerminal: { valorFechado: "1.000" } }));
+    expect((await db.projeto.findUniqueOrThrow({ where: { id } })).vendedorId).toBe(s.ana.id);
+    await db.projeto.update({ where: { id }, data: { responsavelId: s.bruno.id } }); // GP de projetos assume
+    const agora = new Date();
+    const d = await carregarDados({ inicio: new Date(agora.getTime() - 86_400_000), fim: new Date(agora.getTime() + 86_400_000) });
+    expect(d.ganhos.map((g) => [g.projetoId, g.responsavelId])).toEqual([[id, s.ana.id]]);
+  });
+
+  it("perdido conta para o responsável atual, mesmo com vendedor_id de um ganho antigo (GAB-81)", async () => {
+    const s = await semear();
+    const id = await novoCard(s, s.ana, "Padaria");
+    await db.projeto.update({ where: { id }, data: { dataGanho: new Date(Date.now() - 60 * 86_400_000), vendedorId: s.ana.id, responsavelId: s.bruno.id } });
+    await ok(moverCard(id, fase(s, "perdido"), s.bruno, { dadosTerminal: { motivo: "preco" } }));
+    const agora = new Date();
+    const d = await carregarDados({ inicio: new Date(agora.getTime() - 86_400_000), fim: new Date(agora.getTime() + 86_400_000) });
+    expect(d.perdas.map((p) => [p.projetoId, p.responsavelId])).toEqual([[id, s.bruno.id]]);
   });
 
   it("ganho fora do período (data_ganho no mês passado) não conta na semana", async () => {

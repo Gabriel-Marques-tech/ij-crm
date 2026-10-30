@@ -1,19 +1,6 @@
-import Link from "next/link";
-import { FolderKanban, Handshake } from "lucide-react";
 import { formatarDataHora, formatarDinheiro } from "@/lib/projetos/formatar";
 import type { DetalheCard } from "@/lib/projetos/projetos";
-import { ROTULO_ALERTA_VENDA, alertaDaVenda } from "@/lib/projetos/terminal-regras";
-
-type Vinculado = { id: string; titulo: string; deletadoEm: Date | null; pipeline: { chave: string } };
-
-function LinkVinculado({ c }: { c: Vinculado }) {
-  if (c.deletadoEm) return <span className="text-fg-mute">{c.titulo} (removido)</span>;
-  return (
-    <Link href={`/projetos/${c.id}`} className="text-foreground underline decoration-fg-faint underline-offset-2 hover:decoration-foreground">
-      {c.titulo}
-    </Link>
-  );
-}
+import { PIPELINE_PROJETOS } from "@/lib/projetos/terminal-regras";
 
 function Item({ rotulo, children }: { rotulo: string; children: React.ReactNode }) {
   return (
@@ -25,13 +12,14 @@ function Item({ rotulo, children }: { rotulo: string; children: React.ReactNode 
 }
 
 /**
- * Resultado do card (GAB-32): ganho (valor fechado, data) ou perda (motivo) e
- * o vínculo venda ↔ projeto. Só leitura: muda movendo de fase. Nada a mostrar → nada.
+ * Resultado do card (GAB-32): ganho (valor fechado, data) ou perda (motivo).
+ * Só leitura: muda movendo de fase. Nada a mostrar → nada.
  */
 export function ResultadoTerminal({ card }: { card: DetalheCard }) {
   const itens: React.ReactNode[] = [];
   // Reabrir mantém os campos (último fechamento): fora do terminal, rotula como anterior.
-  const anteriorGanho = card.fase.tipoTerminal !== "GANHO" ? " (anterior)" : "";
+  // No quadro Projetos o card está ganho (Ganho → Handoff, GAB-81).
+  const anteriorGanho = card.fase.tipoTerminal !== "GANHO" && card.pipeline.chave !== PIPELINE_PROJETOS ? " (anterior)" : "";
   const anteriorPerda = card.fase.tipoTerminal !== "PERDIDO" ? " (anterior)" : "";
   if (card.dataGanho) {
     itens.push(
@@ -47,35 +35,6 @@ export function ResultadoTerminal({ card }: { card: DetalheCard }) {
     itens.push(
       <Item key="motivo" rotulo={`Motivo da perda${anteriorPerda}`}>
         <span title={card.motivoPerda}>{card.motivoPerda}</span>
-      </Item>,
-    );
-  }
-  if (card.cardProjetos) {
-    itens.push(
-      <Item key="projeto" rotulo="Projeto">
-        <span className="inline-flex items-center gap-1.5">
-          <FolderKanban aria-hidden className="size-3.5 shrink-0 text-fg-mute" />
-          <LinkVinculado c={card.cardProjetos} />
-        </span>
-      </Item>,
-    );
-  }
-  if (card.vendaOrigem) {
-    const alerta = alertaDaVenda(card.vendaOrigem);
-    itens.push(
-      <Item key="venda" rotulo="Venda de origem">
-        <span className="inline-flex items-center gap-1.5">
-          <Handshake aria-hidden className="size-3.5 shrink-0 text-fg-mute" />
-          <LinkVinculado c={card.vendaOrigem} />
-          {alerta ? (
-            <span
-              className="rounded-full border border-danger/60 px-1.5 font-mono text-[10px] leading-4 text-fg-soft uppercase"
-              title="A venda saiu do ganho. O projeto não foi mexido: confira se ele continua."
-            >
-              {ROTULO_ALERTA_VENDA[alerta]}
-            </span>
-          ) : null}
-        </span>
       </Item>,
     );
   }

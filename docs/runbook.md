@@ -259,6 +259,78 @@ Depois de um rollback automático confira `dc ps`: ele só troca o `app`. Se o
 que falhou foi outro serviço (ex.: a Evolution não subiu), ele segue com o
 problema. Veja `dc logs <serviço>`.
 
+### Ciclo único (GAB-81): deploy com migração de dados
+
+A migration `20261030130000_ciclo_unico` **mexe em dados** (une cada par venda →
+card de projetos num Projeto só, cria/adota os marcos, reordena as fases e grava
+`vendedor_id`). O Prisma roda o arquivo como um script só: é tudo ou nada (sem
+`BEGIN`/`COMMIT` explícitos). É idempotente e não apaga nada (o card de projetos
+absorvido fica soft-deletado com `absorvido_por_id`), mas **não tem volta
+automática**: o rollback é restaurar o dump.
+
+**Pares não unidos** (decisão do usuário): se a venda saiu do ganho (reaberta ou
+perdida depois do ganho) e o card de projetos está vivo, os dois **ficam
+separados** — a venda em Vendas, o projeto em Projetos —, com o
+`origem_oportunidade_id` intacto e uma Timeline `ciclo_unico_nao_unido` em cada
+um. A 2ª saída de `scripts/verificar-ciclo-unico.sql` lista esses pares (id,
+título, fase e responsável de cada lado), antes e depois. Na Timeline, cada um
+linka o outro. Se a venda de um par não unido for **ganha de novo**, ela segue
+para o Handoff como card próprio (o projeto da v1 não é mexido) e os dois cards
+ganham um aviso `reganho_projeto_existente` com link um para o outro — a gestão
+decide se arquiva um deles.
+
+Neste deploy, na ordem:
+
+1. **`pg_dump` de produção antes de tudo** (além do backup automático do
+   `deploy.sh`, que no Coolify não existe):
+   ```bash
+   # standalone (compose.prod.yml)
+   scripts/backup.sh                      # ou: dc exec -T db pg_dump -U ijcrm -d ijcrm -Fc > /var/backups/ij-crm/ijcrm-pre-gab81.dump
+   # Coolify: backup do recurso PostgreSQL no painel, ou no host:
+   docker exec <container-postgres-do-crm> pg_dump -U <usuario> -d <banco> -Fc > ijcrm-pre-gab81.dump
+   ls -l ijcrm-pre-gab81.dump && pg_restore --list ijcrm-pre-gab81.dump | grep -c 'TABLE DATA'   # confere que o dump abre
+   ```
+2. **Contagens antes** (só leitura: o script roda dentro de `BEGIN READ ONLY … ROLLBACK`):
+   `psql "$DATABASE_URL" -f scripts/verificar-ciclo-unico.sql > antes.txt`
+   (no container: `... psql -U <usuario> -d <banco> < scripts/verificar-ciclo-unico.sql`).
+   Se puder, rode antes a migration numa **cópia** do dump (`createdb copia &&
+   pg_restore -d copia ijcrm-pre-gab81.dump && DATABASE_URL=…/copia prisma migrate deploy`)
+   e compare as contagens da cópia.
+3. Deploy normal (`prisma migrate deploy` roda a migration). Os `RAISE NOTICE`
+   da migration **não aparecem** no log do `migrate deploy`: o resultado se confere
+   no passo 4, com o script.
+4. **Contagens depois**, mesmo script, `> depois.txt`, e confira as relações
+   listadas no topo de `scripts/verificar-ciclo-unico.sql` (ex.:
+   `projetos_entidades` depois = `cards_total` antes − `cards_absorvidos` depois;
+   `pares_venda_projeto` depois = `pares_nao_unidos`; `marcos` = 7;
+   transições/prazos/mensagens iguais; a lista de não unidos igual à de antes).
+   Na tela: Gestão → Fases mostra os marcos; um card ganho antigo abre com a
+   Timeline da venda e do projeto juntas.
+5. **Rollback** (algo errado nos dados): primeiro o app volta para a tag
+   anterior, depois o banco volta para o dump do passo 1. Standalone:
+   `scripts/deploy.sh rollback sha-<anterior>` e então `scripts/restore.sh <dump>`
+   (o `migrate deploy` que o restore roda usa a tag do app, que não conhece esta
+   migration: ela não é reaplicada). Coolify: redeploy do commit anterior e
+   restauração do backup do recurso PostgreSQL (ou `pg_restore --clean --if-exists
+   --no-owner --single-transaction -d <banco> ijcrm-pre-gab81.dump`). Escritas
+   feitas entre o deploy e o restore se perdem. Só trocar o app (sem restaurar)
+   também funciona — a versão anterior lê o banco migrado —, mas os cards
+   continuam unidos.
+
+Migração falhou: o Postgres desfaz tudo (nada fica pela metade) e o
+`migrate deploy` sai com **P3018**, mostrando a mensagem do erro (ex.:
+`ciclo único: marcos inconsistentes depois da migração`, ou o erro de SQL). O app
+antigo segue no ar. O **próximo** deploy vai parar com **P3009** (migration
+marcada como falhada) até alguém resolver: corrija o problema (dado ou SQL num
+commit novo) e marque a tentativa como desfeita antes de fazer deploy de novo:
+
+```bash
+prisma migrate resolve --rolled-back 20261030130000_ciclo_unico
+# standalone: dc --profile ops run --rm migrate prisma migrate resolve --rolled-back 20261030130000_ciclo_unico
+```
+
+Veja também "Migration falhou" (§2).
+
 ## Deploy automático (GitHub Actions + AWS SSM)
 
 Cada push na `main` (merge de PR) roda o workflow **imagens**:

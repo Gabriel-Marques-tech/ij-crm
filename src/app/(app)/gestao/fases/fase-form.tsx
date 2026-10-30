@@ -21,7 +21,9 @@ const SELECT_CLASSE =
 export function FaseForm({ pipelineId, fase, onSalvo }: { pipelineId: string; fase: FaseComUso | null; onSalvo: () => void }) {
   const acao = fase ? editarFaseAction : criarFaseAction;
   // Com cards vivos o tipo terminal fica travado (o serviço também recusa: FASE_COM_CARDS_TERMINAL).
-  const travaTerminal = (fase?.uso.cards ?? 0) > 0;
+  // Marco do ciclo (GAB-81) nunca muda de tipo (o serviço recusa: MARCO_FIXO).
+  const marco = !!fase?.marco;
+  const travaTerminal = marco || (fase?.uso.cards ?? 0) > 0;
   const [estado, action, pendente] = useActionState(async (prev: EstadoFase, form: FormData) => {
     const r = await acao(prev, form);
     if (r?.ok) onSalvo();
@@ -96,7 +98,7 @@ export function FaseForm({ pipelineId, fase, onSalvo }: { pipelineId: string; fa
           {travaTerminal ? <input type="hidden" name="tipoTerminal" value={fase?.tipoTerminal ?? ""} /> : null}
           {travaTerminal ? (
             <p id="tipoTerminal-dica" className="text-xs text-fg-faint">
-              Essa fase tem cards. Mova-os antes de mudar se ela é de ganho/perdido.
+              {marco ? "Marco do ciclo: o tipo é fixo." : "Essa fase tem cards. Mova-os antes de mudar se ela é de ganho/perdido."}
             </p>
           ) : null}
         </div>

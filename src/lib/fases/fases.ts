@@ -21,6 +21,7 @@ import {
   type AcaoRemocao,
   type ErroFase,
 } from "./regras";
+import { ordemDeMarcosValida } from "./marcos";
 import type { PipelineComFases } from "./tipos";
 
 export type { ErroFase, AcaoRemocao } from "./regras";
@@ -199,6 +200,7 @@ export async function editarFase(
       const fase = await tx.fase.findUniqueOrThrow({ where: { id: faseId }, include: { pipeline: { select: { chave: true } } } });
       if (fase.arquivadaEm) throw new ErroDeRegra("FASE_ARQUIVADA");
       if (dados.tipoTerminal !== undefined && dados.tipoTerminal !== fase.tipoTerminal) {
+        if (fase.marco) throw new ErroDeRegra("MARCO_FIXO");
         // Contado sob o lock do quadro: criar/mover card toma o mesmo lock.
         const qtdCards = await tx.projeto.count({ where: { faseId, deletadoEm: null } });
         const erroCards = validarMudancaTerminal({ de: fase.tipoTerminal, para: dados.tipoTerminal, qtdCards });
@@ -220,8 +222,10 @@ export async function editarFase(
 
 /** Pressupõe o lock do pipeline já tomado na transação. */
 async function aplicarOrdem(tx: Tx, pipelineId: string, faseIds: string[]) {
-  const ativas = await tx.fase.findMany({ where: { pipelineId, arquivadaEm: null }, select: { id: true }, orderBy: { ordem: "asc" } });
+  const ativas = await tx.fase.findMany({ where: { pipelineId, arquivadaEm: null }, select: { id: true, marco: true }, orderBy: { ordem: "asc" } });
   if (!validarReordenacao(ativas.map((f) => f.id), faseIds)) throw new ErroDeRegra("ORDEM_INVALIDA");
+  const marcoDe = new Map(ativas.map((f) => [f.id, f.marco]));
+  if (!ordemDeMarcosValida(faseIds.map((id) => ({ marco: marcoDe.get(id) ?? null })))) throw new ErroDeRegra("ORDEM_MARCOS");
   for (const [ordem, id] of faseIds.entries()) {
     await tx.fase.update({ where: { id }, data: { ordem } });
   }
@@ -282,6 +286,7 @@ export async function removerFase(
       await faseParaLock(tx, faseId);
       const fase = await tx.fase.findUniqueOrThrow({ where: { id: faseId }, include: { pipeline: { select: { chave: true } } } });
       if (fase.arquivadaEm) throw new ErroDeRegra("FASE_ARQUIVADA");
+      if (fase.marco) throw new ErroDeRegra("MARCO_FIXO");
 
       const ativas = await tx.fase.findMany({ where: { pipelineId: fase.pipelineId, arquivadaEm: null }, select: { id: true, tipoTerminal: true } });
       const erroTerminal = validarTerminais(fase.pipeline.chave, ativas.filter((f) => f.id !== faseId));
@@ -290,6 +295,9 @@ export async function removerFase(
       // Tudo lido DEPOIS do lock, inclusive o destino (pode ter sido arquivado).
       const [qtdCards, qtdCardsDeletados, qtdTransicoes, destino] = await Promise.all([
         tx.projeto.count({ where: { faseId, deletadoEm: null } }),
+        // Inclui as cascas absorvidas pelo ciclo único (GAB-81) DE PROPÓSITO: elas não
+        // aparecem em lugar nenhum, mas ainda apontam para a fase (FK); sem contar,
+        // a remoção tentaria EXCLUIR e o DELETE falharia (P2003 → FASE_EM_USO).
         tx.projeto.count({ where: { faseId, deletadoEm: { not: null } } }),
         tx.transicaoFase.count({ where: { OR: [{ deFaseId: faseId }, { paraFaseId: faseId }] } }),
         opts.destinoFaseId
