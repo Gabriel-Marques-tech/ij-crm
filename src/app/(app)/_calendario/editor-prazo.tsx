@@ -129,7 +129,7 @@ function Formulario({
 
   const salvar = () =>
     rodar(
-      () => (prazo ? editarPrazoAction(prazo.id, { titulo, dia, responsavelId: resp }) : criarPrazoAction({ titulo, dia, responsavelId: resp, oportunidadeId: alvo.tipo === "novo" ? alvo.cardId : null })),
+      () => (prazo ? editarPrazoAction(prazo.id, { titulo, dia, responsavelId: resp }) : criarPrazoAction({ titulo, dia, responsavelId: resp, projetoId: alvo.tipo === "novo" ? alvo.cardId : null })),
       prazo ? "salvar o prazo" : "criar o prazo",
     );
 
@@ -241,7 +241,7 @@ function CardDoPrazo({ card }: { card: { id: string; titulo: string } }) {
   return (
     <p className="text-xs text-fg-mute">
       Card:{" "}
-      <Link href={`/kanban/${card.id}`} className="text-fg-soft underline decoration-fg-faint underline-offset-2 hover:text-foreground">
+      <Link href={`/projetos/${card.id}`} className="text-fg-soft underline decoration-fg-faint underline-offset-2 hover:text-foreground">
         {card.titulo}
       </Link>
     </p>

@@ -53,19 +53,19 @@ describe("rodarCli", () => {
     await db.usuario.create({ data: { nome: "Admin", email: "admin@ij.test", papel: "ADMIN" } });
     const seco = io();
     expect(await rodarCli([ARQ], seco.x, AGORA)).toBe(0);
-    expect(await db.oportunidade.count()).toBe(0);
+    expect(await db.projeto.count()).toBe(0);
     expect(seco.saida.join("\n")).toMatch(/dry-run: nada foi gravado/);
     expect(seco.escritos.get(`${ARQ}.erros.csv`)).toMatch(/^﻿linha;id_pipefy;tipo;mensagem/);
 
     const conf = io();
     expect(await rodarCli([ARQ, "--confirmar"], conf.x, AGORA)).toBe(0);
-    const criados = await db.oportunidade.count();
+    const criados = await db.projeto.count();
     expect(criados).toBeGreaterThan(0);
     expect(conf.saida.join("\n")).toMatch(/import concluído: criados \d+, atualizados 0/);
 
     const de_novo = io();
     expect(await rodarCli([ARQ, "--confirmar"], de_novo.x, AGORA)).toBe(0);
-    expect(await db.oportunidade.count()).toBe(criados);
+    expect(await db.projeto.count()).toBe(criados);
     expect(de_novo.saida.join("\n")).toMatch(/criados 0, atualizados [1-9]/);
   });
 
@@ -77,7 +77,7 @@ describe("rodarCli", () => {
     const vend = io({ IMPORT_USUARIO_EMAIL: "Vend@IJ.test" });
     expect(await rodarCli([ARQ, "--confirmar"], vend.x, AGORA)).toBe(1);
     expect(vend.erros[0]).toBe("vend@ij.test precisa ser ADMIN ou GESTOR ativo.");
-    expect(await db.oportunidade.count()).toBe(0);
+    expect(await db.projeto.count()).toBe(0);
   });
 
   it("--motivo-perda: chave inválida recusa; válida aplica aos perdidos sem motivo", async () => {

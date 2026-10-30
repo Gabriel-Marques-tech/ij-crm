@@ -13,7 +13,7 @@
  * orçamento 20000"), é ambíguo → null (o card vai para revisar).
  * Negativo, ilegível ou acima de Decimal(14,2) → null.
  */
-import { lerDinheiro } from "@/lib/oportunidades/terminal-regras";
+import { lerDinheiro } from "@/lib/projetos/terminal-regras";
 
 const LIMITE = 1e12; // 12 dígitos inteiros (Decimal(14,2))
 

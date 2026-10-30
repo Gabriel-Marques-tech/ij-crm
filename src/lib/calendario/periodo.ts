@@ -4,8 +4,8 @@
  * [primeiroDia, ultimoDia] inclusivos; a grade mensal completa as semanas
  * (seg–dom) com dias fora do período, que aparecem apagados.
  */
-import { diaEmFuso } from "@/lib/oportunidades/aging";
-import { somarDias } from "@/lib/oportunidades/proxima-acao";
+import { diaEmFuso } from "@/lib/projetos/aging";
+import { somarDias } from "@/lib/projetos/proxima-acao";
 import { diaValido, resolverSemana, segundaDe } from "./semana";
 
 export const PERIODOS = ["mes", "15d", "semana"] as const;

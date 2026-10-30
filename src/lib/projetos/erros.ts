@@ -1,7 +1,7 @@
-/** Erros de regra do serviço de oportunidades (viram texto em português na action). */
+/** Erros de regra do serviço de projetos (viram texto em português na action). */
 import type { ErroDadosTerminal } from "./terminal-regras";
 
-export type ErroOportunidade =
+export type ErroProjeto =
   | "CARD_NAO_ENCONTRADO"
   | "PIPELINE_NAO_ENCONTRADO"
   | "FASE_NAO_ENCONTRADA"
@@ -19,7 +19,7 @@ export type ErroOportunidade =
 
 /** Lançado dentro da transação: aborta (rollback) e vira `{ ok: false, erro }`. */
 export class ErroDeRegra extends Error {
-  constructor(readonly erro: ErroOportunidade) {
+  constructor(readonly erro: ErroProjeto) {
     super(erro);
   }
 }

@@ -7,7 +7,7 @@
  * "Próxima semana" (já está grande no topo).
  */
 import { agruparPorDia, type DiaAgrupado, type SemanaCalendario } from "@/lib/calendario/semana";
-import { somarDias } from "@/lib/oportunidades/proxima-acao";
+import { somarDias } from "@/lib/projetos/proxima-acao";
 
 /** Último dia lido: hoje+7 (sempre ≥ domingo desta semana). */
 export function fimDaJanela(semana: SemanaCalendario): string {

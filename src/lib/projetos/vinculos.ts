@@ -51,7 +51,7 @@ async function alvoVivo(tx: Tx, campo: CampoVinculo, id: string): Promise<{ id: 
  * ativo. null = card não encontrado.
  */
 export async function obterVinculosDoCard(cardId: string): Promise<{ empresa: Vinculo | null; contato: Vinculo | null } | null> {
-  const card = await db.oportunidade.findFirst({
+  const card = await db.projeto.findFirst({
     where: { id: cardId, deletadoEm: null },
     select: { empresa: { select: SELECAO_REF }, contato: { select: SELECAO_REF } },
   });
@@ -66,7 +66,7 @@ export async function vincularAoCard(cardId: string, campo: CampoVinculo, alvoId
     return await db.$transaction(async (tx) => {
       const travado = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM oportunidade WHERE id = ${cardId} AND deletado_em IS NULL FOR UPDATE`;
       if (travado.length === 0) throw new ErroDeRegra("CARD_NAO_ENCONTRADO");
-      const atual = await tx.oportunidade.findUniqueOrThrow({
+      const atual = await tx.projeto.findUniqueOrThrow({
         where: { id: cardId },
         select: { empresa: { select: { id: true, nome: true } }, contato: { select: { id: true, nome: true } } },
       });
@@ -74,13 +74,13 @@ export async function vincularAoCard(cardId: string, campo: CampoVinculo, alvoId
       if ((antes?.id ?? null) === alvoId) return { ok: true as const, mudou: false };
       const depois = alvoId ? await alvoVivo(tx, campo, alvoId) : null;
 
-      await tx.oportunidade.update({
+      await tx.projeto.update({
         where: { id: cardId },
         data: campo === "empresa" ? { empresaId: depois?.id ?? null } : { contatoId: depois?.id ?? null },
       });
       await tx.timeline.create({
         data: {
-          oportunidadeId: cardId,
+          projetoId: cardId,
           tipo: "CAMPO_ALTERADO",
           payload: { campo, antes: antes?.nome ?? null, depois: depois?.nome ?? null, antesId: antes?.id ?? null, depoisId: depois?.id ?? null },
           usuarioId: por.id,

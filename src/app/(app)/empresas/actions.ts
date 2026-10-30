@@ -36,7 +36,7 @@ export async function editarEmpresaCampoAction(empresaId: string, campo: string,
     const r = await editarEmpresa(empresaId, campo, bruto);
     if (!r.ok) return mensagemFalhaEmpresa(r);
     revalidar(empresaId);
-    revalidatePath("/kanban/[id]", "page");
+    revalidatePath("/projetos/[id]", "page");
     return { ok: true };
   });
 }

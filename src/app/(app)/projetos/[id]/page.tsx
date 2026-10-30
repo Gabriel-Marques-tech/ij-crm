@@ -6,10 +6,10 @@ import { Avatar } from "@/components/kanban/avatar";
 import { MarcarQuadroAtivo } from "@/components/shell/quadro-ativo";
 import { exigirUsuario } from "@/lib/auth/atual";
 import { listarPipelines } from "@/lib/fases/fases";
-import { diaEmFuso, diasNaFase, estadoProximaAcao, nivelAging } from "@/lib/oportunidades/aging";
-import { ROTULO_ORIGEM, UFS } from "@/lib/oportunidades/campos";
-import { formatarDataHora, formatarDinheiro, formatarDia } from "@/lib/oportunidades/formatar";
-import { listarResponsaveis, nomesDeUsuarios, obterCard } from "@/lib/oportunidades/oportunidades";
+import { diaEmFuso, diasNaFase, estadoProximaAcao, nivelAging } from "@/lib/projetos/aging";
+import { ROTULO_ORIGEM, UFS } from "@/lib/projetos/campos";
+import { formatarDataHora, formatarDinheiro, formatarDia } from "@/lib/projetos/formatar";
+import { listarResponsaveis, nomesDeUsuarios, obterCard } from "@/lib/projetos/projetos";
 import { CampoInline, RevisarSwitch } from "./campo-inline";
 import { DescricaoCard } from "./descricao-card";
 import { MoverFase } from "./mover-fase";
@@ -55,7 +55,7 @@ export default async function CardPage({ params }: { params: Promise<{ id: strin
 
   // Venda ↔ projeto (GAB-32): links da Timeline. Soft-deletado fica de fora → "removido".
   const relacionados = new Map<string, CardRelacionado>(
-    [card.projeto, card.origemOportunidade].flatMap((c) => (c && !c.deletadoEm ? [[c.id, { titulo: c.titulo, quadro: c.pipeline.chave }] as const] : [])),
+    [card.cardProjetos, card.vendaOrigem].flatMap((c) => (c && !c.deletadoEm ? [[c.id, { titulo: c.titulo, quadro: c.pipeline.chave }] as const] : [])),
   );
 
   const dias = diasNaFase(card.faseDesde, agora);

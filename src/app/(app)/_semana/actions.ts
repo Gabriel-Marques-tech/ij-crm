@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { exigirEscrita } from "@/lib/auth/atual";
 import { comTratamento, type Inesperado } from "@/lib/erros/registrar";
-import { definirProximaAcao, marcarAcaoFeita, type ErroFeita } from "@/lib/oportunidades/feita";
+import { definirProximaAcao, marcarAcaoFeita, type ErroFeita } from "@/lib/projetos/feita";
 import { validarProximaEscolha } from "@/lib/semana/agrupar";
 
 export type EstadoSemana = { erro?: string; ok?: true } | Inesperado;
@@ -29,7 +29,7 @@ export type Escolha = z.infer<typeof escolhaSchema>;
 function revalidar(cardId: string) {
   revalidatePath("/semana");
   revalidatePath("/kanban");
-  revalidatePath(`/kanban/${cardId}`);
+  revalidatePath(`/projetos/${cardId}`);
 }
 
 /**

@@ -21,9 +21,9 @@ const { exigirEscrita, exigirUsuario, proibido } = vi.hoisted(() => {
 vi.mock("@/lib/auth/atual", () => ({ exigirEscrita, exigirUsuario, exigirPapel: vi.fn(async () => ({ id: "v1", papel: "VISUALIZADOR" })) }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/lib/db", () => ({ db: {} }));
-vi.mock("@/lib/oportunidades/oportunidades");
-vi.mock("@/lib/oportunidades/feita");
-vi.mock("@/lib/oportunidades/vinculos");
+vi.mock("@/lib/projetos/projetos");
+vi.mock("@/lib/projetos/feita");
+vi.mock("@/lib/projetos/vinculos");
 vi.mock("@/lib/prazos/prazos");
 vi.mock("@/lib/contatos/contatos");
 vi.mock("@/lib/empresas/empresas");
@@ -31,15 +31,15 @@ vi.mock("@/lib/lixeira/cards");
 vi.mock("@/lib/preferencias/servico");
 
 const kanban = await import("./kanban/actions");
-const vinculos = await import("./kanban/[id]/vinculos-actions");
+const vinculos = await import("./projetos/[id]/vinculos-actions");
 const calendario = await import("./_calendario/actions");
 const semana = await import("./_semana/actions");
 const contatos = await import("./contatos/actions");
 const empresas = await import("./empresas/actions");
 const lixeira = await import("./_lixeira/actions");
-const oportunidades = await import("@/lib/oportunidades/oportunidades");
-const feita = await import("@/lib/oportunidades/feita");
-const servVinculos = await import("@/lib/oportunidades/vinculos");
+const projetos = await import("@/lib/projetos/projetos");
+const feita = await import("@/lib/projetos/feita");
+const servVinculos = await import("@/lib/projetos/vinculos");
 const prazos = await import("@/lib/prazos/prazos");
 const servContatos = await import("@/lib/contatos/contatos");
 const servEmpresas = await import("@/lib/empresas/empresas");
@@ -80,7 +80,7 @@ describe("VISUALIZADOR não escreve (server actions)", () => {
     await expect(chamar()).rejects.toBe(proibido);
     expect(exigirEscrita).toHaveBeenCalledTimes(1);
     expect(exigirUsuario).not.toHaveBeenCalled();
-    for (const servico of [oportunidades, feita, servVinculos, prazos, servContatos, servEmpresas, lixeiraCards]) {
+    for (const servico of [projetos, feita, servVinculos, prazos, servContatos, servEmpresas, lixeiraCards]) {
       for (const fn of Object.values(servico)) if (vi.isMockFunction(fn)) expect(fn).not.toHaveBeenCalled();
     }
   });

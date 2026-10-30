@@ -3,9 +3,9 @@
  * o ICS começa no domingo) e usa dias civis de São Paulo, qualquer que seja o
  * fuso do servidor. Mesmos helpers da Minha Semana e do Ranking.
  */
-import { diaEmFuso } from "@/lib/oportunidades/aging";
-import { inicioDoDia } from "@/lib/oportunidades/campos";
-import { somarDias } from "@/lib/oportunidades/proxima-acao";
+import { diaEmFuso } from "@/lib/projetos/aging";
+import { inicioDoDia } from "@/lib/projetos/campos";
+import { somarDias } from "@/lib/projetos/proxima-acao";
 
 export type SemanaCalendario = {
   /** `YYYY-MM-DD` (SP), inclusivos. */

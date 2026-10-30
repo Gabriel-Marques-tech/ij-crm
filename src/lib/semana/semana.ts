@@ -7,11 +7,11 @@ import type { Papel } from "@prisma/client";
 import { db } from "@/lib/db";
 import { SELECAO_NOME_EXIBIDO, nomeExibido } from "@/lib/entidades/vinculo";
 import { temPapelMinimo } from "@/lib/auth/papeis";
-import { listarResponsaveis } from "@/lib/oportunidades/oportunidades";
+import { listarResponsaveis } from "@/lib/projetos/projetos";
 import { agruparSemana, type Semana } from "./agrupar";
 
 export async function listarCardsDoVendedor(responsavelId: string) {
-  const cards = await db.oportunidade.findMany({
+  const cards = await db.projeto.findMany({
     // Aberto = vivo e fora de fase terminal (ganho/perdido), em qualquer quadro.
     where: { responsavelId, deletadoEm: null, fase: { isTerminal: false } },
     select: {

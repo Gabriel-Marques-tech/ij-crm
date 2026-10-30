@@ -54,7 +54,7 @@ async function gestor() {
 }
 
 async function card(pipelineId: string, faseId: string, responsavelId: string, titulo = "Lead") {
-  return db.oportunidade.create({ data: { pipelineId, faseId, titulo, responsavelId, criadoVia: "UI" } });
+  return db.projeto.create({ data: { pipelineId, faseId, titulo, responsavelId, criadoVia: "UI" } });
 }
 
 const faseDe = (p: { fases: { chave: string; id: string }[] }, chave: string) => p.fases.find((f) => f.chave === chave)!;
@@ -183,7 +183,7 @@ describe("editarFase", () => {
     expect(f).toMatchObject({ nome: "Negociando", isTerminal: false, tipoTerminal: null });
     // Card soft-deletado não conta.
     const vazia = faseDe(vendas, "primeiro_contato");
-    await db.oportunidade.create({ data: { pipelineId: vendas.id, faseId: vazia.id, titulo: "m", responsavelId: g.id, criadoVia: "UI", deletadoEm: new Date() } });
+    await db.projeto.create({ data: { pipelineId: vendas.id, faseId: vazia.id, titulo: "m", responsavelId: g.id, criadoVia: "UI", deletadoEm: new Date() } });
     expect(await editarFase(vazia.id, { tipoTerminal: "PERDIDO" })).toEqual({ ok: true });
   });
 
@@ -259,14 +259,14 @@ describe("removerFase", () => {
     const c1 = await card(vendas.id, origem.id, g.id, "A");
     const c2 = await card(vendas.id, origem.id, g.id, "B");
     const antes = new Date(Date.now() - 60_000);
-    await db.oportunidade.updateMany({ where: { id: { in: [c1.id, c2.id] } }, data: { faseDesde: antes } });
+    await db.projeto.updateMany({ where: { id: { in: [c1.id, c2.id] } }, data: { faseDesde: antes } });
 
     expect(await removerFase(origem.id, {}, g)).toEqual({ ok: false, erro: "DESTINO_OBRIGATORIO" });
     expect(await removerFase(origem.id, { destinoFaseId: origem.id }, g)).toEqual({ ok: false, erro: "DESTINO_INVALIDO" });
 
     expect(await removerFase(origem.id, { destinoFaseId: destino.id }, g)).toEqual({ ok: true, acao: "ARQUIVAR" });
 
-    const cards = await db.oportunidade.findMany({ where: { id: { in: [c1.id, c2.id] } } });
+    const cards = await db.projeto.findMany({ where: { id: { in: [c1.id, c2.id] } } });
     expect(cards.every((c) => c.faseId === destino.id)).toBe(true);
     expect(cards.every((c) => c.faseDesde.getTime() > antes.getTime())).toBe(true);
 
@@ -274,7 +274,7 @@ describe("removerFase", () => {
     expect(transicoes).toHaveLength(2);
     expect(transicoes.every((t) => t.paraFaseId === destino.id && t.origem === "SISTEMA" && t.usuarioId === g.id)).toBe(true);
 
-    const timeline = await db.timeline.findMany({ where: { oportunidadeId: { in: [c1.id, c2.id] } }, orderBy: { oportunidadeId: "asc" } });
+    const timeline = await db.timeline.findMany({ where: { projetoId: { in: [c1.id, c2.id] } }, orderBy: { projetoId: "asc" } });
     expect(timeline).toHaveLength(2);
     for (const t of timeline) {
       expect(t.tipo).toBe("MOVIMENTACAO");
@@ -293,7 +293,7 @@ describe("removerFase", () => {
     const origem = faseDe(vendas, "em_negociacao");
     const destino = faseDe(vendas, "primeiro_contato");
     const vivo = await card(vendas.id, origem.id, g.id, "vivo");
-    const morto = await db.oportunidade.create({
+    const morto = await db.projeto.create({
       data: { pipelineId: vendas.id, faseId: origem.id, titulo: "morto", responsavelId: g.id, criadoVia: "UI", deletadoEm: new Date() },
     });
 
@@ -301,17 +301,17 @@ describe("removerFase", () => {
     expect(uso.cards).toBe(1);
 
     expect(await removerFase(origem.id, { destinoFaseId: destino.id }, g)).toEqual({ ok: true, acao: "ARQUIVAR" });
-    expect((await db.oportunidade.findUniqueOrThrow({ where: { id: vivo.id } })).faseId).toBe(destino.id);
-    expect((await db.oportunidade.findUniqueOrThrow({ where: { id: morto.id } })).faseId).toBe(origem.id);
-    expect(await db.transicaoFase.count({ where: { oportunidadeId: morto.id } })).toBe(0);
-    expect(await db.timeline.count({ where: { oportunidadeId: morto.id } })).toBe(0);
+    expect((await db.projeto.findUniqueOrThrow({ where: { id: vivo.id } })).faseId).toBe(destino.id);
+    expect((await db.projeto.findUniqueOrThrow({ where: { id: morto.id } })).faseId).toBe(origem.id);
+    expect(await db.transicaoFase.count({ where: { projetoId: morto.id } })).toBe(0);
+    expect(await db.timeline.count({ where: { projetoId: morto.id } })).toBe(0);
   });
 
   it("só card soft-deletado na fase: sem destino, sem migração, arquiva em vez de excluir (FK)", async () => {
     const { vendas } = await semearPipelines();
     const g = await gestor();
     const origem = faseDe(vendas, "em_negociacao");
-    await db.oportunidade.create({
+    await db.projeto.create({
       data: { pipelineId: vendas.id, faseId: origem.id, titulo: "morto", responsavelId: g.id, criadoVia: "UI", deletadoEm: new Date() },
     });
     expect(await removerFase(origem.id, {}, g)).toEqual({ ok: true, acao: "ARQUIVAR" });
@@ -324,7 +324,7 @@ describe("removerFase", () => {
     const a = faseDe(vendas, "primeiro_contato");
     const b = faseDe(vendas, "em_negociacao");
     const c = await card(vendas.id, b.id, g.id);
-    await db.transicaoFase.create({ data: { oportunidadeId: c.id, deFaseId: a.id, paraFaseId: b.id, origem: "UI", usuarioId: g.id } });
+    await db.transicaoFase.create({ data: { projetoId: c.id, deFaseId: a.id, paraFaseId: b.id, origem: "UI", usuarioId: g.id } });
     expect(await removerFase(a.id, {}, g)).toEqual({ ok: true, acao: "ARQUIVAR" });
     expect((await db.fase.findUniqueOrThrow({ where: { id: a.id } })).arquivadaEm).not.toBeNull();
   });
@@ -359,15 +359,15 @@ describe("removerFase × fases terminais (GAB-32)", () => {
     // Segundo PERDIDO para a fase perdida poder sair sem quebrar "≥1 PERDIDO".
     const perdido2 = await db.fase.create({ data: { pipelineId: vendas.id, chave: "perdido_2", nome: "Perdido 2", ordem: 99, isTerminal: true, tipoTerminal: "PERDIDO" } });
     const perdido = faseDe(vendas, "perdido");
-    const p = await db.oportunidade.create({ data: { pipelineId: vendas.id, faseId: perdido.id, titulo: "P", responsavelId: g.id, criadoVia: "UI", motivoPerda: "Preço" } });
+    const p = await db.projeto.create({ data: { pipelineId: vendas.id, faseId: perdido.id, titulo: "P", responsavelId: g.id, criadoVia: "UI", motivoPerda: "Preço" } });
     expect(await removerFase(perdido.id, { destinoFaseId: aberta.id }, g)).toEqual({ ok: false, erro: "DESTINO_TERMINAL_INCOMPATIVEL" });
     expect(await removerFase(perdido.id, { destinoFaseId: faseDe(vendas, "contrato_assinado").id }, g)).toEqual({ ok: false, erro: "DESTINO_TERMINAL_INCOMPATIVEL" });
-    expect((await db.oportunidade.findUniqueOrThrow({ where: { id: c.id } })).faseId).toBe(aberta.id);
-    expect((await db.oportunidade.findUniqueOrThrow({ where: { id: p.id } })).faseId).toBe(perdido.id);
+    expect((await db.projeto.findUniqueOrThrow({ where: { id: c.id } })).faseId).toBe(aberta.id);
+    expect((await db.projeto.findUniqueOrThrow({ where: { id: p.id } })).faseId).toBe(perdido.id);
 
     // Mesmo tipo terminal: migra mantendo os dados do fechamento.
     expect(await removerFase(perdido.id, { destinoFaseId: perdido2.id }, g)).toEqual({ ok: true, acao: "ARQUIVAR" });
-    expect(await db.oportunidade.findUniqueOrThrow({ where: { id: p.id } })).toMatchObject({ faseId: perdido2.id, motivoPerda: "Preço" });
+    expect(await db.projeto.findUniqueOrThrow({ where: { id: p.id } })).toMatchObject({ faseId: perdido2.id, motivoPerda: "Preço" });
   });
 });
 
@@ -390,7 +390,7 @@ describe("listarPipelinesParaGestao", () => {
     const a = faseDe(vendas, "primeiro_contato");
     const b = faseDe(vendas, "em_negociacao");
     const c = await card(vendas.id, b.id, g.id);
-    await db.transicaoFase.create({ data: { oportunidadeId: c.id, deFaseId: a.id, paraFaseId: b.id, origem: "UI" } });
+    await db.transicaoFase.create({ data: { projetoId: c.id, deFaseId: a.id, paraFaseId: b.id, origem: "UI" } });
     const lista = await listarPipelinesParaGestao();
     const fa = lista[0].fases.find((f) => f.chave === "primeiro_contato")!;
     const fb = lista[0].fases.find((f) => f.chave === "em_negociacao")!;

@@ -1,5 +1,5 @@
 /**
- * Visão Tabela (GAB-35), leitura: todas as oportunidades vivas com filtros,
+ * Visão Tabela (GAB-35), leitura: todos os projetos vivos com filtros,
  * ordenação e paginação NO BANCO, e o mesmo conjunto (sem limite) para o CSV.
  *
  * - Vendedor vê tudo (§4.5, matriz de papéis): responsável é filtro, não parede.
@@ -18,9 +18,9 @@ import { QUEM_ATUA } from "@/lib/auth/papeis";
 import { db } from "@/lib/db";
 import { BUSCA_MAX, escaparLike } from "@/lib/entidades/busca";
 import { nomeExibido, SELECAO_NOME_EXIBIDO, sufixoVinculo } from "@/lib/entidades/vinculo";
-import { diaEmFuso, diasNaFase, nivelAging, type NivelAging } from "@/lib/oportunidades/aging";
-import { inicioDoDia, ROTULO_ORIGEM } from "@/lib/oportunidades/campos";
-import { DIAS_SEMANA, somarDias } from "@/lib/oportunidades/proxima-acao";
+import { diaEmFuso, diasNaFase, nivelAging, type NivelAging } from "@/lib/projetos/aging";
+import { inicioDoDia, ROTULO_ORIGEM } from "@/lib/projetos/campos";
+import { DIAS_SEMANA, somarDias } from "@/lib/projetos/proxima-acao";
 import { BOM, celulaData, celulaDataHora, celulaNumero, celulaTexto, linhaCsv } from "./csv";
 import type { EstadoTabela, FiltroAcao, FiltrosTabela, OrdemTabela } from "./params";
 
@@ -28,8 +28,8 @@ export const POR_PAGINA = 50;
 /** Linhas por ida ao banco no CSV. */
 export const LOTE_CSV = 500;
 
-type Where = Prisma.OportunidadeWhereInput;
-type OrderBy = Prisma.OportunidadeOrderByWithRelationInput;
+type Where = Prisma.ProjetoWhereInput;
+type OrderBy = Prisma.ProjetoOrderByWithRelationInput;
 
 function meiaNoite(dia: string): Date {
   // `dia` já validado (lerEstado) ou derivado de diaEmFuso: nunca null aqui.
@@ -165,9 +165,9 @@ async function idsOrdenados(f: FiltrosTabela, ordem: OrdemTabela, agora: Date): 
   if (daBusca?.size === 0) return [];
   const texto = ORDEM_TEXTO[ordem.coluna];
   if (!texto) {
-    return naBusca((await db.oportunidade.findMany({ where, orderBy: montarOrderBy(ordem), select: { id: true } })).map((r) => r.id));
+    return naBusca((await db.projeto.findMany({ where, orderBy: montarOrderBy(ordem), select: { id: true } })).map((r) => r.id));
   }
-  const ids = naBusca((await db.oportunidade.findMany({ where, select: { id: true } })).map((r) => r.id));
+  const ids = naBusca((await db.projeto.findMany({ where, select: { id: true } })).map((r) => r.id));
   if (!ids.length) return [];
   const dir = ordem.dir === "asc" ? "ASC" : "DESC";
   const linhas = await db.$queryRaw<{ id: string }[]>`
@@ -257,7 +257,7 @@ const SELECAO = {
   responsavel: { select: { id: true, nome: true } },
   empresa: { select: SELECAO_REF_TABELA },
   contato: { select: SELECAO_REF_TABELA },
-} satisfies Prisma.OportunidadeSelect;
+} satisfies Prisma.ProjetoSelect;
 
 export type LinhaTabela = {
   id: string;
@@ -290,11 +290,11 @@ function refNaTabela(tipo: "empresa" | "contato", r: RefBrutaTabela | null): Ref
   return { nome: nomeExibido(r), excluido: false };
 }
 
-type Bruta = Prisma.OportunidadeGetPayload<{ select: typeof SELECAO }>;
+type Bruta = Prisma.ProjetoGetPayload<{ select: typeof SELECAO }>;
 
 /** Só o CSV lê a descrição (texto longo): a tela não tem essa coluna. */
-const SELECAO_CSV = { ...SELECAO, descricao: true } satisfies Prisma.OportunidadeSelect;
-type BrutaCsv = Prisma.OportunidadeGetPayload<{ select: typeof SELECAO_CSV }>;
+const SELECAO_CSV = { ...SELECAO, descricao: true } satisfies Prisma.ProjetoSelect;
+type BrutaCsv = Prisma.ProjetoGetPayload<{ select: typeof SELECAO_CSV }>;
 
 async function paraLinhas(brutas: Bruta[], agora: Date): Promise<LinhaTabela[]> {
   return brutas.map((b) => {
@@ -330,7 +330,7 @@ async function carregarNaOrdem<B extends { id: string }>(
   select: typeof SELECAO | typeof SELECAO_CSV,
 ): Promise<B[]> {
   if (!fatia.length) return [];
-  const brutas = (await db.oportunidade.findMany({ where: await montarWhere(f, agora, fatia), select })) as unknown as B[];
+  const brutas = (await db.projeto.findMany({ where: await montarWhere(f, agora, fatia), select })) as unknown as B[];
   const porId = new Map(brutas.map((b) => [b.id, b]));
   return fatia.map((id) => porId.get(id)).filter((b): b is B => !!b);
 }
@@ -354,7 +354,7 @@ export async function listarTabela(e: EstadoTabela, agora: Date): Promise<Pagina
  * VISUALIZADOR só entra se ainda é dono de algum card (ex.: ex-vendedor rebaixado).
  */
 export async function listarPessoas() {
-  return db.usuario.findMany({ where: { OR: [QUEM_ATUA, { oportunidades: { some: {} } }] }, orderBy: [{ ativo: "desc" }, { nome: "asc" }], select: { id: true, nome: true, ativo: true } });
+  return db.usuario.findMany({ where: { OR: [QUEM_ATUA, { projetos: { some: {} } }] }, orderBy: [{ ativo: "desc" }, { nome: "asc" }], select: { id: true, nome: true, ativo: true } });
 }
 
 // ---------------------------------------------------------------- CSV

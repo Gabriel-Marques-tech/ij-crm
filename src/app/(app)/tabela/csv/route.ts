@@ -13,7 +13,7 @@
 import { unstable_rethrow } from "next/navigation";
 import { exigirUsuario } from "@/lib/auth/atual";
 import { mensagemInesperada, registrarErro } from "@/lib/erros/registrar";
-import { diaEmFuso } from "@/lib/oportunidades/aging";
+import { diaEmFuso } from "@/lib/projetos/aging";
 import { lerEstado } from "@/lib/tabela/params";
 import { exportarCsv } from "@/lib/tabela/tabela";
 
@@ -64,7 +64,7 @@ export async function GET(req: Request): Promise<Response> {
   return new Response(corpo, {
     headers: {
       "content-type": "text/csv; charset=utf-8",
-      "content-disposition": `attachment; filename="oportunidades-${diaEmFuso(agora)}.csv"`,
+      "content-disposition": `attachment; filename="projetos-${diaEmFuso(agora)}.csv"`,
       "cache-control": "no-store",
       "x-content-type-options": "nosniff",
     },

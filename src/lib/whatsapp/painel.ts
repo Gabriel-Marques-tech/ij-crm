@@ -11,9 +11,9 @@ import type { Papel, Prisma, StatusMensagem } from "@prisma/client";
 import { podeAtribuirPapel, QUEM_ATUA } from "@/lib/auth/papeis";
 import { db } from "@/lib/db";
 import { travarPipelines } from "@/lib/fases/fases";
-import { ErroDeRegra, type ErroOportunidade } from "@/lib/oportunidades/erros";
-import { criarCardTravado } from "@/lib/oportunidades/oportunidades";
-import { PIPELINE_VENDAS } from "@/lib/oportunidades/terminal-regras";
+import { ErroDeRegra, type ErroProjeto } from "@/lib/projetos/erros";
+import { criarCardTravado } from "@/lib/projetos/projetos";
+import { PIPELINE_VENDAS } from "@/lib/projetos/terminal-regras";
 import { mascararJid, mascararTelefone } from "./mascarar";
 
 export const POR_PAGINA_FILA = 20;
@@ -115,7 +115,7 @@ export async function carregarPainel(): Promise<Painel> {
           where: { tipo: "MENSAGEM_WHATSAPP" },
           orderBy: { em: "desc" },
           take: 1,
-          select: { oportunidade: { select: { id: true, titulo: true, deletadoEm: true } } },
+          select: { projeto: { select: { id: true, titulo: true, deletadoEm: true } } },
         },
       },
     }),
@@ -131,7 +131,7 @@ export async function carregarPainel(): Promise<Painel> {
       ultimaVez: d.ultimaVez,
     })),
     recentes: recentes.map((r) => {
-      const op = r.timeline[0]?.oportunidade;
+      const op = r.timeline[0]?.projeto;
       return {
         id: r.id,
         texto: r.texto,
@@ -162,7 +162,7 @@ export async function opcoesDoPainel(): Promise<{ fases: { id: string; nome: str
 export async function buscarCardsParaVincular(q: string): Promise<{ id: string; nome: string; detalhe: string }[]> {
   const termo = q.trim().slice(0, 100);
   if (!termo) return [];
-  const ops = await db.oportunidade.findMany({
+  const ops = await db.projeto.findMany({
     // Só Vendas, como o "criar card" do mesmo diálogo.
     where: { deletadoEm: null, pipeline: { chave: PIPELINE_VENDAS }, titulo: { contains: termo, mode: "insensitive" } },
     orderBy: { atualizadoEm: "desc" },
@@ -174,8 +174,8 @@ export async function buscarCardsParaVincular(q: string): Promise<{ id: string; 
 
 // ---------------------------------------------------------------- resolver manualmente
 
-export type ErroResolver = "MENSAGEM_NAO_ENCONTRADA" | "MENSAGEM_JA_RESOLVIDA" | "MENSAGEM_EM_PROCESSAMENTO" | ErroOportunidade;
-export type AlvoResolver = { tipo: "CRIAR"; titulo: string; faseId: string } | { tipo: "VINCULAR"; oportunidadeId: string };
+export type ErroResolver = "MENSAGEM_NAO_ENCONTRADA" | "MENSAGEM_JA_RESOLVIDA" | "MENSAGEM_EM_PROCESSAMENTO" | ErroProjeto;
+export type AlvoResolver = { tipo: "CRIAR"; titulo: string; faseId: string } | { tipo: "VINCULAR"; projetoId: string };
 
 class Recusa extends Error {
   constructor(readonly erro: ErroResolver) {
@@ -184,7 +184,7 @@ class Recusa extends Error {
 }
 
 /**
- * Fecha uma mensagem da fila sem a LLM: cria card (núcleo de oportunidades,
+ * Fecha uma mensagem da fila sem a LLM: cria card (núcleo de projetos,
  * responsável = vendedor que mandou, se ativo) ou liga a um card existente;
  * Timeline `MENSAGEM_WHATSAPP` com o texto, autor = quem resolveu; mensagem
  * vira `PROCESSADA` com `resolvida_por_id`/`resolvida_em`. A linha da
@@ -195,9 +195,9 @@ export async function resolverManualmente(
   mensagemId: string,
   alvo: AlvoResolver,
   por: { id: string },
-): Promise<{ ok: true; oportunidadeId: string } | { ok: false; erro: ErroResolver }> {
+): Promise<{ ok: true; projetoId: string } | { ok: false; erro: ErroResolver }> {
   try {
-    const oportunidadeId = await db.$transaction(async (tx) => {
+    const projetoId = await db.$transaction(async (tx) => {
       const [m] = await tx.$queryRaw<{ status: StatusMensagem; texto: string; remetente_usuario_id: string | null }[]>`
         SELECT status::text AS status, texto, remetente_usuario_id FROM mensagem_bruta WHERE id = ${mensagemId} FOR UPDATE`;
       if (!m) throw new Recusa("MENSAGEM_NAO_ENCONTRADA");
@@ -219,13 +219,13 @@ export async function resolverManualmente(
           por,
         );
       } else {
-        const op = await tx.oportunidade.findFirst({ where: { id: alvo.oportunidadeId, deletadoEm: null, pipeline: { chave: PIPELINE_VENDAS } }, select: { id: true } });
+        const op = await tx.projeto.findFirst({ where: { id: alvo.projetoId, deletadoEm: null, pipeline: { chave: PIPELINE_VENDAS } }, select: { id: true } });
         if (!op) throw new ErroDeRegra("CARD_NAO_ENCONTRADO");
         id = op.id;
       }
       await tx.timeline.create({
         data: {
-          oportunidadeId: id,
+          projetoId: id,
           tipo: "MENSAGEM_WHATSAPP",
           usuarioId: por.id,
           mensagemBrutaId: mensagemId,
@@ -236,7 +236,7 @@ export async function resolverManualmente(
       await tx.mensagemBruta.update({ where: { id: mensagemId }, data: { status: "PROCESSADA", resolvidaPorId: por.id, resolvidaEm: agora } });
       return id;
     });
-    return { ok: true, oportunidadeId };
+    return { ok: true, projetoId };
   } catch (e) {
     if (e instanceof Recusa) return { ok: false, erro: e.erro };
     if (e instanceof ErroDeRegra) return { ok: false, erro: e.erro };

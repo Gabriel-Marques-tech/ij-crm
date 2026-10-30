@@ -1,9 +1,9 @@
 /**
- * Oportunidades candidatas para o contexto da LLM (GAB-38; design doc §4.3
+ * Projetos candidatos para o contexto da LLM (GAB-38; design doc §4.3
  * "Alvo de ATUALIZAR"). Só LEITURA — não é sessão de conversa:
  * - cards de `vendas` dos contatos/empresas casados por identificador exato
  *   (abertos e fechados: as regras de alvo precisam saber de "só terminais");
- * - as últimas 3 oportunidades que o remetente tocou (Timeline com o usuário
+ * - os últimos 3 projetos que o remetente tocou (Timeline com o usuário
  *   dele) nos 30 min antes da mensagem — cobre mensagens picadas;
  * - o card da confirmação do bot que a mensagem responde (`MensagemEnviada`);
  * - GAB-49: os cards que as mensagens de venda do remetente mexeram na janela
@@ -13,8 +13,8 @@
  */
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import type { OportunidadeCandidata } from "@/lib/llm/prompts/extracao.v2";
-import { PIPELINE_VENDAS } from "@/lib/oportunidades/terminal-regras";
+import type { ProjetoCandidata } from "@/lib/llm/prompts/extracao.v2";
+import { PIPELINE_VENDAS } from "@/lib/projetos/terminal-regras";
 import type { ViaCandidata } from "./alvo";
 
 type Cliente = Prisma.TransactionClient | typeof db;
@@ -45,10 +45,10 @@ const CARD_VIVO_EM_VENDAS = { deletadoEm: null, pipeline: { chave: PIPELINE_VEND
  */
 export async function alvoDaResposta(respondendoEventoId: string | null, recebidaEm: Date, cliente: Cliente = db): Promise<AlvoDaResposta | null> {
   if (!respondendoEventoId) return null;
-  const enviada = await cliente.mensagemEnviada.findUnique({ where: { eventoId: respondendoEventoId }, select: { oportunidadeId: true, em: true } });
-  if (!enviada?.oportunidadeId) return null;
-  const card = await cliente.oportunidade.findUnique({
-    where: { id: enviada.oportunidadeId },
+  const enviada = await cliente.mensagemEnviada.findUnique({ where: { eventoId: respondendoEventoId }, select: { projetoId: true, em: true } });
+  if (!enviada?.projetoId) return null;
+  const card = await cliente.projeto.findUnique({
+    where: { id: enviada.projetoId },
     select: { id: true, deletadoEm: true, pipeline: { select: { chave: true } } },
   });
   if (!card || card.deletadoEm) return { tipo: "INVALIDA", motivo: "RESPOSTA_CARD_REMOVIDO" };
@@ -58,10 +58,10 @@ export async function alvoDaResposta(respondendoEventoId: string | null, recebid
 }
 
 /** Cards de vendas por identidade: abertos e fechados com limites próprios. */
-async function porIdentidade(cliente: Cliente, filtro: Prisma.OportunidadeWhereInput): Promise<string[]> {
+async function porIdentidade(cliente: Cliente, filtro: Prisma.ProjetoWhereInput): Promise<string[]> {
   const [abertos, fechados] = await Promise.all(
     ([false, true] as const).map((terminal) =>
-      cliente.oportunidade.findMany({
+      cliente.projeto.findMany({
         where: { ...CARD_VIVO_EM_VENDAS, ...filtro, fase: { isTerminal: terminal } },
         orderBy: [{ atualizadoEm: "desc" }, { id: "asc" }],
         take: terminal ? MAX_FECHADOS_POR_IDENTIDADE : MAX_ABERTOS_POR_IDENTIDADE,
@@ -72,7 +72,7 @@ async function porIdentidade(cliente: Cliente, filtro: Prisma.OportunidadeWhereI
   return [...abertos, ...fechados].map((o) => o.id);
 }
 
-export async function oportunidadesCandidatas(
+export async function projetosCandidatos(
   e: {
     remetenteUsuarioId: string | null;
     recebidaEm: Date;
@@ -83,7 +83,7 @@ export async function oportunidadesCandidatas(
     ledger?: string[];
   },
   cliente: Cliente = db,
-): Promise<OportunidadeCandidata[]> {
+): Promise<ProjetoCandidata[]> {
   const vias = new Map<string, Set<ViaCandidata>>();
   const marcar = (id: string, via: ViaCandidata) => (vias.get(id) ?? vias.set(id, new Set()).get(id)!).add(via);
 
@@ -103,13 +103,13 @@ export async function oportunidadesCandidatas(
       where: {
         usuarioId: e.remetenteUsuarioId,
         em: { gte: new Date(e.recebidaEm.getTime() - JANELA_RECENTES_MS) },
-        oportunidade: CARD_VIVO_EM_VENDAS,
+        projeto: CARD_VIVO_EM_VENDAS,
       },
       orderBy: [{ em: "desc" }, { id: "desc" }],
       take: 50,
-      select: { oportunidadeId: true },
+      select: { projetoId: true },
     });
-    const recentes = [...new Set(toques.map((t) => t.oportunidadeId))].slice(0, MAX_RECENTES);
+    const recentes = [...new Set(toques.map((t) => t.projetoId))].slice(0, MAX_RECENTES);
     for (const id of recentes) marcar(id, "recente");
   }
 
@@ -118,13 +118,13 @@ export async function oportunidadesCandidatas(
   if (vias.size === 0) return [];
   const ids = [...vias.keys()];
   const [cards, ultimos] = await Promise.all([
-    cliente.oportunidade.findMany({
+    cliente.projeto.findMany({
       where: { id: { in: ids }, ...CARD_VIVO_EM_VENDAS },
       select: { id: true, titulo: true, criadoEm: true, fase: { select: { nome: true, isTerminal: true } } },
     }),
-    cliente.timeline.groupBy({ by: ["oportunidadeId"], where: { oportunidadeId: { in: ids } }, _max: { em: true } }),
+    cliente.timeline.groupBy({ by: ["projetoId"], where: { projetoId: { in: ids } }, _max: { em: true } }),
   ]);
-  const tocada = new Map(ultimos.map((u) => [u.oportunidadeId, u._max.em]));
+  const tocada = new Map(ultimos.map((u) => [u.projetoId, u._max.em]));
   return cards
     .map((c) => ({
       id: c.id,

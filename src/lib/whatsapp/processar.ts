@@ -20,7 +20,7 @@
  *   2×30 s + transação). Ao devolver FALHA → RECEBIDA mantém `erro`: é o que
  *   faz a resposta começar com "Reprocessada:".
  * - A LLM roda FORA de qualquer transação (a tx interativa do Prisma expira
- *   em 5s); a aplicação (Empresa/Contato/Oportunidade/Timeline + status) roda
+ *   em 5s); a aplicação (Empresa/Contato/Projeto/Timeline + status) roda
  *   numa transação só.
  * - Falha da LLM ou da aplicação → `FALHA`, `erro` = código + ref,
  *   `registrarErro` loga a causa com a mesma ref (nunca o texto), e o grupo
@@ -46,10 +46,10 @@ import { alertarSeSemCredito, marcarCreditoOk } from "@/lib/llm/alerta-credito";
 import { ErroLlm, extrairAtualizacao, type ContextoExtracao, type ResultadoExtracao } from "@/lib/llm/extracao";
 import type { ContatoCandidato, EmpresaCandidata } from "@/lib/llm/prompts/extracao.v2";
 import { VERSAO_EXTRACAO } from "@/lib/llm/prompts/extracao.v2";
-import { ErroDeRegra } from "@/lib/oportunidades/erros";
-import { PIPELINE_VENDAS } from "@/lib/oportunidades/terminal-regras";
+import { ErroDeRegra } from "@/lib/projetos/erros";
+import { PIPELINE_VENDAS } from "@/lib/projetos/terminal-regras";
 import { aplicarExtracao, type Desfecho } from "./aplicar";
-import { alvoDaResposta, oportunidadesCandidatas, type MotivoRespostaInvalida } from "./candidatas";
+import { alvoDaResposta, projetosCandidatos, type MotivoRespostaInvalida } from "./candidatas";
 import { textoAtualizado, textoAtualizadoSemTag, textoCriado, textoCriadoSemTag, textoFalha, textoPendente } from "./confirmacao";
 import { contarDescartada } from "./contadores";
 import { enviarWhatsApp } from "./enviar";
@@ -59,7 +59,7 @@ import { regraSemTag } from "./regra-sem-tag";
 
 export type ResultadoProcessamento =
   | { tipo: "IGNORADA" }
-  | { tipo: "PROCESSADA"; oportunidadeId: string; confirmacao: string }
+  | { tipo: "PROCESSADA"; projetoId: string; confirmacao: string }
   /** `confirmacao: null` = sem resposta no grupo (mensagem sem #crm pendente, GAB-39). */
   | { tipo: "PENDENTE_REVISAO"; confirmacao: string | null }
   /** Sem #crm e a extração disse IGNORAR: linha apagada, só o contador (GAB-39). */
@@ -100,7 +100,7 @@ function carregar(id: string) {
 
 /**
  * Contexto do passo 6: remetente, msg respondida, fases de vendas, candidatos
- * por identificador exato e oportunidades candidatas (GAB-38), ledger da
+ * por identificador exato e projetos candidatos (GAB-38), ledger da
  * janela de 12 h + resumo da anterior (GAB-49, `contexto/contexto-12h.ts`).
  */
 export async function montarContexto(
@@ -138,7 +138,7 @@ export async function montarContexto(
   const c12 = await contexto12h(m, { pendentes });
   const resposta = await alvoDaResposta(m.respondendoEventoId, m.recebidaEm);
   const alvoResposta = resposta?.tipo === "CARD" ? resposta.id : null;
-  const oportunidades = await oportunidadesCandidatas({
+  const projetos = await projetosCandidatos({
     remetenteUsuarioId: m.remetenteUsuarioId,
     recebidaEm: m.recebidaEm,
     contatoIds: contatos.map((c) => c.id),
@@ -154,7 +154,7 @@ export async function montarContexto(
     fases: fases.map((f) => ({ chave: f.chave, nome: f.nome, terminal: f.isTerminal })),
     contatos,
     empresas,
-    oportunidades,
+    projetos,
     alvoResposta,
     respostaInvalida: resposta?.tipo === "INVALIDA" ? resposta.motivo : null,
     semTag: m.semTag ?? false,
@@ -182,14 +182,16 @@ function registroLlm(r: ResultadoExtracao | null, bruto?: unknown, uso?: Resulta
   };
 }
 
+// Vai para `mensagem_bruta.resultado_llm.aplicacao` (JSON persistido): a chave `oportunidadeId` fica
+// com o nome antigo de propósito (GAB-80), para não misturar formatos com as linhas já gravadas.
 function resumoDesfecho(d: Desfecho) {
   if (d.tipo === "PENDENTE") return { tipo: d.tipo, motivo: d.motivo };
   if (d.tipo === "ATUALIZADO") {
-    return { tipo: d.tipo, oportunidadeId: d.oportunidadeId, alterados: d.alterados, moveu: d.deFaseNome !== null, revisar: d.revisar, motivosRevisar: d.motivosRevisar, sugestoes: d.sugestoes };
+    return { tipo: d.tipo, oportunidadeId: d.projetoId, alterados: d.alterados, moveu: d.deFaseNome !== null, revisar: d.revisar, motivosRevisar: d.motivosRevisar, sugestoes: d.sugestoes };
   }
   return {
     tipo: d.tipo,
-    oportunidadeId: d.oportunidadeId,
+    oportunidadeId: d.projetoId,
     contato: d.contato,
     empresa: d.empresa,
     revisar: d.revisar,
@@ -207,13 +209,13 @@ function participantDe(m: Bruta, participantJid?: string | null): string | undef
   return undefined;
 }
 
-async function responder(m: Bruta, texto: string, oportunidadeId: string | null, participantJid?: string | null) {
+async function responder(m: Bruta, texto: string, projetoId: string | null, participantJid?: string | null) {
   try {
     await enviarWhatsApp({
       para: m.grupoJid,
       texto,
       citar: { eventoId: m.eventoId, participant: participantDe(m, participantJid), texto: m.texto },
-      oportunidadeId,
+      projetoId,
     });
   } catch (e) {
     console.error(`[processar] confirmação da mensagem ${m.id} não enviada: ${e instanceof Error ? e.name : typeof e}`);
@@ -313,7 +315,7 @@ async function processar(id: string, opts: { participantJid?: string | null }, p
                 extracao: r.extracao,
                 limiar: limiarConfianca(),
                 registroLlm: llm,
-                candidatas: ctx.oportunidades,
+                candidatas: ctx.projetos,
                 alvoResposta: ctx.alvoResposta,
                 respostaInvalida: ctx.respostaInvalida,
               });
@@ -347,6 +349,6 @@ async function processar(id: string, opts: { participantJid?: string | null }, p
     desfecho.tipo === "ATUALIZADO"
       ? (m.semTag ? textoAtualizadoSemTag : textoAtualizado)(desfecho, { reprocessada })
       : (m.semTag ? textoCriadoSemTag : textoCriado)(desfecho, { reprocessada });
-  await responder(m, confirmacao, desfecho.oportunidadeId, opts.participantJid);
-  return { tipo: "PROCESSADA", oportunidadeId: desfecho.oportunidadeId, confirmacao };
+  await responder(m, confirmacao, desfecho.projetoId, opts.participantJid);
+  return { tipo: "PROCESSADA", projetoId: desfecho.projetoId, confirmacao };
 }

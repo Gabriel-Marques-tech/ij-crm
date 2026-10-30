@@ -27,7 +27,7 @@ export function Destaques({ destaques }: { destaques: Destaque[] }) {
                       {v.card ? (
                         <>
                           {" · "}
-                          <Link href={`/kanban/${encodeURIComponent(v.card.id)}`} className="text-fg-mute hover:text-foreground hover:underline">
+                          <Link href={`/projetos/${encodeURIComponent(v.card.id)}`} className="text-fg-mute hover:text-foreground hover:underline">
                             {v.card.titulo}
                           </Link>
                         </>

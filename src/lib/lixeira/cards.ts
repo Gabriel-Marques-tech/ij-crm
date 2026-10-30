@@ -49,14 +49,14 @@ async function travarLinha(tx: Tx, id: string): Promise<boolean> {
 export async function excluirCard(id: string, por: { id: string }): Promise<ResultadoLixeira> {
   try {
     await db.$transaction(async (tx) => {
-      const alvo = await tx.oportunidade.findFirst({ where: { id, deletadoEm: null }, select: { pipelineId: true } });
+      const alvo = await tx.projeto.findFirst({ where: { id, deletadoEm: null }, select: { pipelineId: true } });
       if (!alvo) throw new Falha({ erro: "CARD_NAO_ENCONTRADO" });
       await travarPipelines(tx, [alvo.pipelineId]);
       const agora = new Date();
-      const atual = await tx.oportunidade.findFirst({ where: { id, deletadoEm: null }, select: { faseId: true } });
+      const atual = await tx.projeto.findFirst({ where: { id, deletadoEm: null }, select: { faseId: true } });
       if (!atual) throw new Falha({ erro: "CARD_NAO_ENCONTRADO" });
-      await tx.oportunidade.update({ where: { id }, data: { deletadoEm: agora } });
-      await tx.timeline.create({ data: { oportunidadeId: id, tipo: "EXCLUSAO", payload: { faseId: atual.faseId }, usuarioId: por.id, em: agora } });
+      await tx.projeto.update({ where: { id }, data: { deletadoEm: agora } });
+      await tx.timeline.create({ data: { projetoId: id, tipo: "EXCLUSAO", payload: { faseId: atual.faseId }, usuarioId: por.id, em: agora } });
     });
     return { ok: true };
   } catch (e) {
@@ -68,11 +68,11 @@ export async function restaurarCard(id: string, por: Ator, opts: { faseId?: stri
   if (!podeRestaurar(por.papel)) return { ok: false, erro: "SEM_PERMISSAO" };
   try {
     const faseId = await db.$transaction(async (tx) => {
-      const alvo = await tx.oportunidade.findUnique({ where: { id }, select: { pipelineId: true } });
+      const alvo = await tx.projeto.findUnique({ where: { id }, select: { pipelineId: true } });
       if (!alvo) throw new Falha({ erro: "CARD_NAO_ENCONTRADO" });
       await travarPipelines(tx, [alvo.pipelineId]);
       if (!(await travarLinha(tx, id))) throw new Falha({ erro: "CARD_NAO_ENCONTRADO" });
-      const card = await tx.oportunidade.findUniqueOrThrow({ where: { id }, select: { deletadoEm: true, faseId: true, fase: true } });
+      const card = await tx.projeto.findUniqueOrThrow({ where: { id }, select: { deletadoEm: true, faseId: true, fase: true } });
       if (!card.deletadoEm) throw new Falha({ erro: "NAO_ESTA_NA_LIXEIRA" });
 
       let destino = card.fase;
@@ -87,12 +87,12 @@ export async function restaurarCard(id: string, por: Ator, opts: { faseId?: stri
       const agora = new Date();
       const depois = new Date(agora.getTime() + 1); // MOVIMENTACAO depois da RESTAURACAO na Timeline
       const moveu = destino.id !== card.faseId;
-      await tx.oportunidade.update({ where: { id }, data: { deletadoEm: null, ...(moveu ? { faseId: destino.id, faseDesde: agora } : {}) } });
-      await tx.timeline.create({ data: { oportunidadeId: id, tipo: "RESTAURACAO", payload: { faseId: destino.id }, usuarioId: por.id, em: agora } });
+      await tx.projeto.update({ where: { id }, data: { deletadoEm: null, ...(moveu ? { faseId: destino.id, faseDesde: agora } : {}) } });
+      await tx.timeline.create({ data: { projetoId: id, tipo: "RESTAURACAO", payload: { faseId: destino.id }, usuarioId: por.id, em: agora } });
       if (moveu) {
-        await tx.transicaoFase.create({ data: { oportunidadeId: id, deFaseId: card.faseId, paraFaseId: destino.id, usuarioId: por.id, origem: "UI", em: agora } });
+        await tx.transicaoFase.create({ data: { projetoId: id, deFaseId: card.faseId, paraFaseId: destino.id, usuarioId: por.id, origem: "UI", em: agora } });
         await tx.timeline.create({
-          data: { oportunidadeId: id, tipo: "MOVIMENTACAO", payload: { deFaseId: card.faseId, paraFaseId: destino.id, motivo: "restauracao" }, usuarioId: por.id, em: depois },
+          data: { projetoId: id, tipo: "MOVIMENTACAO", payload: { deFaseId: card.faseId, paraFaseId: destino.id, motivo: "restauracao" }, usuarioId: por.id, em: depois },
         });
       }
       return destino.id;
@@ -121,8 +121,8 @@ export async function apagarCardDefinitivo(id: string, por: Ator, confirmacao: s
 
 const SELECAO_LIGADOS = {
   pipelineId: true,
-  origemOportunidade: { select: { id: true, pipelineId: true } },
-  projeto: { select: { id: true, pipelineId: true } },
+  vendaOrigem: { select: { id: true, pipelineId: true } },
+  cardProjetos: { select: { id: true, pipelineId: true } },
   reaberturas: { select: { id: true, pipelineId: true } },
 } as const;
 
@@ -130,18 +130,18 @@ async function apagarCardNaTransacao(tx: Tx, id: string, por: Ator, confirmacao:
   // Ordem documentada: pipelines (todos os quadros envolvidos, por id) → linha.
   // Escrevemos na Timeline dos cards ligados (venda ↔ projeto, reaberturas) e o
   // DELETE zera as FKs deles, então os quadros deles entram no lock também.
-  const antes = await tx.oportunidade.findUnique({ where: { id }, select: SELECAO_LIGADOS });
+  const antes = await tx.projeto.findUnique({ where: { id }, select: SELECAO_LIGADOS });
   if (!antes) throw new Falha({ erro: "CARD_NAO_ENCONTRADO" });
   const quadros = new Set(pipelinesEnvolvidos(antes));
   await travarPipelines(tx, quadros);
   if (!(await travarLinha(tx, id))) throw new Falha({ erro: "CARD_NAO_ENCONTRADO" });
-  const card = await tx.oportunidade.findUniqueOrThrow({ where: { id }, select: { titulo: true, deletadoEm: true, ...SELECAO_LIGADOS } });
+  const card = await tx.projeto.findUniqueOrThrow({ where: { id }, select: { titulo: true, deletadoEm: true, ...SELECAO_LIGADOS } });
   if (pipelinesEnvolvidos(card).some((p) => !quadros.has(p))) throw new VinculosMudaram();
   if (!card.deletadoEm) throw new Falha({ erro: "NAO_ESTA_NA_LIXEIRA" });
   if (!confirmacaoConfere(confirmacao, card.titulo)) throw new Falha({ erro: "CONFIRMACAO_NAO_CONFERE" });
   const agora = new Date();
-  const nota = (oportunidadeId: string, evento: string) => ({
-    oportunidadeId,
+  const nota = (projetoId: string, evento: string) => ({
+    projetoId,
     tipo: "VINCULO_PROJETO" as const,
     payload: { evento, titulo: card.titulo },
     usuarioId: por.id,
@@ -149,20 +149,20 @@ async function apagarCardNaTransacao(tx: Tx, id: string, por: Ator, confirmacao:
   });
   // Os cards ligados perdem a FK (SET NULL) mas sobrevivem: fica o registro do porquê.
   const notas = [
-    ...(card.projeto ? [nota(card.projeto.id, "venda_apagada")] : []),
-    ...(card.origemOportunidade ? [nota(card.origemOportunidade.id, "projeto_apagado")] : []),
+    ...(card.cardProjetos ? [nota(card.cardProjetos.id, "venda_apagada")] : []),
+    ...(card.vendaOrigem ? [nota(card.vendaOrigem.id, "projeto_apagado")] : []),
     ...card.reaberturas.map((r) => nota(r.id, "origem_reabertura_apagada")),
   ];
   if (notas.length > 0) await tx.timeline.createMany({ data: notas });
   // Cascade: TransicaoFase, Timeline. SET NULL: projeto.origem, reaberturas.reabertaDe, MensagemEnviada.
-  await tx.oportunidade.delete({ where: { id } });
+  await tx.projeto.delete({ where: { id } });
 }
 
 function pipelinesEnvolvidos(c: {
   pipelineId: string;
-  origemOportunidade: { pipelineId: string } | null;
-  projeto: { pipelineId: string } | null;
+  vendaOrigem: { pipelineId: string } | null;
+  cardProjetos: { pipelineId: string } | null;
   reaberturas: { pipelineId: string }[];
 }): string[] {
-  return [c.pipelineId, c.origemOportunidade?.pipelineId, c.projeto?.pipelineId, ...c.reaberturas.map((r) => r.pipelineId)].filter((p): p is string => !!p);
+  return [c.pipelineId, c.vendaOrigem?.pipelineId, c.cardProjetos?.pipelineId, ...c.reaberturas.map((r) => r.pipelineId)].filter((p): p is string => !!p);
 }

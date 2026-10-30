@@ -9,9 +9,9 @@
  * A corrida (dois inserts ao mesmo tempo) cai no unique do banco (P2002) e
  * vira a mesma resposta.
  *
- * Leitura nunca mostra contato soft-deletado ou mesclado, nem oportunidade
+ * Leitura nunca mostra contato soft-deletado ou mesclado, nem projeto
  * soft-deletada. Merge (GAB-36) é soft-pointer: o principal mostra os pontos
- * e as oportunidades dos mesclados nele (consulta pelo grupo, nada copiado).
+ * e os projetos dos mesclados nele (consulta pelo grupo, nada copiado).
  */
 import { Prisma, type TipoContatoPonto } from "@prisma/client";
 import { db } from "@/lib/db";
@@ -220,13 +220,13 @@ export async function listarContatos(busca?: string) {
       cargo: true,
       empresa: { select: SELECAO_REF },
       pontos: { orderBy: { criadoEm: "asc" }, select: { id: true, tipo: true, valorNormalizado: true } },
-      _count: { select: { oportunidades: { where: { deletadoEm: null } } } },
-      // Mesclados neste: pontos e oportunidades aparecem aqui (soft-pointer).
+      _count: { select: { projetos: { where: { deletadoEm: null } } } },
+      // Mesclados neste: pontos e projetos aparecem aqui (soft-pointer).
       mergedFrom: {
         where: { deletadoEm: null },
         select: {
           pontos: { orderBy: { criadoEm: "asc" }, select: { id: true, tipo: true, valorNormalizado: true } },
-          _count: { select: { oportunidades: { where: { deletadoEm: null } } } },
+          _count: { select: { projetos: { where: { deletadoEm: null } } } },
         },
       },
     },
@@ -235,7 +235,7 @@ export async function listarContatos(busca?: string) {
   return lista.map(({ mergedFrom, ...c }) => ({
     ...c,
     pontos: [...c.pontos, ...mergedFrom.flatMap((m) => m.pontos)],
-    _count: { oportunidades: c._count.oportunidades + mergedFrom.reduce((s, m) => s + m._count.oportunidades, 0) },
+    _count: { projetos: c._count.projetos + mergedFrom.reduce((s, m) => s + m._count.projetos, 0) },
     empresa: c.empresa ? (empresas.get(c.empresa.id) ?? null) : null,
   }));
 }
@@ -246,11 +246,11 @@ export async function obterContato(id: string) {
     include: { empresa: { select: SELECAO_REF } },
   });
   if (!c) return null;
-  // Grupo de merge: o próprio + os mesclados nele. Pontos e oportunidades são lidos pelo grupo.
+  // Grupo de merge: o próprio + os mesclados nele. Pontos e projetos são lidos pelo grupo.
   const grupo = await idsDoGrupo("contato", id);
-  const [pontos, oportunidades] = await Promise.all([
+  const [pontos, projetos] = await Promise.all([
     db.contatoPonto.findMany({ where: { contatoId: { in: grupo } }, orderBy: [{ tipo: "asc" }, { criadoEm: "asc" }, { id: "asc" }] }),
-    db.oportunidade.findMany({
+    db.projeto.findMany({
         where: { contatoId: { in: grupo }, deletadoEm: null },
         orderBy: [{ atualizadoEm: "desc" }, { id: "asc" }],
         select: {
@@ -263,9 +263,9 @@ export async function obterContato(id: string) {
         },
       }),
   ]);
-  const empresas = await descreverVinculos("empresa", [c.empresa, ...oportunidades.map((o) => o.empresa)]);
+  const empresas = await descreverVinculos("empresa", [c.empresa, ...projetos.map((o) => o.empresa)]);
   const desc = (r: { id: string } | null) => (r ? (empresas.get(r.id) ?? null) : null);
-  return { ...c, pontos, empresa: desc(c.empresa), oportunidades: oportunidades.map((o) => ({ ...o, empresa: desc(o.empresa) })) };
+  return { ...c, pontos, empresa: desc(c.empresa), projetos: projetos.map((o) => ({ ...o, empresa: desc(o.empresa) })) };
 }
 
 export type DetalheContato = NonNullable<Awaited<ReturnType<typeof obterContato>>>;

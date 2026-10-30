@@ -12,7 +12,7 @@
  * inválido é ignorado em silêncio (link velho/editado à mão não quebra).
  */
 import type { Origem } from "@prisma/client";
-import { inicioDoDia, ROTULO_ORIGEM } from "@/lib/oportunidades/campos";
+import { inicioDoDia, ROTULO_ORIGEM } from "@/lib/projetos/campos";
 
 export type FiltroAcao = "vencida" | "hoje" | "semana" | "sem";
 export type FiltroOrigem = Origem | "SEM";

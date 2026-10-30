@@ -7,7 +7,7 @@ import { ocorrenciasParaCsv } from "@/lib/importacao/pipefy/erros-csv";
 import type { Ocorrencia } from "@/lib/importacao/pipefy/interpretar";
 import type { Relatorio } from "@/lib/importacao/pipefy/aplicar";
 import type { Previa } from "@/lib/importacao/pipefy/servico";
-import { MOTIVOS_PERDA } from "@/lib/oportunidades/terminal-regras";
+import { MOTIVOS_PERDA } from "@/lib/projetos/terminal-regras";
 import { confirmarImportAction, remapearImportAction, type RespostaPrevia } from "./actions";
 
 /** Mesmo teto do servidor (`LIMITE_BYTES`): avisa antes de subir 50 MB à toa. */

@@ -27,8 +27,8 @@ import { DialogoTerminal, type PedidoTerminal } from "@/components/kanban/dialog
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { FALHA_CONEXAO, executarAcao, falhaDe, type FalhaUI } from "@/lib/erros/cliente";
-import { DESCRICAO_MAX } from "@/lib/oportunidades/descricao";
-import { dialogoTerminal, type DadosTerminal } from "@/lib/oportunidades/terminal-regras";
+import { DESCRICAO_MAX } from "@/lib/projetos/descricao";
+import { dialogoTerminal, type DadosTerminal } from "@/lib/projetos/terminal-regras";
 import { criarCardAction, moverCardAction, salvarVisualizacaoKanbanAction } from "./actions";
 import { CardVisual } from "./card-visual";
 import { colisaoQuadro } from "./colisao";

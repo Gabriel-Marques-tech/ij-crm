@@ -35,7 +35,7 @@ function traduzir(e: unknown): { ok: false; erro: ErroPrazo; mensagem?: string }
 }
 
 /** Prazo vivo cujo card (se houver) também está vivo. */
-const VIVO: Prisma.PrazoWhereInput = { deletadoEm: null, OR: [{ oportunidadeId: null }, { oportunidade: { deletadoEm: null } }] };
+const VIVO: Prisma.PrazoWhereInput = { deletadoEm: null, OR: [{ projetoId: null }, { projeto: { deletadoEm: null } }] };
 
 async function exigirResponsavelAtivo(tx: Tx, id: string) {
   const u = await tx.usuario.findFirst({ where: { id, ativo: true, ...QUEM_ATUA }, select: { id: true } });
@@ -52,29 +52,29 @@ function validar(d: DadosPrazo) {
 async function travar(tx: Tx, id: string) {
   const linha = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM prazo WHERE id = ${id} AND deletado_em IS NULL FOR UPDATE`;
   if (linha.length === 0) throw new Recusa("PRAZO_NAO_ENCONTRADO");
-  const p = await tx.prazo.findFirst({ where: { id, ...VIVO }, select: { responsavelId: true, oportunidadeId: true, titulo: true, data: true, feitoEm: true } });
+  const p = await tx.prazo.findFirst({ where: { id, ...VIVO }, select: { responsavelId: true, projetoId: true, titulo: true, data: true, feitoEm: true } });
   if (!p) throw new Recusa("PRAZO_NAO_ENCONTRADO");
   return p;
 }
 
-export async function criarPrazo(ator: Ator, dados: DadosPrazo & { oportunidadeId?: string | null }): Promise<ResultadoPrazo<{ id: string }>> {
+export async function criarPrazo(ator: Ator, dados: DadosPrazo & { projetoId?: string | null }): Promise<ResultadoPrazo<{ id: string }>> {
   try {
     return await db.$transaction(async (tx) => {
       const v = validar(dados);
       if (!podeMexerNoPrazo(ator, dados.responsavelId)) throw new Recusa("SEM_PERMISSAO");
       await exigirResponsavelAtivo(tx, dados.responsavelId);
-      const cardId = dados.oportunidadeId ?? null;
+      const cardId = dados.projetoId ?? null;
       if (cardId) {
-        const card = await tx.oportunidade.findFirst({ where: { id: cardId, deletadoEm: null }, select: { id: true } });
+        const card = await tx.projeto.findFirst({ where: { id: cardId, deletadoEm: null }, select: { id: true } });
         if (!card) throw new Recusa("CARD_NAO_ENCONTRADO");
       }
       const p = await tx.prazo.create({
-        data: { titulo: v.titulo, data: instanteDoPrazo(v.dia), responsavelId: dados.responsavelId, oportunidadeId: cardId, criadoPorId: ator.id },
+        data: { titulo: v.titulo, data: instanteDoPrazo(v.dia), responsavelId: dados.responsavelId, projetoId: cardId, criadoPorId: ator.id },
         select: { id: true },
       });
       if (cardId) {
         await tx.timeline.create({
-          data: { oportunidadeId: cardId, tipo: "PRAZO", payload: { evento: "criado", prazoId: p.id, titulo: v.titulo, dia: v.dia, responsavelId: dados.responsavelId }, usuarioId: ator.id },
+          data: { projetoId: cardId, tipo: "PRAZO", payload: { evento: "criado", prazoId: p.id, titulo: v.titulo, dia: v.dia, responsavelId: dados.responsavelId }, usuarioId: ator.id },
         });
       }
       return { ok: true as const, id: p.id };
@@ -109,10 +109,10 @@ export async function marcarPrazoFeito(ator: Ator, id: string, feito: boolean): 
       if (!podeMexerNoPrazo(ator, atual.responsavelId)) throw new Recusa("SEM_PERMISSAO");
       if (feito === (atual.feitoEm !== null)) return { ok: true as const };
       await tx.prazo.update({ where: { id }, data: feito ? { feitoEm: new Date(), feitoPorId: ator.id } : { feitoEm: null, feitoPorId: null } });
-      if (feito && atual.oportunidadeId) {
+      if (feito && atual.projetoId) {
         await tx.timeline.create({
           data: {
-            oportunidadeId: atual.oportunidadeId,
+            projetoId: atual.projetoId,
             tipo: "PRAZO",
             payload: { evento: "concluido", prazoId: id, titulo: atual.titulo, dia: diaDoPrazo(atual.data), responsavelId: atual.responsavelId },
             usuarioId: ator.id,
@@ -159,7 +159,7 @@ export const SELECAO_PRAZO = {
   data: true,
   feitoEm: true,
   responsavel: { select: { id: true, nome: true, foto: { select: { atualizadoEm: true } } } },
-  oportunidade: { select: { id: true, titulo: true } },
+  projeto: { select: { id: true, titulo: true } },
 } as const satisfies Prisma.PrazoSelect;
 
 type LinhaPrazo = Prisma.PrazoGetPayload<{ select: typeof SELECAO_PRAZO }>;
@@ -172,7 +172,7 @@ export function paraPrazoItem(p: LinhaPrazo, ator: Ator, hoje: string): PrazoIte
     dia,
     estado: estadoPrazo({ dia, feito: p.feitoEm !== null }, hoje),
     responsavel: { id: p.responsavel.id, nome: p.responsavel.nome, fotoEm: p.responsavel.foto?.atualizadoEm.getTime() ?? null },
-    card: p.oportunidade,
+    card: p.projeto,
     podeMexer: podeMexerNoPrazo(ator, p.responsavel.id),
   };
 }
@@ -187,8 +187,8 @@ export function compararPrazos(a: PrazoItem, b: PrazoItem): number {
 }
 
 /** Bloco "Prazos" do detalhe do card. */
-export async function listarPrazosDoCard(oportunidadeId: string, ator: Ator, hoje: string): Promise<PrazoItem[]> {
-  const linhas = await db.prazo.findMany({ where: { oportunidadeId, ...VIVO }, select: SELECAO_PRAZO });
+export async function listarPrazosDoCard(projetoId: string, ator: Ator, hoje: string): Promise<PrazoItem[]> {
+  const linhas = await db.prazo.findMany({ where: { projetoId, ...VIVO }, select: SELECAO_PRAZO });
   return linhas.map((p) => paraPrazoItem(p, ator, hoje)).sort(compararPrazos);
 }
 

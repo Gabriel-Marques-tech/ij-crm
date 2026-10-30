@@ -51,10 +51,11 @@ export function isActive(pathname: string, href: string): boolean {
 /**
  * Item ativo considerando o quadro do Kanban. `quadro` = o declarado pela página
  * (detalhe do card, ver `quadro-ativo.tsx`) ou o `?quadro=` da lista. Na lista
- * sem `?quadro=` vale o padrão; no detalhe sem quadro declarado nenhum acende.
+ * sem `?quadro=` vale o padrão; no detalhe (`/projetos/[id]`) sem quadro
+ * declarado nenhum acende.
  */
 export function itemAtivo(item: NavItem, pathname: string, quadro: string | null): boolean {
   if (!item.quadro) return isActive(pathname, item.href);
-  if (!isActive(pathname, "/kanban")) return false;
+  if (!isActive(pathname, "/kanban") && !pathname.startsWith("/projetos/")) return false;
   return (quadro ?? (pathname === "/kanban" ? QUADRO_PADRAO : null)) === item.quadro;
 }

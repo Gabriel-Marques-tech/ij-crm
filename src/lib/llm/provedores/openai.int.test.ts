@@ -91,7 +91,7 @@ describe("LLM_PROVEDOR=openai ponta a ponta (fetch falso)", () => {
     const depois = await dbT.mensagemBruta.findUniqueOrThrow({ where: { id: m.id } });
     expect(depois.status).toBe("PROCESSADA");
     expect(depois.resultadoLlm).toMatchObject({ provedor: "openai", modelo: "gpt-6.1-sol", saida: F.saida });
-    expect(await dbT.oportunidade.count()).toBe(1);
+    expect(await dbT.projeto.count()).toBe(1);
     const l = logs(console.info);
     expect(l).toMatch(/provedor=openai modelo=gpt-6\.1-sol .* tokens_in=1500 tokens_out=260 tokens_reasoning=64 ok/);
     expect(l).not.toContain(F.texto);

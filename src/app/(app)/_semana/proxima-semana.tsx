@@ -36,7 +36,7 @@ export function ProximaSemana({ acoes, prazos, ate, depois, kanbanHref }: { acoe
             const data = <span className="w-20 shrink-0 font-mono text-[11px] text-fg-mute tabular">{`${r.semana} ${r.ddmm}`}</span>;
             return l.tipo === "acao" ? (
               <li key={`a-${l.a.cardId}`}>
-                <Link href={`/kanban/${l.a.cardId}`} className="flex min-h-10 items-center gap-3 px-3 py-2 transition-colors hover:bg-surface-hover">
+                <Link href={`/projetos/${l.a.cardId}`} className="flex min-h-10 items-center gap-3 px-3 py-2 transition-colors hover:bg-surface-hover">
                   {data}
                   <span aria-hidden className={cn("h-5 w-[3px] shrink-0 rounded-sm", COR_ACAO)} />
                   <span className="min-w-0 flex-1 truncate text-sm text-foreground">{l.a.acao ?? "Próxima ação"}</span>

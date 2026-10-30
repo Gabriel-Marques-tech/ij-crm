@@ -32,7 +32,7 @@ describe("MiniCardAcao", () => {
   it("mostra ação, empresa, fase e avatar do responsável; link para o card", () => {
     render(<MiniCardAcao item={acao} />);
     const link = screen.getByRole("link", { name: /Ligar para o Zé/ });
-    expect(link).toHaveAttribute("href", "/kanban/c1");
+    expect(link).toHaveAttribute("href", "/projetos/c1");
     expect(screen.getByText("Padaria Central")).toBeInTheDocument();
     expect(screen.getByText("Proposta")).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Responsável: Ana Vendas" })).toBeInTheDocument();

@@ -4,7 +4,7 @@ import type { AcaoItem } from "@/lib/calendario/calendario";
 import { agruparPorDia } from "@/lib/calendario/semana";
 import type { PrazoItem } from "@/lib/prazos/prazos";
 import { PrazosProvider } from "../_calendario/editor-prazo";
-import { PrazosDoCard } from "../kanban/[id]/prazos-card";
+import { PrazosDoCard } from "../projetos/[id]/prazos-card";
 import { SemanaEmColunas } from "./semana-colunas";
 
 vi.mock("../_calendario/actions", () => ({ criarPrazoAction: vi.fn(), editarPrazoAction: vi.fn(), concluirPrazoAction: vi.fn(), excluirPrazoAction: vi.fn() }));

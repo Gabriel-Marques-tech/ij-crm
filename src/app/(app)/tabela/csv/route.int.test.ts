@@ -26,7 +26,7 @@ async function semear() {
   const u = await dbT.usuario.create({ data: { nome: "Vera Vendedora", email: "v@ij.test" } });
   const outro = await dbT.usuario.create({ data: { nome: "Outro", email: "o@ij.test" } });
   for (const [titulo, resp] of [["meu", u.id], ["dele", outro.id]] as const) {
-    await dbT.oportunidade.create({ data: { titulo, pipelineId: p.id, faseId: p.fases[0].id, responsavelId: resp, criadoVia: "UI" } });
+    await dbT.projeto.create({ data: { titulo, pipelineId: p.id, faseId: p.fases[0].id, responsavelId: resp, criadoVia: "UI" } });
   }
   return { u, outro };
 }
@@ -44,7 +44,7 @@ describe("GET /tabela/csv", () => {
     const todos = await GET(new Request("http://x/tabela/csv"));
     expect(todos.status).toBe(200);
     expect(todos.headers.get("content-type")).toBe("text/csv; charset=utf-8");
-    expect(todos.headers.get("content-disposition")).toMatch(/^attachment; filename="oportunidades-\d{4}-\d{2}-\d{2}\.csv"$/);
+    expect(todos.headers.get("content-disposition")).toMatch(/^attachment; filename="projetos-\d{4}-\d{2}-\d{2}\.csv"$/);
     const bytes = new Uint8Array(await todos.arrayBuffer());
     expect([...bytes.slice(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
     const texto = new TextDecoder().decode(bytes);
@@ -61,7 +61,7 @@ describe("GET /tabela/csv", () => {
     exigirUsuario.mockResolvedValue({ id: u.id, papel: "VENDEDOR" });
     const principal = await dbT.empresa.create({ data: { nome: "Principal Viva" } });
     const dup = await dbT.empresa.create({ data: { nome: "Nome Antigo", mergedIntoId: principal.id } });
-    await dbT.oportunidade.updateMany({ where: { titulo: "meu" }, data: { empresaId: dup.id } });
+    await dbT.projeto.updateMany({ where: { titulo: "meu" }, data: { empresaId: dup.id } });
     const texto = await (await GET(new Request("http://x/tabela/csv?q=principal"))).text();
     expect(texto).toContain(";meu;");
     expect(texto).toContain(";Principal Viva;");
@@ -73,7 +73,7 @@ describe("GET /tabela/csv", () => {
     const { u } = await semear();
     exigirUsuario.mockResolvedValue({ id: u.id, papel: "VENDEDOR" });
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
-    vi.spyOn(db.oportunidade, "findMany").mockRejectedValueOnce(new Error("conexão caiu"));
+    vi.spyOn(db.projeto, "findMany").mockRejectedValueOnce(new Error("conexão caiu"));
     const r = await GET(new Request("http://x/tabela/csv"));
     expect(r.status).toBe(500);
     const corpo = await r.text();

@@ -36,7 +36,7 @@ export function AcoesMensagem({ id, texto, fases }: { id: string; texto: string;
       const falha = await executarAcao(async () => (r = await reprocessarAction(id)), "reprocessar a mensagem");
       setErro(falha);
       if (falha || !r || !("aviso" in r) || !r.aviso) return;
-      setAviso({ texto: r.aviso, card: r.oportunidadeId });
+      setAviso({ texto: r.aviso, card: r.projetoId });
       router.refresh();
     });
   }
@@ -55,7 +55,7 @@ export function AcoesMensagem({ id, texto, fases }: { id: string; texto: string;
         <p className="max-w-xs text-right text-xs text-fg-soft" role="status">
           {aviso.texto}{" "}
           {aviso.card ? (
-            <Link href={`/kanban/${encodeURIComponent(aviso.card)}`} className="text-primary hover:underline">
+            <Link href={`/projetos/${encodeURIComponent(aviso.card)}`} className="text-primary hover:underline">
               abrir card
             </Link>
           ) : null}
@@ -82,12 +82,12 @@ function DialogoResolver({ id, texto, fases, onFechar }: { id: string; texto: st
   function confirmar() {
     startTransition(async () => {
       let r: Awaited<ReturnType<typeof resolverAction>> | undefined;
-      const alvo = modo === "CRIAR" ? { tipo: "CRIAR" as const, titulo, faseId } : { tipo: "VINCULAR" as const, oportunidadeId: card!.id };
+      const alvo = modo === "CRIAR" ? { tipo: "CRIAR" as const, titulo, faseId } : { tipo: "VINCULAR" as const, projetoId: card!.id };
       const falha = await executarAcao(async () => (r = await resolverAction(id, alvo)), "resolver a mensagem");
       setErro(falha);
-      if (falha || !r || !("oportunidadeId" in r) || !r.oportunidadeId) return;
+      if (falha || !r || !("projetoId" in r) || !r.projetoId) return;
       onFechar();
-      router.push(`/kanban/${encodeURIComponent(r.oportunidadeId)}`);
+      router.push(`/projetos/${encodeURIComponent(r.projetoId)}`);
     });
   }
 

@@ -1,6 +1,6 @@
 /**
  * Rótulos de dia para componentes de cliente (GAB-51). Sem imports de
- * propósito: `oportunidades/formatar` puxa `@prisma/client` (via `campos`),
+ * propósito: `projetos/formatar` puxa `@prisma/client` (via `campos`),
  * que não roda no navegador.
  */
 const DIA_SEMANA = ["DOM", "SEG", "TER", "QUA", "QUI", "SEX", "SÁB"];

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { interpretarGanho, interpretarPerda } from "@/lib/oportunidades/terminal-regras";
+import { interpretarGanho, interpretarPerda } from "@/lib/projetos/terminal-regras";
 import { dadosDoFechamento } from "./fechamento";
 
 const GANHO = { tipoTerminal: "GANHO" as const };

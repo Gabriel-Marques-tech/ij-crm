@@ -62,7 +62,7 @@ export default async function ContatosPage({ searchParams }: { searchParams: Pro
                       ))}
                     </span>
                   </td>
-                  <td className="px-4 py-2.5 text-right font-mono tabular text-fg-soft">{c._count.oportunidades}</td>
+                  <td className="px-4 py-2.5 text-right font-mono tabular text-fg-soft">{c._count.projetos}</td>
                 </tr>
               ))}
             </tbody>

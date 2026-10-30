@@ -3,7 +3,7 @@ import { PageHeader } from "@/components/shell/page-header";
 import { exigirPapel } from "@/lib/auth/atual";
 import { comTratamento, ehInesperado } from "@/lib/erros/registrar";
 import { contagemNaoAutorizados, LIMITE_LOG_LLM, LIMITE_LOG_WEBHOOK, listarLogsLlm, listarLogsWebhook } from "@/lib/logs/tecnicos";
-import { formatarDataHora } from "@/lib/oportunidades/formatar";
+import { formatarDataHora } from "@/lib/projetos/formatar";
 import { AbasAdmin } from "../abas";
 
 export const metadata = { title: "Logs · Admin" };

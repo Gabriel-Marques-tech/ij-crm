@@ -9,7 +9,7 @@ import { exigirPapel } from "@/lib/auth/atual";
 import { listarCardsNaLixeira, listarContatosNaLixeira, listarEmpresasNaLixeira } from "@/lib/lixeira/lixeira";
 import { podeApagarDeVez } from "@/lib/lixeira/regras";
 import { formatarCnpj } from "@/lib/normalizacao";
-import { formatarDataHora } from "@/lib/oportunidades/formatar";
+import { formatarDataHora } from "@/lib/projetos/formatar";
 import { apagarCardAction, apagarEntidadeAction, restaurarCardAction, restaurarEntidadeAction } from "../../_lixeira/actions";
 
 export const metadata = { title: "Lixeira" };
@@ -119,7 +119,7 @@ export default async function LixeiraPage({ searchParams }: { searchParams: Prom
         </p>
         <p className="mt-0.5 text-xs text-fg-soft">
           {c.empresa ? <>{c.empresa.nome} · </> : null}
-          <span className="font-mono tabular">{c._count.oportunidades}</span> oportunidade(s)
+          <span className="font-mono tabular">{c._count.projetos}</span> projeto(s)
           {c._count.mergedFrom > 0 ? (
             <>
               {" "}
@@ -156,7 +156,7 @@ export default async function LixeiraPage({ searchParams }: { searchParams: Prom
         <p className="truncate text-sm font-medium text-foreground">{e.nome}</p>
         <p className="mt-0.5 text-xs text-fg-soft">
           {e.cnpj ? <span className="font-mono">{formatarCnpj(e.cnpj)} · </span> : null}
-          <span className="font-mono tabular">{e._count.contatos}</span> contato(s) · <span className="font-mono tabular">{e._count.oportunidades}</span> oportunidade(s)
+          <span className="font-mono tabular">{e._count.contatos}</span> contato(s) · <span className="font-mono tabular">{e._count.projetos}</span> projeto(s)
           {e._count.mergedFrom > 0 ? (
             <>
               {" "}

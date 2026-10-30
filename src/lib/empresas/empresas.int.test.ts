@@ -44,22 +44,22 @@ describe("criarEmpresa / editarEmpresa", () => {
 });
 
 describe("leitura", () => {
-  it("detalhe e lista ignoram oportunidades soft-deletadas e contatos deletados", async () => {
+  it("detalhe e lista ignoram projetos soft-deletados e contatos deletados", async () => {
     const p = await db.pipeline.create({ data: { chave: "vendas", nome: "Vendas", fases: { create: [{ chave: "a", nome: "A", ordem: 0 }] } }, include: { fases: true } });
     const u = await db.usuario.create({ data: { nome: "Vend", email: "v@ij.test" } });
     const a = await criarEmpresa({ nome: "Acme" });
     if (!a.ok) throw new Error("setup");
     const base = { pipelineId: p.id, faseId: p.fases[0].id, responsavelId: u.id, criadoVia: "UI" as const, empresaId: a.id };
-    await db.oportunidade.create({ data: { ...base, titulo: "Viva" } });
-    await db.oportunidade.create({ data: { ...base, titulo: "Apagada", deletadoEm: new Date() } });
+    await db.projeto.create({ data: { ...base, titulo: "Viva" } });
+    await db.projeto.create({ data: { ...base, titulo: "Apagada", deletadoEm: new Date() } });
     await db.contato.create({ data: { nome: "Ana", empresaId: a.id } });
     await db.contato.create({ data: { nome: "Morto", empresaId: a.id, deletadoEm: new Date() } });
 
     const d = await obterEmpresa(a.id);
-    expect(d?.oportunidades.map((o) => o.titulo)).toEqual(["Viva"]);
+    expect(d?.projetos.map((o) => o.titulo)).toEqual(["Viva"]);
     expect(d?.contatos.map((c) => c.nome)).toEqual(["Ana"]);
     const [l] = await listarEmpresas();
-    expect(l._count).toEqual({ contatos: 1, oportunidades: 1 });
+    expect(l._count).toEqual({ contatos: 1, projetos: 1 });
   });
 
   it("lista busca por nome, CNPJ ou domínio; autocomplete prefixo primeiro", async () => {
@@ -89,13 +89,13 @@ describe("review", () => {
     expect(await criarEmpresa({ nome: "X", cnpj: "12ABC34501DE35" })).toMatchObject({ erro: "CNPJ_DUPLICADO", empresa: { nome: "Morta", deletado: true } });
   });
 
-  it("contato de oportunidade excluído/mesclado vem descrito no detalhe da empresa", async () => {
+  it("contato de projeto excluído/mesclado vem descrito no detalhe da empresa", async () => {
     const p = await db.pipeline.create({ data: { chave: "vendas", nome: "Vendas", fases: { create: [{ chave: "a", nome: "A", ordem: 0 }] } }, include: { fases: true } });
     const u = await db.usuario.create({ data: { nome: "Vend", email: "v@ij.test" } });
     const a = await criarEmpresa({ nome: "Acme" });
     if (!a.ok) throw new Error("setup");
     const morto = await db.contato.create({ data: { nome: "Morto", deletadoEm: new Date() } });
-    await db.oportunidade.create({ data: { pipelineId: p.id, faseId: p.fases[0].id, responsavelId: u.id, criadoVia: "UI", empresaId: a.id, contatoId: morto.id, titulo: "Card" } });
-    expect((await obterEmpresa(a.id))?.oportunidades[0].contato).toEqual({ estado: "EXCLUIDO", id: morto.id, nome: "Morto" });
+    await db.projeto.create({ data: { pipelineId: p.id, faseId: p.fases[0].id, responsavelId: u.id, criadoVia: "UI", empresaId: a.id, contatoId: morto.id, titulo: "Card" } });
+    expect((await obterEmpresa(a.id))?.projetos[0].contato).toEqual({ estado: "EXCLUIDO", id: morto.id, nome: "Morto" });
   });
 });

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { ArrowLeft, Mail, Phone } from "lucide-react";
 import { CampoEditavel } from "@/components/entidades/campo-editavel";
-import { ListaOportunidades } from "@/components/entidades/lista-oportunidades";
+import { ListaProjetos } from "@/components/entidades/lista-projetos";
 import { exigirUsuario } from "@/lib/auth/atual";
 import { SecaoGestao } from "@/components/merge/secao-gestao";
 import { destinoDeMesclado } from "@/lib/merge/merge";
@@ -10,7 +10,7 @@ import { obterEmpresa } from "@/lib/empresas/empresas";
 import { textoVinculo } from "@/lib/entidades/vinculo";
 import { hrefSeguro } from "@/lib/href";
 import { formatarCnpj } from "@/lib/normalizacao";
-import { UFS } from "@/lib/oportunidades/campos";
+import { UFS } from "@/lib/projetos/campos";
 import { editarEmpresaCampoAction } from "../actions";
 
 export const metadata = { title: "Empresa" };
@@ -97,9 +97,9 @@ export default async function EmpresaPage({ params }: { params: Promise<{ id: st
 
           <section className="rounded-xl border border-border bg-surface p-4">
             <h2 className="mb-3 text-sm font-medium">
-              Oportunidades <span className="font-mono text-xs text-fg-mute tabular">{e.oportunidades.length}</span>
+              Projetos <span className="font-mono text-xs text-fg-mute tabular">{e.projetos.length}</span>
             </h2>
-            <ListaOportunidades itens={e.oportunidades.map((o) => ({ ...o, extra: textoVinculo("contato", o.contato) }))} />
+            <ListaProjetos itens={e.projetos.map((o) => ({ ...o, extra: textoVinculo("contato", o.contato) }))} />
           </section>
 
           <SecaoGestao tipo="empresa" atual={{ id: e.id, nome: e.nome }} papel={eu.papel} />

@@ -1,5 +1,5 @@
 import { cn } from "cn";
-import type { NivelAging } from "@/lib/oportunidades/aging";
+import type { NivelAging } from "@/lib/projetos/aging";
 
 /** Semântica de aging só em dot + borda esquerda, nunca fundo (§4.5.1). */
 export const DOT_AGING: Record<NivelAging, string> = {

@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { MensagemErro } from "@/components/erros/mensagem-erro";
 import { executarAcao, type FalhaUI } from "@/lib/erros/cliente";
-import { adicionarNotaAction } from "../actions";
+import { adicionarNotaAction } from "../../kanban/actions";
 
 export function NotaForm({ cardId }: { cardId: string }) {
   const [texto, setTexto] = useState("");

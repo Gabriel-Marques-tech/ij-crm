@@ -4,9 +4,9 @@
  * CNPJ entra normalizado (alfanumérico, `normalizarCnpj`) e é único quando
  * presente: repetir um CNPJ devolve `CNPJ_DUPLICADO` com a empresa dona.
  * Domínio de email entra normalizado e nunca é provedor pessoal (gmail…).
- * Leitura nunca mostra empresa soft-deletada/mesclada nem oportunidade
+ * Leitura nunca mostra empresa soft-deletada/mesclada nem projeto
  * soft-deletada. Merge (GAB-36) é soft-pointer: o principal mostra contatos e
- * oportunidades das empresas mescladas nele (consulta pelo grupo).
+ * projetos das empresas mescladas nele (consulta pelo grupo).
  */
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
@@ -113,16 +113,16 @@ export async function listarEmpresas(busca?: string) {
       dominioEmail: true,
       cidade: true,
       estado: true,
-      _count: { select: { contatos: { where: VIVO }, oportunidades: { where: { deletadoEm: null } } } },
-      // Mescladas nesta: contatos e oportunidades contam aqui (soft-pointer).
-      mergedFrom: { where: { deletadoEm: null }, select: { _count: { select: { contatos: { where: VIVO }, oportunidades: { where: { deletadoEm: null } } } } } },
+      _count: { select: { contatos: { where: VIVO }, projetos: { where: { deletadoEm: null } } } },
+      // Mescladas nesta: contatos e projetos contam aqui (soft-pointer).
+      mergedFrom: { where: { deletadoEm: null }, select: { _count: { select: { contatos: { where: VIVO }, projetos: { where: { deletadoEm: null } } } } } },
     },
   });
   return lista.map(({ mergedFrom, ...e }) => ({
     ...e,
     _count: {
       contatos: e._count.contatos + mergedFrom.reduce((s, m) => s + m._count.contatos, 0),
-      oportunidades: e._count.oportunidades + mergedFrom.reduce((s, m) => s + m._count.oportunidades, 0),
+      projetos: e._count.projetos + mergedFrom.reduce((s, m) => s + m._count.projetos, 0),
     },
   }));
 }
@@ -131,13 +131,13 @@ export async function obterEmpresa(id: string) {
   const e = await db.empresa.findFirst({ where: { id, ...VIVO } });
   if (!e) return null;
   const grupo = await idsDoGrupo("empresa", id);
-  const [contatos, oportunidades] = await Promise.all([
+  const [contatos, projetos] = await Promise.all([
     db.contato.findMany({
         where: { ...VIVO, empresaId: { in: grupo } },
         orderBy: [{ nome: "asc" }, { id: "asc" }],
         select: { id: true, nome: true, cargo: true, pontos: { orderBy: [{ tipo: "asc" }, { criadoEm: "asc" }], select: { id: true, tipo: true, valorNormalizado: true } } },
       }),
-    db.oportunidade.findMany({
+    db.projeto.findMany({
         where: { deletadoEm: null, empresaId: { in: grupo } },
         orderBy: [{ atualizadoEm: "desc" }, { id: "asc" }],
         select: {
@@ -150,8 +150,8 @@ export async function obterEmpresa(id: string) {
         },
       }),
   ]);
-  const vinculos = await descreverVinculos("contato", oportunidades.map((o) => o.contato));
-  return { ...e, contatos, oportunidades: oportunidades.map((o) => ({ ...o, contato: o.contato ? (vinculos.get(o.contato.id) ?? null) : null })) };
+  const vinculos = await descreverVinculos("contato", projetos.map((o) => o.contato));
+  return { ...e, contatos, projetos: projetos.map((o) => ({ ...o, contato: o.contato ? (vinculos.get(o.contato.id) ?? null) : null })) };
 }
 
 export type DetalheEmpresa = NonNullable<Awaited<ReturnType<typeof obterEmpresa>>>;

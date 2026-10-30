@@ -4,9 +4,9 @@ import { useState, useTransition } from "react";
 import { DialogoTerminal, type PedidoTerminal } from "@/components/kanban/dialogo-terminal";
 import { MensagemErro } from "@/components/erros/mensagem-erro";
 import { executarAcao, type FalhaUI } from "@/lib/erros/cliente";
-import { dialogoTerminal, type DadosTerminal } from "@/lib/oportunidades/terminal-regras";
-import { moverCardAction } from "../actions";
-import type { FaseCliente } from "../tipos";
+import { dialogoTerminal, type DadosTerminal } from "@/lib/projetos/terminal-regras";
+import { moverCardAction } from "../../kanban/actions";
+import type { FaseCliente } from "../../kanban/tipos";
 
 /** Mover de fase pelo detalhe (alternativa ao arrasto, boa no celular). Mesmos diálogos de ganho/perdido do quadro. */
 export function MoverFase({

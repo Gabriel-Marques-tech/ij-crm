@@ -79,7 +79,7 @@ describe("GradeMes", () => {
   it("ação liga ao card; vencida em coral", () => {
     montar([acao("v", "2026-10-20", { vencida: true })], []);
     const link = within(celula("2026-10-20")).getByRole("link", { name: "Ação v" });
-    expect(link).toHaveAttribute("href", "/kanban/v");
+    expect(link).toHaveAttribute("href", "/projetos/v");
     expect(link).toHaveAttribute("data-estado", "vencida");
   });
 });

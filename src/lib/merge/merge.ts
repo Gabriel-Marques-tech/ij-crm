@@ -2,7 +2,7 @@
  * Merge manual de Contatos e de Empresas (GAB-36, §4.5). Nunca automático.
  *
  * Soft-pointer: o perdedor ganha `merged_into_id = principal` e só. Nada é
- * copiado nem apagado — pontos de contato, contatos e oportunidades
+ * copiado nem apagado — pontos de contato, contatos e projetos
  * continuam presos ao perdedor e APARECEM no principal porque as leituras
  * juntam o grupo (`idsDoGrupo`). "Desfazer" limpa o ponteiro e tudo volta a
  * aparecer separado.
@@ -67,16 +67,16 @@ export async function destinoDeMesclado(tipo: TipoMerge, id: string): Promise<st
   return r && !r.deletado && r.id !== id ? r.id : null;
 }
 
-export type Contagens = { pontos: number; contatos: number; oportunidades: number };
+export type Contagens = { pontos: number; contatos: number; projetos: number };
 
 async function contar(tipo: TipoMerge, ids: string[]): Promise<Contagens> {
   const fk = tipo === "contato" ? { contatoId: { in: ids } } : { empresaId: { in: ids } };
-  const [pontos, contatos, oportunidades] = await Promise.all([
+  const [pontos, contatos, projetos] = await Promise.all([
     tipo === "contato" ? db.contatoPonto.count({ where: { contatoId: { in: ids } } }) : Promise.resolve(0),
     tipo === "empresa" ? db.contato.count({ where: { empresaId: { in: ids }, ...VIVO } }) : Promise.resolve(0),
-    db.oportunidade.count({ where: { ...fk, deletadoEm: null } }),
+    db.projeto.count({ where: { ...fk, deletadoEm: null } }),
   ]);
-  return { pontos, contatos, oportunidades };
+  return { pontos, contatos, projetos };
 }
 
 export type PreviaMerge = {
@@ -98,7 +98,7 @@ export async function previaMerge(tipo: TipoMerge, principalId: string, perdedor
     previa: {
       principal: { id: principal!.id, nome: principal!.nome, contagens: cp },
       perdedor: { id: perdedor!.id, nome: perdedor!.nome, contagens: cd },
-      resultado: { pontos: cp.pontos + cd.pontos, contatos: cp.contatos + cd.contatos, oportunidades: cp.oportunidades + cd.oportunidades },
+      resultado: { pontos: cp.pontos + cd.pontos, contatos: cp.contatos + cd.contatos, projetos: cp.projetos + cd.projetos },
     },
   };
 }

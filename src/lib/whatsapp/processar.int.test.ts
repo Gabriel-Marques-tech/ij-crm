@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/lib/db";
-import { diaEmFuso } from "@/lib/oportunidades/aging";
+import { diaEmFuso } from "@/lib/projetos/aging";
 import { FIXTURES_EXTRACAO, RECEBIDA_EM, saida } from "@/lib/llm/fixtures/extracao";
 import { VERSAO_EXTRACAO } from "@/lib/llm/prompts/extracao.v2";
 import { definirRespostaMock } from "@/lib/llm/provedores/mock";
@@ -82,7 +82,7 @@ describe("fixtures de extração (LLM mockada) → efeito no CRM", () => {
     expect(depois.resultadoLlm).toMatchObject({ versao: VERSAO_EXTRACAO, provedor: "mock", saida: f.saida });
     expect(r).toMatchObject({ confirmacao: f.esperado.confirmacao });
 
-    const cards = await dbT.oportunidade.findMany({ include: { fase: true, responsavel: true, empresa: true, contato: { include: { pontos: true } } } });
+    const cards = await dbT.projeto.findMany({ include: { fase: true, responsavel: true, empresa: true, contato: { include: { pontos: true } } } });
     if (f.esperado.status === "PENDENTE_REVISAO") {
       expect(cards).toHaveLength(0);
       expect(await dbT.empresa.count()).toBe(0);
@@ -101,12 +101,12 @@ describe("fixtures de extração (LLM mockada) → efeito no CRM", () => {
     if (f.saida.empresa.nome) expect(c.empresa?.nome).toBe(f.saida.empresa.nome);
     if (c.contato && c.empresa) expect(c.contato.empresaId).toBe(c.empresa.id);
 
-    const tl = await dbT.timeline.findMany({ where: { oportunidadeId: c.id }, orderBy: { em: "asc" } });
+    const tl = await dbT.timeline.findMany({ where: { projetoId: c.id }, orderBy: { em: "asc" } });
     expect(tl.map((t) => t.tipo)).toEqual(["CRIACAO", "MENSAGEM_WHATSAPP"]);
     expect(tl[0].payload).toMatchObject({ via: "WHATSAPP" });
     expect(tl[1]).toMatchObject({ mensagemBrutaId: m.id, usuarioId: joao.id });
     expect(tl[1].payload).toMatchObject({ texto: f.texto, saida: f.saida, versao: VERSAO_EXTRACAO });
-    const tr = await dbT.transicaoFase.findMany({ where: { oportunidadeId: c.id } });
+    const tr = await dbT.transicaoFase.findMany({ where: { projetoId: c.id } });
     expect(tr).toMatchObject([{ deFaseId: null, paraFaseId: c.faseId, origem: "WHATSAPP", usuarioId: joao.id }]);
   });
 
@@ -130,7 +130,7 @@ describe("identidade: reaproveita só por identificador exato", () => {
     expect(r.tipo).toBe("PROCESSADA");
     expect(await dbT.contato.count()).toBe(1);
     expect(await dbT.empresa.count()).toBe(1);
-    const card = await dbT.oportunidade.findFirstOrThrow();
+    const card = await dbT.projeto.findFirstOrThrow();
     expect(card).toMatchObject({ contatoId: existente.id, empresaId: emp.id, titulo: "Gustavo Saab — Economia Sensata", revisar: false });
     expect(await dbT.contatoPonto.count({ where: { contatoId: existente.id } })).toBe(2);
   });
@@ -143,7 +143,7 @@ describe("identidade: reaproveita só por identificador exato", () => {
     const r = await processarMensagem((await bruta("#crm Fulano morto@acme.com quer site")).id);
     expect(r).toMatchObject({ tipo: "PENDENTE_REVISAO", confirmacao: expect.stringMatching(/^⚠️ .*contato excluído/u) });
     expect(await dbT.contato.count()).toBe(1);
-    expect(await dbT.oportunidade.count()).toBe(0);
+    expect(await dbT.projeto.count()).toBe(0);
   });
 
   it("CNPJ já cadastrado → vincula a empresa existente (via cnpj), mesmo com outro nome", async () => {
@@ -151,7 +151,7 @@ describe("identidade: reaproveita só por identificador exato", () => {
     definirRespostaMock(() => saida({ contato: { nome: "Ana" }, empresa: { nome: "Acme" } }));
     await processarMensagem((await bruta("#crm Ana da Acme, cnpj 11.222.333/0001-81")).id);
     expect(await dbT.empresa.count()).toBe(1);
-    expect(await dbT.oportunidade.findFirstOrThrow()).toMatchObject({ empresaId: acme.id, titulo: "Ana — ACME Indústria" });
+    expect(await dbT.projeto.findFirstOrThrow()).toMatchObject({ empresaId: acme.id, titulo: "Ana — ACME Indústria" });
   });
 
   it("domínio do email casa empresa → só SUGESTÃO + revisar; cria empresa nova, sem vincular a do domínio", async () => {
@@ -159,7 +159,7 @@ describe("identidade: reaproveita só por identificador exato", () => {
     definirRespostaMock(() => saida({ contato: { nome: "Fernando", email: "fernando@agrosol.com.br" }, empresa: { id: agro.id, nome: "Agrosol" } }));
     const r = await processarMensagem((await bruta("#crm Fernando fernando@agrosol.com.br da Agrosol")).id);
     expect(r.tipo).toBe("PROCESSADA");
-    const card = await dbT.oportunidade.findFirstOrThrow();
+    const card = await dbT.projeto.findFirstOrThrow();
     expect(card.empresaId).not.toBe(agro.id);
     expect(card.revisar).toBe(true);
     const m = await dbT.mensagemBruta.findFirstOrThrow();
@@ -170,7 +170,7 @@ describe("identidade: reaproveita só por identificador exato", () => {
     const outra = await dbT.contato.create({ data: { nome: "Outro" } });
     definirRespostaMock(() => saida({ contato: { id: outra.id, nome: "Gustavo" }, empresa: { nome: "X" } }));
     await processarMensagem((await bruta("#crm Gustavo da X")).id);
-    const card = await dbT.oportunidade.findFirstOrThrow();
+    const card = await dbT.projeto.findFirstOrThrow();
     expect(card.contatoId).not.toBe(outra.id);
     expect(card.revisar).toBe(true);
   });
@@ -180,7 +180,7 @@ describe("identidade: reaproveita só por identificador exato", () => {
     const f = FIXTURES_EXTRACAO[0];
     const r = await processarMensagem((await bruta(f.texto)).id);
     expect(r).toMatchObject({ confirmacao: expect.stringContaining("Marquei para revisar: já existe empresa com esse nome no CRM.") });
-    const card = await dbT.oportunidade.findFirstOrThrow();
+    const card = await dbT.projeto.findFirstOrThrow();
     expect(card.empresaId).not.toBe(e.id);
     expect(await dbT.empresa.count()).toBe(2);
   });
@@ -208,7 +208,7 @@ describe("identidade: reaproveita só por identificador exato", () => {
     const r = await processarMensagem((await bruta("#crm falei com o Gustavo 11 97777-6666 da Economia Sensata")).id);
     expect(r.tipo).toBe("PROCESSADA");
     expect(await dbT.contato.count()).toBe(1);
-    expect(await dbT.oportunidade.findFirstOrThrow()).toMatchObject({ contatoId: existente.id });
+    expect(await dbT.projeto.findFirstOrThrow()).toMatchObject({ contatoId: existente.id });
   });
 
   it("dois identificadores citados de contatos diferentes → PENDENTE, mesmo se a LLM devolve só um", async () => {
@@ -217,7 +217,7 @@ describe("identidade: reaproveita só por identificador exato", () => {
     definirRespostaMock(() => saida({ contato: { nome: "A", telefone: "11 97777-6666" }, empresa: { nome: "Acme" } }));
     const r = await processarMensagem((await bruta("#crm A 11 97777-6666 b@acme.com.br da Acme")).id);
     expect(r).toMatchObject({ tipo: "PENDENTE_REVISAO", confirmacao: expect.stringMatching(/^⚠️ .*cadastros diferentes/u) });
-    expect(await dbT.oportunidade.count()).toBe(0);
+    expect(await dbT.projeto.count()).toBe(0);
     expect(await dbT.contato.count()).toBe(2);
   });
 
@@ -239,7 +239,7 @@ describe("identidade: reaproveita só por identificador exato", () => {
     });
     definirRespostaMock(() => saida({ contato: { nome: "Gustavo" }, empresa: { nome: "Outra Firma" } }));
     const r = await processarMensagem((await bruta("#crm Gustavo 11 97777-6666 da Outra Firma")).id);
-    expect(await dbT.oportunidade.findFirstOrThrow()).toMatchObject({ empresaId: emp.id, revisar: true });
+    expect(await dbT.projeto.findFirstOrThrow()).toMatchObject({ empresaId: emp.id, revisar: true });
     expect(r).toMatchObject({ confirmacao: expect.stringContaining("Marquei para revisar: empresa da mensagem difere da empresa do contato.") });
     expect(await dbT.empresa.count()).toBe(1);
   });
@@ -251,7 +251,7 @@ describe("identidade: reaproveita só por identificador exato", () => {
     });
     definirRespostaMock(() => saida({ contato: { nome: "Gustavo" }, empresa: { nome: "ECONOMIA  sénsata" } }));
     await processarMensagem((await bruta("#crm Gustavo 11 97777-6666")).id);
-    expect(await dbT.oportunidade.findFirstOrThrow()).toMatchObject({ empresaId: emp.id, revisar: false });
+    expect(await dbT.projeto.findFirstOrThrow()).toMatchObject({ empresaId: emp.id, revisar: false });
   });
 
   it("empresa do contato reusado foi mesclada → vincula a principal viva (não cria nova)", async () => {
@@ -262,7 +262,7 @@ describe("identidade: reaproveita só por identificador exato", () => {
     });
     definirRespostaMock(() => saida({ contato: { nome: "Gustavo" }, empresa: { nome: "Sensata Holding" } }));
     await processarMensagem((await bruta("#crm Gustavo 11 97777-6666")).id);
-    expect(await dbT.oportunidade.findFirstOrThrow()).toMatchObject({ empresaId: principal.id });
+    expect(await dbT.projeto.findFirstOrThrow()).toMatchObject({ empresaId: principal.id });
     expect(await dbT.empresa.count()).toBe(2);
   });
 });
@@ -271,7 +271,7 @@ describe("limiar de confiança", () => {
   it("LLM_LIMIAR_CONFIANCA muda o corte", async () => {
     process.env.LLM_LIMIAR_CONFIANCA = "0.95";
     await processarMensagem((await bruta(FIXTURES_EXTRACAO[0].texto)).id); // confiança 0.92
-    expect(await dbT.oportunidade.findFirstOrThrow()).toMatchObject({ revisar: true });
+    expect(await dbT.projeto.findFirstOrThrow()).toMatchObject({ revisar: true });
   });
 });
 
@@ -284,7 +284,7 @@ describe("reivindicação e idempotência", () => {
     expect([a.tipo, b.tipo].sort()).toEqual(["IGNORADA", "PROCESSADA"]);
     expect(chamadas).toHaveBeenCalledTimes(1);
     expect(await processarMensagem(m.id)).toEqual({ tipo: "IGNORADA" });
-    expect(await dbT.oportunidade.count()).toBe(1);
+    expect(await dbT.projeto.count()).toBe(1);
     expect((await dbT.mensagemBruta.findUniqueOrThrow({ where: { id: m.id } })).tentativas).toBe(1);
   });
 
@@ -299,7 +299,7 @@ describe("reivindicação e idempotência", () => {
     id = m.id;
     const r = await processarMensagem(m.id);
     expect(r).toEqual({ tipo: "IGNORADA" });
-    expect(await dbT.oportunidade.count()).toBe(0);
+    expect(await dbT.projeto.count()).toBe(0);
     expect(await dbT.empresa.count()).toBe(0);
     expect(await dbT.contato.count()).toBe(0);
     expect(await dbT.mensagemBruta.findUniqueOrThrow({ where: { id } })).toMatchObject({ status: "PROCESSANDO", tentativas: 2, resultadoLlm: null });
@@ -420,7 +420,7 @@ describe("falhas → FALHA com ref, nunca quebra, nunca loga o texto", () => {
     const m = await bruta(FIXTURES_EXTRACAO[0].texto);
     const r = await processarMensagem(m.id);
     expect(r).toMatchObject({ tipo: "FALHA" });
-    expect(await dbT.oportunidade.count()).toBe(0);
+    expect(await dbT.projeto.count()).toBe(0);
     expect(await dbT.empresa.count()).toBe(0);
     expect(await dbT.contato.count()).toBe(0);
     const d = await dbT.mensagemBruta.findUniqueOrThrow({ where: { id: m.id } });

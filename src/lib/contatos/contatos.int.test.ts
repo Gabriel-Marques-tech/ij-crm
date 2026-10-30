@@ -103,16 +103,16 @@ describe("leitura", () => {
     return { pipelineId: p.id, faseId: p.fases[0].id, responsavelId: u.id, criadoVia: "UI" as const };
   }
 
-  it("detalhe lista oportunidades vinculadas, nunca as soft-deletadas", async () => {
+  it("detalhe lista projetos vinculados, nunca os soft-deletados", async () => {
     const base = await semearCards();
     const a = await criarContato({ nome: "Ana" });
     if (!a.ok) throw new Error("setup");
-    await db.oportunidade.create({ data: { ...base, titulo: "Viva", contatoId: a.id } });
-    await db.oportunidade.create({ data: { ...base, titulo: "Apagada", contatoId: a.id, deletadoEm: new Date() } });
+    await db.projeto.create({ data: { ...base, titulo: "Viva", contatoId: a.id } });
+    await db.projeto.create({ data: { ...base, titulo: "Apagada", contatoId: a.id, deletadoEm: new Date() } });
     const c = await obterContato(a.id);
-    expect(c?.oportunidades.map((o) => o.titulo)).toEqual(["Viva"]);
+    expect(c?.projetos.map((o) => o.titulo)).toEqual(["Viva"]);
     const lista = await listarContatos();
-    expect(lista[0]._count.oportunidades).toBe(1);
+    expect(lista[0]._count.projetos).toBe(1);
   });
 
   it("lista busca por nome (ILIKE) ou por telefone/email exatos", async () => {

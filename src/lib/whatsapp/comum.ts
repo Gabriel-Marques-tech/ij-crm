@@ -10,9 +10,9 @@ import type { Extracao } from "@/lib/llm/prompts/extracao.v2";
 import { lerValorInformal } from "@/lib/llm/valores";
 import { valoresNoTexto } from "./fechamento";
 import { normalizarPonto, type PontoNormalizado } from "@/lib/normalizacao";
-import { inicioDoDia, interpretarCampo } from "@/lib/oportunidades/campos";
-import { ErroDeRegra } from "@/lib/oportunidades/erros";
-import type { NovoCard } from "@/lib/oportunidades/oportunidades";
+import { inicioDoDia, interpretarCampo } from "@/lib/projetos/campos";
+import { ErroDeRegra } from "@/lib/projetos/erros";
+import type { NovoCard } from "@/lib/projetos/projetos";
 import type { Candidata } from "./alvo";
 import type { MotivoRespostaInvalida } from "./candidatas";
 import type { MotivoPendente, ResumoAtualizado, ResumoCriado } from "./confirmacao";
@@ -31,7 +31,7 @@ export type Sugestao =
 export type Desfecho =
   | ({
       tipo: "CRIADO";
-      oportunidadeId: string;
+      projetoId: string;
       contato: { id: string; criado: boolean } | null;
       empresa: { id: string; criada: boolean } | null;
       sugestoes: Sugestao[];
@@ -40,7 +40,7 @@ export type Desfecho =
     } & ResumoCriado)
   | ({
       tipo: "ATUALIZADO";
-      oportunidadeId: string;
+      projetoId: string;
       /** Campos/vínculos que mudaram, na ordem em que foram gravados. */
       alterados: string[];
       sugestoes: Sugestao[];
@@ -54,7 +54,7 @@ export type EntradaAplicacao = {
   /** Vai na Timeline MENSAGEM_WHATSAPP (JSON da LLM, versão, modelo). */
   registroLlm: Record<string, unknown>;
   /**
-   * Oportunidades candidatas que foram no contexto da LLM. `oportunidade_id`
+   * Projetos candidatos que foram no contexto da LLM. `oportunidade_id`
    * só vale se estiver aqui (GAB-38). Ausente = nenhuma.
    */
   candidatas?: Pick<Candidata, "id" | "tocadaEm" | "via">[];

@@ -8,9 +8,9 @@ import { DiasNaFase } from "@/components/kanban/aging";
 import { Button } from "@/components/ui/button";
 import { exigirUsuario } from "@/lib/auth/atual";
 import { listarPipelines } from "@/lib/fases/fases";
-import { estadoProximaAcao } from "@/lib/oportunidades/aging";
-import { ROTULO_ORIGEM } from "@/lib/oportunidades/campos";
-import { formatarDinheiro } from "@/lib/oportunidades/formatar";
+import { estadoProximaAcao } from "@/lib/projetos/aging";
+import { ROTULO_ORIGEM } from "@/lib/projetos/campos";
+import { formatarDinheiro } from "@/lib/projetos/formatar";
 import { escreverEstado, lerEstado, paramsDeRegistro, proximaOrdem, type ColunaOrdenavel, type EstadoTabela } from "@/lib/tabela/params";
 import { listarPessoas, listarTabela, POR_PAGINA, type LinhaTabela, type RefTabela } from "@/lib/tabela/tabela";
 import { BarraFiltrosTabela } from "./painel-filtros-tabela";
@@ -56,9 +56,9 @@ export default async function TabelaPage({ searchParams }: { searchParams: Promi
   return (
     <>
       <PageHeader
-        eyebrow="oportunidades · tabela"
+        eyebrow="projetos · tabela"
         title="Tabela"
-        description="Todas as oportunidades, de todos os quadros. Clique no cabeçalho para ordenar e na linha para abrir o card."
+        description="Todos os projetos, de todos os quadros. Clique no cabeçalho para ordenar e na linha para abrir o card."
         actions={
           <Button variant="outline" size="sm" nativeButton={false} render={<a href={href({ ...atual, pagina: 1 }, "/tabela/csv")} />}>
             <Download />
@@ -79,7 +79,7 @@ export default async function TabelaPage({ searchParams }: { searchParams: Promi
       {pagina.total === 0 ? (
         <EstadoVazio
           mascote="cabeca"
-          titulo="Nenhuma oportunidade com esses filtros"
+          titulo="Nenhum projeto com esses filtros"
           texto="Mude ou limpe os filtros acima."
           className="rounded-xl border border-dashed border-border-strong bg-surface/40"
         />
@@ -170,7 +170,7 @@ function Linha({ l, agora }: { l: LinhaTabela; agora: Date }) {
       <td className="px-3 py-2">
         <div className="flex items-center gap-2">
           <Link
-            href={`/kanban/${l.id}`}
+            href={`/projetos/${l.id}`}
             className="block max-w-72 truncate text-foreground outline-none after:absolute after:inset-0 focus-visible:underline hover:underline"
           >
             {l.titulo}

@@ -1,6 +1,6 @@
 import type { Origem, TipoTerminal } from "@prisma/client";
-import type { Quadro } from "@/lib/oportunidades/oportunidades";
-import { alertaDaVenda, type AlertaVenda } from "@/lib/oportunidades/terminal-regras";
+import type { Quadro } from "@/lib/projetos/projetos";
+import { alertaDaVenda, type AlertaVenda } from "@/lib/projetos/terminal-regras";
 
 /** Dados serializáveis que o servidor passa ao quadro cliente. */
 export type FaseCliente = {
@@ -70,7 +70,7 @@ export function paraCliente(q: Quadro): { fases: FaseCliente[]; cards: CardClien
       estado: c.estado,
       valorFechado: c.valorFechado?.toFixed(2) ?? null,
       motivoPerda: c.motivoPerda,
-      alertaVenda: alertaDaVenda(c.origemOportunidade),
+      alertaVenda: alertaDaVenda(c.vendaOrigem),
     })),
   };
 }

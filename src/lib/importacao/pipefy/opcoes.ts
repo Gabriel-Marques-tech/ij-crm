@@ -7,7 +7,7 @@
  * o gestor escolha aqui um motivo para "perdidos sem motivo" — aí ele é
  * gravado com o detalhe "Motivo definido na importação por <gestor>".
  */
-import { MOTIVOS_PERDA, type ChaveMotivoPerda } from "@/lib/oportunidades/terminal-regras";
+import { MOTIVOS_PERDA, type ChaveMotivoPerda } from "@/lib/projetos/terminal-regras";
 
 export type OpcoesImport = { motivoPerdaPadrao?: ChaveMotivoPerda | null };
 

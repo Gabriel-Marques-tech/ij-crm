@@ -26,7 +26,7 @@ export function MiniCardAcao({ item, extra, urgente = false }: { item: AcaoItem;
     >
       <span aria-hidden className={cn("absolute inset-y-0 left-0 w-[3px]", vencida ? COR_ACAO_VENCIDA : COR_ACAO)} />
       <Link
-        href={`/kanban/${item.cardId}`}
+        href={`/projetos/${item.cardId}`}
         className="line-clamp-2 text-xs leading-snug font-medium text-foreground outline-none after:absolute after:inset-0 hover:underline focus-visible:underline"
       >
         {item.acao ?? "Próxima ação"}

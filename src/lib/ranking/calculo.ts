@@ -26,7 +26,7 @@
  * final (instante do último evento que pontuou) → nome.
  */
 import type { OrigemTransicao } from "@prisma/client";
-import { diaEmFuso } from "@/lib/oportunidades/aging";
+import { diaEmFuso } from "@/lib/projetos/aging";
 import type { ConfigRanking, PesosRanking } from "./config";
 import { dentroDoPeriodo } from "./periodo";
 
@@ -36,7 +36,7 @@ export type Participante = { id: string; nome: string; fotoEm: number | null };
 
 /** `origem`: da transição que levou o card ao ganho/perda (null = sem histórico). */
 export type Ganho = {
-  oportunidadeId: string;
+  projetoId: string;
   titulo: string;
   responsavelId: string;
   dataGanho: Date;
@@ -44,14 +44,14 @@ export type Ganho = {
   criadoEm: Date;
   origem: OrigemTransicao | null;
 };
-export type Perda = { oportunidadeId: string; responsavelId: string; em: Date; origem: OrigemTransicao | null };
+export type Perda = { projetoId: string; responsavelId: string; em: Date; origem: OrigemTransicao | null };
 
 /** Movimentos feitos por gente. SISTEMA (migração de fase) e IMPORT ficam de fora. */
 export const ORIGENS_QUE_PONTUAM: ReadonlySet<OrigemTransicao> = new Set<OrigemTransicao>(["UI", "WHATSAPP"]);
 const porGente = (o: OrigemTransicao | null) => o !== null && ORIGENS_QUE_PONTUAM.has(o);
 export type Transicao = {
   id: string;
-  oportunidadeId: string;
+  projetoId: string;
   titulo: string;
   usuarioId: string | null;
   origem: OrigemTransicao;
@@ -63,8 +63,8 @@ export type Transicao = {
   /** null = criação (entrada no funil). */
   deOrdem: number | null;
 };
-export type AcaoFeita = { oportunidadeId: string; usuarioId: string; em: Date };
-export type Criacao = { oportunidadeId: string; usuarioId: string; em: Date };
+export type AcaoFeita = { projetoId: string; usuarioId: string; em: Date };
+export type Criacao = { projetoId: string; usuarioId: string; em: Date };
 /** Situação de HOJE (não do período): cards abertos em Vendas por responsável. */
 export type Abertos = { responsavelId: string; quantidade: number; orcamento: number };
 
@@ -140,7 +140,7 @@ export function avancosQueContam(transicoes: Transicao[], intervalo: Intervalo):
   const vistas = new Set<string>();
   const contam: Transicao[] = [];
   for (const t of ordenadas) {
-    const chave = `${t.oportunidadeId}|${t.paraFaseId}`;
+    const chave = `${t.projetoId}|${t.paraFaseId}`;
     if (vistas.has(chave)) continue;
     vistas.add(chave);
     if (!dentroDoPeriodo(t.em, intervalo)) continue;
@@ -318,7 +318,7 @@ function calcularDestaques(linhas: LinhaRanking[], ganhos: Ganho[], config: Conf
       chave: "maiorTicket",
       titulo: "Maior ticket",
       formato: "dinheiro",
-      vencedores: maiorTicket.map((g) => ({ usuario: porId.get(g.responsavelId)!, card: { id: g.oportunidadeId, titulo: g.titulo } })),
+      vencedores: maiorTicket.map((g) => ({ usuario: porId.get(g.responsavelId)!, card: { id: g.projetoId, titulo: g.titulo } })),
       valor: maiorValor,
       dica: "Nenhum ganho com valor fechado no período.",
     },
@@ -344,7 +344,7 @@ function calcularDestaques(linhas: LinhaRanking[], ganhos: Ganho[], config: Conf
 export type ItemFeed = {
   tipo: "GANHO" | "AVANCO";
   em: Date;
-  oportunidadeId: string;
+  projetoId: string;
   titulo: string;
   usuario: Participante;
   /** Avanço: nome da fase de destino. */
@@ -375,11 +375,11 @@ export function montarFeed(participantes: Participante[], dados: DadosRanking, a
   const itens: ItemFeed[] = [];
   for (const g of dados.ganhos) {
     const u = porId.get(g.responsavelId);
-    if (u && porGente(g.origem) && dentroDoPeriodo(g.dataGanho, janela)) itens.push({ tipo: "GANHO", em: g.dataGanho, oportunidadeId: g.oportunidadeId, titulo: g.titulo, usuario: u });
+    if (u && porGente(g.origem) && dentroDoPeriodo(g.dataGanho, janela)) itens.push({ tipo: "GANHO", em: g.dataGanho, projetoId: g.projetoId, titulo: g.titulo, usuario: u });
   }
   for (const t of avancosQueContam(dados.transicoes, janela)) {
     const u = t.usuarioId ? porId.get(t.usuarioId) : undefined;
-    if (u) itens.push({ tipo: "AVANCO", em: t.em, oportunidadeId: t.oportunidadeId, titulo: t.titulo, usuario: u, faseNome: t.paraFaseNome });
+    if (u) itens.push({ tipo: "AVANCO", em: t.em, projetoId: t.projetoId, titulo: t.titulo, usuario: u, faseNome: t.paraFaseNome });
   }
   return itens.sort((a, b) => b.em.getTime() - a.em.getTime()).slice(0, limite);
 }

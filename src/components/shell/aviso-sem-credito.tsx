@@ -1,4 +1,4 @@
-import { formatarDataHora } from "@/lib/oportunidades/formatar";
+import { formatarDataHora } from "@/lib/projetos/formatar";
 
 /**
  * Banner para gestor/admin enquanto a API de LLM estiver sem crédito ou, no

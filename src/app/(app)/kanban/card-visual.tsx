@@ -2,8 +2,8 @@ import Link from "next/link";
 import { cn } from "cn";
 import { BORDA_AGING, DiasNaFase } from "@/components/kanban/aging";
 import { Avatar } from "@/components/kanban/avatar";
-import { diasNaFase, estadoProximaAcao, nivelAging } from "@/lib/oportunidades/aging";
-import { ROTULO_ALERTA_VENDA } from "@/lib/oportunidades/terminal-regras";
+import { diasNaFase, estadoProximaAcao, nivelAging } from "@/lib/projetos/aging";
+import { ROTULO_ALERTA_VENDA } from "@/lib/projetos/terminal-regras";
 import type { CardCliente, FaseCliente } from "./tipos";
 
 /** Card do Kanban (§4.5.1): surface sobre bg, borda; aging só no dot e na borda esquerda. */
@@ -33,7 +33,7 @@ export function CardVisual({
       )}
     >
       <Link
-        href={`/kanban/${card.id}`}
+        href={`/projetos/${card.id}`}
         className="block text-sm leading-snug font-medium text-foreground outline-none hover:underline focus-visible:underline"
         // Não deixa o clique no link iniciar arrasto por teclado no card pai.
         onKeyDown={(e) => e.stopPropagation()}

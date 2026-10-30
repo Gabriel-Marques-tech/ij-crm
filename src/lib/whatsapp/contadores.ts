@@ -9,7 +9,7 @@
  */
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { diaEmFuso } from "@/lib/oportunidades/aging";
+import { diaEmFuso } from "@/lib/projetos/aging";
 
 type Cliente = Prisma.TransactionClient | typeof db;
 

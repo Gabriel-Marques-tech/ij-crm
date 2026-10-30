@@ -67,10 +67,10 @@ describe("alternador de quadro (Vendas / Projetos)", () => {
   });
 
   it("no detalhe vale o ?quadro do link; sem ele nenhum quadro acende", () => {
-    expect(itemAtivo(projetos, "/kanban/abc", "projetos")).toBe(true);
-    expect(itemAtivo(vendas, "/kanban/abc", "projetos")).toBe(false);
-    expect(itemAtivo(vendas, "/kanban/abc", null)).toBe(false);
-    expect(itemAtivo(projetos, "/kanban/abc", null)).toBe(false);
+    expect(itemAtivo(projetos, "/projetos/abc", "projetos")).toBe(true);
+    expect(itemAtivo(vendas, "/projetos/abc", "projetos")).toBe(false);
+    expect(itemAtivo(vendas, "/projetos/abc", null)).toBe(false);
+    expect(itemAtivo(projetos, "/projetos/abc", null)).toBe(false);
   });
 
   it("fora do Kanban nenhum quadro acende; os outros itens seguem o prefixo", () => {

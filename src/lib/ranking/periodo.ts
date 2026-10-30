@@ -3,8 +3,8 @@
  * America/Sao_Paulo. Intervalo meio-aberto [inicio, fim): segunda 00:00 de SP
  * já é a semana seguinte; domingo 23:59 ainda é a anterior.
  */
-import { diaEmFuso } from "@/lib/oportunidades/aging";
-import { inicioDoDia } from "@/lib/oportunidades/campos";
+import { diaEmFuso } from "@/lib/projetos/aging";
+import { inicioDoDia } from "@/lib/projetos/campos";
 
 export type TipoPeriodo = "semana" | "mes";
 

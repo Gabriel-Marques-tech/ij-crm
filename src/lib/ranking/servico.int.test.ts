@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { dbTeste, limparBanco } from "@/test/db";
 import { invalidarCachePipelines } from "@/lib/fases/cache";
-import { diaEmFuso } from "@/lib/oportunidades/aging";
-import { marcarAcaoFeita } from "@/lib/oportunidades/feita";
-import { criarCard, moverCard } from "@/lib/oportunidades/oportunidades";
+import { diaEmFuso } from "@/lib/projetos/aging";
+import { marcarAcaoFeita } from "@/lib/projetos/feita";
+import { criarCard, moverCard } from "@/lib/projetos/projetos";
 import { obterConfiguracao } from "@/lib/configuracao/servico";
 import { CONFIG_RANKING, CONFIG_RANKING_PADRAO } from "./config";
 import { resolverPeriodo } from "./periodo";
@@ -65,7 +65,7 @@ describe("ranking a partir do histórico real (criar, mover, marcar feita, ganha
     await ok(moverCard(id, fase(s, "em_negociacao"), s.ana)); // +5
     await ok(moverCard(id, fase(s, "primeiro_contato"), s.ana)); // volta: 0
     await ok(moverCard(id, fase(s, "em_negociacao"), s.ana)); // reentrada: 0
-    await db.oportunidade.update({ where: { id }, data: { proximaAcao: "ligar", proximaAcaoEm: new Date() } });
+    await db.projeto.update({ where: { id }, data: { proximaAcao: "ligar", proximaAcaoEm: new Date() } });
     const hoje = diaEmFuso(new Date());
     await ok(marcarAcaoFeita(id, { proximaAcao: "ligar", dia: hoje }, { tipo: "nova", proximaAcao: "mandar proposta", proximaAcaoEm: new Date() }, s.ana)); // +2
     await ok(marcarAcaoFeita(id, { proximaAcao: "mandar proposta", dia: hoje }, { tipo: "nenhuma" }, s.ana)); // mesmo card no dia: conta (+2; cota é 4/dia por vendedor)
@@ -74,7 +74,7 @@ describe("ranking a partir do histórico real (criar, mover, marcar feita, ganha
 
     // Card do gestor com orçamento aberto: ele entra; gestor sem card, não; inativo, não.
     const gilCard = await novoCard(s, s.gil, "Escola"); // +1 para o Gil
-    await db.oportunidade.update({ where: { id: gilCard }, data: { orcamentoPrevisto: "8000.50" } });
+    await db.projeto.update({ where: { id: gilCard }, data: { orcamentoPrevisto: "8000.50" } });
 
     const agora = new Date();
     const v = await carregarRanking(s.ana, resolverPeriodo("semana", undefined, agora), agora);
@@ -110,7 +110,7 @@ describe("ranking a partir do histórico real (criar, mover, marcar feita, ganha
     expect(l.detalhe.ganho).toBe(100);
     expect(l.ganhos).toBe(1);
 
-    await db.oportunidade.update({ where: { id }, data: { deletadoEm: new Date() } });
+    await db.projeto.update({ where: { id }, data: { deletadoEm: new Date() } });
     expect((await pontosAna()).pontos).toBe(0);
   });
 
@@ -118,7 +118,7 @@ describe("ranking a partir do histórico real (criar, mover, marcar feita, ganha
     const s = await semear();
     const id = await novoCard(s, s.ana, "Velha");
     await ok(moverCard(id, fase(s, "contrato_assinado"), s.ana, { dadosTerminal: {} }));
-    await db.oportunidade.update({ where: { id }, data: { dataGanho: new Date(Date.now() - 40 * 86_400_000) } });
+    await db.projeto.update({ where: { id }, data: { dataGanho: new Date(Date.now() - 40 * 86_400_000) } });
     const agora = new Date();
     const v = await carregarRanking(s.ana, resolverPeriodo("semana", undefined, agora), agora);
     if (v.modo !== "completo") throw new Error("modo");
@@ -130,7 +130,7 @@ describe("ranking a partir do histórico real (criar, mover, marcar feita, ganha
     const c = await novoCard(s, s.gil, "Do gestor");
     expect((await listarParticipantes()).participantes.map((p) => p.nome)).toEqual(["Ana Vendas", "Bruno Lima", "Gil Gestor"]);
     expect((await listarParticipantes()).inativos).toEqual([s.ivo.id]);
-    await db.oportunidade.update({ where: { id: c }, data: { deletadoEm: new Date() } });
+    await db.projeto.update({ where: { id: c }, data: { deletadoEm: new Date() } });
     expect((await listarParticipantes()).participantes.map((p) => p.nome)).toEqual(["Ana Vendas", "Bruno Lima"]);
   });
 
@@ -138,7 +138,7 @@ describe("ranking a partir do histórico real (criar, mover, marcar feita, ganha
     const s = await semear();
     const vera = await db.usuario.create({ data: { nome: "Vera Visualizadora", email: "vera@ij.test", papel: "VISUALIZADOR" } });
     // Ex-vendedor rebaixado: ainda dono de um card.
-    await db.oportunidade.create({ data: { titulo: "Antigo", pipelineId: s.vendas.id, faseId: fase(s, "primeiro_contato"), responsavelId: vera.id, criadoVia: "UI" } });
+    await db.projeto.create({ data: { titulo: "Antigo", pipelineId: s.vendas.id, faseId: fase(s, "primeiro_contato"), responsavelId: vera.id, criadoVia: "UI" } });
     const { participantes } = await listarParticipantes();
     expect(participantes.map((p) => p.nome)).toEqual(["Ana Vendas", "Bruno Lima"]);
   });
@@ -238,7 +238,7 @@ async function cardComHistorico(
   extra: { dataGanho?: Date; valorFechado?: string } = {},
 ) {
   const ultimo = passos.at(-1)!;
-  const op = await db.oportunidade.create({
+  const op = await db.projeto.create({
     data: {
       titulo,
       pipelineId: s.vendas.id,
@@ -253,7 +253,7 @@ async function cardComHistorico(
   });
   let de: string | null = null;
   for (const p of passos) {
-    await db.transicaoFase.create({ data: { oportunidadeId: op.id, deFaseId: de, paraFaseId: fase(s, p.para), usuarioId: dono.id, origem: p.origem, em: p.em } });
+    await db.transicaoFase.create({ data: { projetoId: op.id, deFaseId: de, paraFaseId: fase(s, p.para), usuarioId: dono.id, origem: p.origem, em: p.em } });
     de = fase(s, p.para);
   }
   return op.id;

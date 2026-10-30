@@ -8,9 +8,9 @@
  *   quadro inteiro cabe na memória).
  */
 import type { Origem } from "@prisma/client";
-import { diasNaFase, nivelAging, type NivelAging } from "@/lib/oportunidades/aging";
-import { ROTULO_ORIGEM, UFS } from "@/lib/oportunidades/campos";
-import { faixaProximaAcao } from "@/lib/oportunidades/proxima-acao";
+import { diasNaFase, nivelAging, type NivelAging } from "@/lib/projetos/aging";
+import { ROTULO_ORIGEM, UFS } from "@/lib/projetos/campos";
+import { faixaProximaAcao } from "@/lib/projetos/proxima-acao";
 import type { CardCliente, FaseCliente } from "./tipos";
 
 /** `semana` = próximos 7 dias civis, sem contar hoje (hoje tem opção própria). */

@@ -99,7 +99,7 @@ model Usuario {
   criadoEm          DateTime  @default(now()) @map("criado_em")
   atualizadoEm      DateTime  @updatedAt @map("atualizado_em")
 
-  oportunidades     Oportunidade[]   @relation("responsavel")
+  projetos     Projeto[]   @relation("responsavel")
   transicoes        TransicaoFase[]
   timeline          Timeline[]
   mensagensBrutas   MensagemBruta[]
@@ -165,7 +165,7 @@ model Empresa {
   mergedInto    Empresa?  @relation("empresaMerge", fields: [mergedIntoId], references: [id])
   mergedFrom    Empresa[] @relation("empresaMerge")
   contatos      Contato[]
-  oportunidades Oportunidade[]
+  projetos Projeto[]
 
   @@index([nome])
   @@index([nome(ops: raw("gin_trgm_ops"))], type: Gin, map: "empresa_nome_trgm_idx")
@@ -189,7 +189,7 @@ model Contato {
   mergedInto    Contato?  @relation("contatoMerge", fields: [mergedIntoId], references: [id])
   mergedFrom    Contato[] @relation("contatoMerge")
   pontos        ContatoPonto[]
-  oportunidades Oportunidade[]
+  projetos Projeto[]
 
   @@index([nome])
   @@index([nome(ops: raw("gin_trgm_ops"))], type: Gin, map: "contato_nome_trgm_idx")
@@ -222,7 +222,7 @@ model Pipeline {
   ordem  Int    @default(0)
 
   fases         Fase[]
-  oportunidades Oportunidade[]
+  projetos Projeto[]
 
   @@map("pipeline")
 }
@@ -244,7 +244,7 @@ model Fase {
   atualizadoEm      DateTime      @updatedAt @map("atualizado_em")
 
   pipeline          Pipeline      @relation(fields: [pipelineId], references: [id])
-  oportunidades     Oportunidade[]
+  projetos     Projeto[]
   transicoesDe      TransicaoFase[] @relation("transicaoDe")
   transicoesPara    TransicaoFase[] @relation("transicaoPara")
 
@@ -253,9 +253,9 @@ model Fase {
   @@map("fase")
 }
 
-// ---------------------------------------------------------------- oportunidades
+// ---------------------------------------------------------------- projetos
 
-model Oportunidade {
+model Projeto {
   id                    String     @id @default(cuid())
   pipelineId            String     @map("pipeline_id")
   faseId                String     @map("fase_id")
@@ -280,7 +280,7 @@ model Oportunidade {
   faseDesde             DateTime   @default(now()) @map("fase_desde")
   criadoVia             CriadoVia  @map("criado_via")
   // Único: uma venda gera no máximo UM card de projeto, mesmo reaberta e ganha de novo (GAB-32).
-  origemOportunidadeId  String?    @unique @map("origem_oportunidade_id")
+  vendaOrigemId         String?    @unique @map("origem_oportunidade_id")
   reabertaDeId          String?    @map("reaberta_de_id")
   pipefyId              String?    @unique @map("pipefy_id")
   deletadoEm            DateTime?  @map("deletado_em")
@@ -292,11 +292,12 @@ model Oportunidade {
   empresa               Empresa?   @relation(fields: [empresaId], references: [id])
   contato               Contato?   @relation(fields: [contatoId], references: [id])
   responsavel           Usuario    @relation("responsavel", fields: [responsavelId], references: [id])
-  origemOportunidade    Oportunidade?  @relation("projetoDeVenda", fields: [origemOportunidadeId], references: [id])
-  projeto               Oportunidade?  @relation("projetoDeVenda")
+  vendaOrigem           Projeto?  @relation("vendaParaCardProjetos", fields: [vendaOrigemId], references: [id])
+  // Card do quadro Projetos gerado pelo ganho desta venda (conceito da v1; o ciclo único é o GAB-81).
+  cardProjetos          Projeto?  @relation("vendaParaCardProjetos")
   // SET NULL explícito: card reaberto é histórico e sobrevive à deleção definitiva da origem (GAB-36).
-  reabertaDe            Oportunidade?  @relation("reabertura", fields: [reabertaDeId], references: [id], onDelete: SetNull)
-  reaberturas           Oportunidade[] @relation("reabertura")
+  reabertaDe            Projeto?  @relation("reabertura", fields: [reabertaDeId], references: [id], onDelete: SetNull)
+  reaberturas           Projeto[] @relation("reabertura")
   transicoes            TransicaoFase[]
   timeline              Timeline[]
   mensagensEnviadas     MensagemEnviada[]
@@ -315,19 +316,19 @@ model Oportunidade {
 // "deleção definitiva" (admin, GAB-36); soft-delete nunca toca nestas tabelas.
 model TransicaoFase {
   id             String          @id @default(cuid())
-  oportunidadeId String          @map("oportunidade_id")
+  projetoId      String          @map("oportunidade_id")
   deFaseId       String?         @map("de_fase_id")
   paraFaseId     String          @map("para_fase_id")
   usuarioId      String?         @map("usuario_id")
   origem         OrigemTransicao
   em             DateTime        @default(now())
 
-  oportunidade   Oportunidade    @relation(fields: [oportunidadeId], references: [id], onDelete: Cascade)
+  projeto        Projeto    @relation(fields: [projetoId], references: [id], onDelete: Cascade)
   deFase         Fase?           @relation("transicaoDe", fields: [deFaseId], references: [id], onDelete: Restrict)
   paraFase       Fase            @relation("transicaoPara", fields: [paraFaseId], references: [id])
   usuario        Usuario?        @relation(fields: [usuarioId], references: [id])
 
-  @@index([oportunidadeId, em])
+  @@index([projetoId, em])
   @@index([usuarioId])
   @@index([em]) // ranking por período (GAB-44)
   @@map("transicao_fase")
@@ -335,18 +336,18 @@ model TransicaoFase {
 
 model Timeline {
   id              String        @id @default(cuid())
-  oportunidadeId  String        @map("oportunidade_id")
+  projetoId       String        @map("oportunidade_id")
   tipo            TipoTimeline
   payload         Json          @default("{}")
   usuarioId       String?       @map("usuario_id")
   mensagemBrutaId String?       @map("mensagem_bruta_id")
   em              DateTime      @default(now())
 
-  oportunidade    Oportunidade  @relation(fields: [oportunidadeId], references: [id], onDelete: Cascade)
+  projeto         Projeto  @relation(fields: [projetoId], references: [id], onDelete: Cascade)
   usuario         Usuario?      @relation(fields: [usuarioId], references: [id])
   mensagemBruta   MensagemBruta? @relation(fields: [mensagemBrutaId], references: [id])
 
-  @@index([oportunidadeId, em])
+  @@index([projetoId, em])
   @@index([mensagemBrutaId])
   @@index([tipo, em]) // ranking: ações feitas por período (GAB-44)
   @@map("timeline")
@@ -400,15 +401,15 @@ model MensagemBruta {
 
 model MensagemEnviada {
   eventoId       String       @id @map("evento_id")
-  oportunidadeId String?      @map("oportunidade_id")
+  projetoId String?      @map("oportunidade_id")
   grupoJid       String       @map("grupo_jid")
   texto          String
   em             DateTime     @default(now())
 
   // SET NULL explícito: mensagem enviada é histórico e sobrevive à deleção definitiva do card (GAB-36).
-  oportunidade   Oportunidade? @relation(fields: [oportunidadeId], references: [id], onDelete: SetNull)
+  projeto   Projeto? @relation(fields: [projetoId], references: [id], onDelete: SetNull)
 
-  @@index([oportunidadeId])
+  @@index([projetoId])
   @@map("mensagem_enviada")
 }
 
@@ -567,7 +568,7 @@ model Prazo {
   titulo         String
   data           DateTime  @db.Date
   responsavelId  String    @map("responsavel_id")
-  oportunidadeId String?   @map("oportunidade_id")
+  projetoId String?   @map("oportunidade_id")
   feitoEm        DateTime? @map("feito_em")
   feitoPorId     String?   @map("feito_por_id")
   criadoPorId    String    @map("criado_por_id")
@@ -578,10 +579,10 @@ model Prazo {
   responsavel  Usuario       @relation("prazoResponsavel", fields: [responsavelId], references: [id])
   criadoPor    Usuario       @relation("prazoCriadoPor", fields: [criadoPorId], references: [id])
   feitoPor     Usuario?      @relation("prazoFeitoPor", fields: [feitoPorId], references: [id], onDelete: SetNull)
-  oportunidade Oportunidade? @relation(fields: [oportunidadeId], references: [id], onDelete: Cascade)
+  projeto Projeto? @relation(fields: [projetoId], references: [id], onDelete: Cascade)
 
   @@index([responsavelId, data]) // semana de uma pessoa (Calendário "Meu"/"Pessoa", Minha Semana)
   @@index([data]) // semana do time
-  @@index([oportunidadeId])
+  @@index([projetoId])
   @@map("prazo")
 }

@@ -42,7 +42,7 @@ export function Agenda({
             <ul className="divide-y divide-border">
               {acoes.map((a) => (
                 <li key={a.cardId}>
-                  <Link href={`/kanban/${a.cardId}`} className="group flex min-h-11 items-center gap-2 rounded-md py-2.5 pr-1 transition-colors hover:bg-surface-hover">
+                  <Link href={`/projetos/${a.cardId}`} className="group flex min-h-11 items-center gap-2 rounded-md py-2.5 pr-1 transition-colors hover:bg-surface-hover">
                     <span aria-hidden className={cn("h-7 w-[3px] shrink-0 rounded-sm", a.vencida ? COR_ACAO_VENCIDA : COR_ACAO)} />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-[13px] leading-relaxed text-foreground">{a.acao ?? "Próxima ação"}</span>

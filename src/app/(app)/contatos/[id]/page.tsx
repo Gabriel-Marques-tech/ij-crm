@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { CampoEditavel } from "@/components/entidades/campo-editavel";
-import { ListaOportunidades } from "@/components/entidades/lista-oportunidades";
+import { ListaProjetos } from "@/components/entidades/lista-projetos";
 import { exigirUsuario } from "@/lib/auth/atual";
 import { SecaoGestao } from "@/components/merge/secao-gestao";
 import { destinoDeMesclado } from "@/lib/merge/merge";
@@ -60,9 +60,9 @@ export default async function ContatoPage({ params }: { params: Promise<{ id: st
 
         <section className="rounded-xl border border-border bg-surface p-4">
           <h2 className="mb-3 text-sm font-medium">
-            Oportunidades <span className="font-mono text-xs text-fg-mute tabular">{c.oportunidades.length}</span>
+            Projetos <span className="font-mono text-xs text-fg-mute tabular">{c.projetos.length}</span>
           </h2>
-          <ListaOportunidades itens={c.oportunidades.map((o) => ({ ...o, extra: textoVinculo("empresa", o.empresa) }))} />
+          <ListaProjetos itens={c.projetos.map((o) => ({ ...o, extra: textoVinculo("empresa", o.empresa) }))} />
         </section>
       </div>
     </>

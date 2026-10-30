@@ -32,7 +32,7 @@ function casos(): Caso[] {
       operacao: "extracao",
       pedido: {
         sistema: PROMPT_SISTEMA,
-        usuario: montarMensagemUsuario(MENSAGEM_SINTETICA, { remetente: "Vendedor Teste", recebidaEm: agora, respondendoA: null, fases, contatos: [], empresas: [], oportunidades: [], alvoResposta: null }),
+        usuario: montarMensagemUsuario(MENSAGEM_SINTETICA, { remetente: "Vendedor Teste", recebidaEm: agora, respondendoA: null, fases, contatos: [], empresas: [], projetos: [], alvoResposta: null }),
         schema: JSON_SCHEMA_EXTRACAO,
       },
       esquema: esquemaExtracao,

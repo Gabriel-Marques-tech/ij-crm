@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db as dbApp } from "@/lib/db";
 import { dbTeste, limparBanco } from "@/test/db";
 import { invalidarCachePipelines } from "@/lib/fases/cache";
-import { inicioDoDia } from "@/lib/oportunidades/campos";
+import { inicioDoDia } from "@/lib/projetos/campos";
 import { ESTADO_PADRAO, FILTROS_TABELA_VAZIOS, type EstadoTabela, type FiltrosTabela } from "./params";
 import { exportarCsv, listarTabela, POR_PAGINA } from "./tabela";
 
@@ -51,7 +51,7 @@ async function card(
   x: {
     resp?: string;
     faseChave?: string;
-    projeto?: boolean;
+    noQuadroProjetos?: boolean;
     origem?: "RD" | "COLD_CALL" | null;
     revisar?: boolean;
     acao?: string | null;
@@ -63,13 +63,13 @@ async function card(
     deletado?: boolean;
   } = {},
 ) {
-  const p = x.projeto ? s.projetos : s.vendas;
+  const p = x.noQuadroProjetos ? s.projetos : s.vendas;
   seq += 1;
-  return db.oportunidade.create({
+  return db.projeto.create({
     data: {
       titulo,
       pipelineId: p.id,
-      faseId: fase(p, x.faseChave ?? (x.projeto ? "em_execucao" : "primeiro_contato")),
+      faseId: fase(p, x.faseChave ?? (x.noQuadroProjetos ? "em_execucao" : "primeiro_contato")),
       responsavelId: x.resp ?? s.ana.id,
       criadoVia: "UI",
       origem: x.origem ?? null,
@@ -113,7 +113,7 @@ describe("listarTabela", () => {
   it("todos os vivos, de qualquer responsável e pipeline; nunca soft-deletados; padrão = criado desc", async () => {
     const s = await semear();
     await card(s, "a");
-    await card(s, "b", { resp: s.bruno.id, projeto: true });
+    await card(s, "b", { resp: s.bruno.id, noQuadroProjetos: true });
     await card(s, "c", { faseChave: "perdido" });
     await card(s, "apagado", { deletado: true });
     const r = await listarTabela(estado(), AGORA);
@@ -129,7 +129,7 @@ describe("listarTabela", () => {
     await card(s, "origem errada", { origem: "COLD_CALL", revisar: true });
     await card(s, "sem revisar", { origem: "RD" });
     await card(s, "do bruno", { origem: "RD", revisar: true, resp: s.bruno.id });
-    await card(s, "projeto", { origem: "RD", revisar: true, projeto: true });
+    await card(s, "projeto", { origem: "RD", revisar: true, noQuadroProjetos: true });
     await card(s, "fase errada", { origem: "RD", revisar: true, faseChave: "proposta" });
     await card(s, "ganho", { origem: "RD", revisar: true, faseChave: "contrato_assinado" });
 
@@ -377,7 +377,7 @@ describe("listarTabela", () => {
     const original = dbApp.$queryRaw.bind(dbApp);
     vi.spyOn(dbApp, "$queryRaw").mockImplementationOnce((async (...args: Parameters<typeof dbApp.$queryRaw>) => {
       const r = await original(...args);
-      await db.oportunidade.update({ where: { id: a.id }, data: { deletadoEm: new Date() } });
+      await db.projeto.update({ where: { id: a.id }, data: { deletadoEm: new Date() } });
       return r;
     }) as typeof dbApp.$queryRaw);
     const r = await listarTabela(estado({}, { ordem: { coluna: "empresa", dir: "asc" } }), AGORA);
@@ -457,8 +457,8 @@ describe("exportarCsv", () => {
     const a = await card(s, "a");
     const b = await card(s, "b");
     await card(s, "c");
-    await db.oportunidade.update({ where: { id: a.id }, data: { descricao: '=HYPERLINK("x")\nlinha 2' } });
-    await db.oportunidade.update({ where: { id: b.id }, data: { descricao: "texto; com separador" } });
+    await db.projeto.update({ where: { id: a.id }, data: { descricao: '=HYPERLINK("x")\nlinha 2' } });
+    await db.projeto.update({ where: { id: b.id }, data: { descricao: "texto; com separador" } });
 
     const csv = await csvTexto(estado({}, { ordem: { coluna: "titulo", dir: "asc" } }));
     const [cabecalho] = csv.slice(1).split("\r\n");
@@ -481,9 +481,9 @@ describe("exportarCsv", () => {
     const cabecalho = await gen.next();
     expect(cabecalho.value).toContain("Título");
     // Depois de lidos os ids: c1 deixa de bater no filtro, c4 é apagado, c5 deixa de bater na busca.
-    await db.oportunidade.update({ where: { id: cards[1].id }, data: { revisar: false } });
-    await db.oportunidade.update({ where: { id: cards[4].id }, data: { deletadoEm: new Date() } });
-    await db.oportunidade.update({ where: { id: cards[5].id }, data: { titulo: "zz" } });
+    await db.projeto.update({ where: { id: cards[1].id }, data: { revisar: false } });
+    await db.projeto.update({ where: { id: cards[4].id }, data: { deletadoEm: new Date() } });
+    await db.projeto.update({ where: { id: cards[5].id }, data: { titulo: "zz" } });
     let resto = "";
     for await (const p of gen) resto += p;
     const titulosCsv = resto.split("\r\n").filter(Boolean).map((l) => l.split(";")[1]);

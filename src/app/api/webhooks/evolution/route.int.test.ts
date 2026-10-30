@@ -458,7 +458,7 @@ describe("POST /api/webhooks/evolution — confirmação com NOTIFICATIONS_ENABL
     });
 
     const enviada = await dbT.mensagemEnviada.findUniqueOrThrow({ where: { eventoId: "BAE5ENVIADA0001" } });
-    expect(enviada).toMatchObject({ grupoJid: GRUPO_FIXTURE, texto: "⚠️ não identifiquei o lead — responde esta mensagem com o nome", oportunidadeId: null });
+    expect(enviada).toMatchObject({ grupoJid: GRUPO_FIXTURE, texto: "⚠️ não identifiquei o lead — responde esta mensagem com o nome", projetoId: null });
   });
 
   it("Evolution responde erro → nada em MensagemEnviada, erro só logado (mensagem já está salva)", async () => {
@@ -489,7 +489,7 @@ describe("POST /api/webhooks/evolution — #crm vira card (GAB-34, LLM mockada)"
     expect(r.json).toMatchObject({ ok: true, persistida: true });
     await aguardarDepois();
 
-    const card = await dbT.oportunidade.findFirstOrThrow({ include: { fase: true, empresa: true, contato: true, timeline: { orderBy: { em: "asc" } } } });
+    const card = await dbT.projeto.findFirstOrThrow({ include: { fase: true, empresa: true, contato: true, timeline: { orderBy: { em: "asc" } } } });
     expect(card).toMatchObject({
       titulo: "Gustavo — Economia Sensata",
       responsavelId: u.id,
@@ -526,8 +526,8 @@ describe("POST /api/webhooks/evolution — #crm vira card (GAB-34, LLM mockada)"
     const corpo = JSON.parse((fetchSpy.mock.calls[0][1] as RequestInit).body as string);
     expect(corpo.text).toBe("✅ Gustavo — Economia Sensata → Primeiro Contato. Resp: João. Próx.: mandar proposta (31/10)");
     expect(corpo.quoted.key).toMatchObject({ id: "3EB0A1B2C3D4E5F60001", participant: "5511999998888@s.whatsapp.net" });
-    const card = await dbT.oportunidade.findFirstOrThrow();
-    expect(await dbT.mensagemEnviada.findUniqueOrThrow({ where: { eventoId: "BAE5CONFIRMA01" } })).toMatchObject({ oportunidadeId: card.id });
+    const card = await dbT.projeto.findFirstOrThrow();
+    expect(await dbT.mensagemEnviada.findUniqueOrThrow({ where: { eventoId: "BAE5CONFIRMA01" } })).toMatchObject({ projetoId: card.id });
   });
 
   it("retry da Evolution (mesmo key.id) → duplicado: nenhuma segunda chamada à LLM nem segundo card", async () => {
@@ -537,7 +537,7 @@ describe("POST /api/webhooks/evolution — #crm vira card (GAB-34, LLM mockada)"
     const b = await postar(payloadTicket());
     await aguardarDepois();
     expect(b.json).toEqual({ ok: true, duplicado: true });
-    expect(await dbT.oportunidade.count()).toBe(1);
+    expect(await dbT.projeto.count()).toBe(1);
   });
 
   it("sem ANTHROPIC_API_KEY (provedor anthropic) → FALHA com ref, 200 para a Evolution, nada quebra", async () => {
@@ -550,7 +550,7 @@ describe("POST /api/webhooks/evolution — #crm vira card (GAB-34, LLM mockada)"
     const bruta = await dbT.mensagemBruta.findFirstOrThrow();
     expect(bruta.status).toBe("FALHA");
     expect(bruta.erro).toMatch(/SEM_CHAVE.*ref=[0-9a-f]{8}/);
-    expect(await dbT.oportunidade.count()).toBe(0);
+    expect(await dbT.projeto.count()).toBe(0);
   });
 });
 

@@ -5,7 +5,7 @@
 import type { Inesperado } from "@/lib/erros/registrar";
 import type { FalhaContato } from "@/lib/contatos/contatos";
 import type { FalhaEmpresa } from "@/lib/empresas/empresas";
-import type { ErroVinculo } from "@/lib/oportunidades/vinculos";
+import type { ErroVinculo } from "@/lib/projetos/vinculos";
 
 /** Dono de um identificador que o usuário tentou repetir (para "vincular?" / "ver"). `deletado` → a UI não mostra link. */
 export type Duplicado = { tipo: "contato" | "empresa"; id: string; nome: string; deletado?: boolean };

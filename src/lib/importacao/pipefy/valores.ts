@@ -6,7 +6,7 @@
  * sem fuso é lida como São Paulo (-03:00 fixo: sem horário de verão desde 2019).
  */
 import type { Origem } from "@prisma/client";
-import { lerDinheiro } from "@/lib/oportunidades/terminal-regras";
+import { lerDinheiro } from "@/lib/projetos/terminal-regras";
 
 export type Lido<T> = { ok: true; valor: T | null } | { ok: false };
 

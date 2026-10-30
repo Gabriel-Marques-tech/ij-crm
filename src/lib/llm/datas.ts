@@ -21,7 +21,7 @@
  * - "daqui a N dias/semanas", "em N dias".
  * Fora disso → null (quem chama marca o card para revisar).
  */
-import { diaEmFuso } from "@/lib/oportunidades/aging";
+import { diaEmFuso } from "@/lib/projetos/aging";
 
 const DIA_MS = 24 * 60 * 60 * 1000;
 const MAX_DIAS_A_FRENTE = 366;

@@ -34,7 +34,7 @@ type Tx = Prisma.TransactionClient;
 
 type Base = {
   tx: Tx;
-  oportunidadeId: string;
+  projetoId: string;
   pipelineChave: string;
   porUsuarioId: string;
   /** Instante do movimento (fase_desde, TransicaoFase). */
@@ -66,12 +66,12 @@ export function pipelinesExtrasDoTerminal(pipelineChave: string, tipo: TipoTermi
  * P2002 no índice único `origem_oportunidade_id`: alguém ligou um projeto à
  * venda no meio do ganho. `moverCard` refaz o movimento (idempotente).
  */
-export function ehConflitoDeProjetoDaVenda(e: unknown): boolean {
+export function ehConflitoDeCardProjetosDaVenda(e: unknown): boolean {
   const err = e as { code?: string; meta?: { target?: unknown } };
   if (err?.code !== "P2002") return false;
   const alvo = err.meta?.target;
   const nomes = Array.isArray(alvo) ? alvo.map(String) : typeof alvo === "string" ? [alvo] : [];
-  return nomes.some((n) => n.includes("origem_oportunidade_id") || n.includes("origemOportunidadeId"));
+  return nomes.some((n) => n.includes("origem_oportunidade_id") || n.includes("vendaOrigemId"));
 }
 
 type CampoTerminal = "valorFechado" | "dataGanho" | "motivoPerda";
@@ -86,22 +86,22 @@ function serializar(v: { toFixed(n: number): string } | Date | string | null): V
 
 /** Grava os campos que mudaram, cada um com `CAMPO_ALTERADO { campo, antes, depois }`, na ordem dada. */
 async function gravarCampos(ctx: Base, novos: [CampoTerminal, string | Date | null][]) {
-  const atual = await ctx.tx.oportunidade.findUniqueOrThrow({
-    where: { id: ctx.oportunidadeId },
+  const atual = await ctx.tx.projeto.findUniqueOrThrow({
+    where: { id: ctx.projetoId },
     select: { valorFechado: true, dataGanho: true, motivoPerda: true },
   });
   const mudancas = novos
     .map(([campo, valor]) => ({ campo, valor, antes: serializar(atual[campo]), depois: serializar(valor) }))
     .filter((m) => m.antes !== m.depois);
   if (mudancas.length === 0) return;
-  await ctx.tx.oportunidade.update({
-    where: { id: ctx.oportunidadeId },
+  await ctx.tx.projeto.update({
+    where: { id: ctx.projetoId },
     data: Object.fromEntries(mudancas.map((m) => [m.campo, m.valor])),
   });
   for (const m of mudancas) {
     await ctx.tx.timeline.create({
       data: {
-        oportunidadeId: ctx.oportunidadeId,
+        projetoId: ctx.projetoId,
         tipo: "CAMPO_ALTERADO",
         payload: { campo: m.campo, antes: m.antes, depois: m.depois },
         usuarioId: ctx.porUsuarioId,
@@ -123,13 +123,13 @@ async function gravarCampos(ctx: Base, novos: [CampoTerminal, string | Date | nu
 export async function aoSairDeTerminal(ctx: ContextoSaidaTerminal): Promise<void> {
   if (ctx.origem.tipoTerminal !== "GANHO" || ctx.pipelineChave !== PIPELINE_VENDAS) return;
   if (ctx.destino.tipoTerminal === "GANHO") return; // ganho → outro ganho: continua ganha
-  const projeto = await ctx.tx.oportunidade.findUnique({ where: { origemOportunidadeId: ctx.oportunidadeId }, select: { id: true } });
-  if (!projeto) return;
+  const cardProjetos = await ctx.tx.projeto.findUnique({ where: { vendaOrigemId: ctx.projetoId }, select: { id: true } });
+  if (!cardProjetos) return;
   await ctx.tx.timeline.create({
     data: {
-      oportunidadeId: projeto.id,
+      projetoId: cardProjetos.id,
       tipo: "VINCULO_PROJETO",
-      payload: { vendaId: ctx.oportunidadeId, evento: ctx.destino.tipoTerminal === "PERDIDO" ? "perdida" : "reaberta", paraFaseId: ctx.destino.id },
+      payload: { vendaId: ctx.projetoId, evento: ctx.destino.tipoTerminal === "PERDIDO" ? "perdida" : "reaberta", paraFaseId: ctx.destino.id },
       usuarioId: ctx.porUsuarioId,
       em: ctx.em,
     },
@@ -150,22 +150,22 @@ export async function aoEntrarEmTerminal(ctx: ContextoTerminal): Promise<void> {
       ["valorFechado", r.valorFechado],
       ["dataGanho", ctx.em],
     ]);
-    await garantirProjeto(ctx);
+    await garantirCardProjetos(ctx);
   }
 }
 
 /** Cria o card de projeto da venda, ou só registra o vínculo se ele já existe. */
-async function garantirProjeto(ctx: ContextoTerminal) {
+async function garantirCardProjetos(ctx: ContextoTerminal) {
   const { tx } = ctx;
-  const vendaId = ctx.oportunidadeId;
+  const vendaId = ctx.projetoId;
   // Inclui soft-deletado: a unicidade no banco também inclui.
-  const existente = await tx.oportunidade.findUnique({ where: { origemOportunidadeId: vendaId }, select: { id: true } });
+  const existente = await tx.projeto.findUnique({ where: { vendaOrigemId: vendaId }, select: { id: true } });
   if (existente) {
     await tx.timeline.create({
-      data: { oportunidadeId: vendaId, tipo: "VINCULO_PROJETO", payload: { projetoId: existente.id, criado: false }, usuarioId: ctx.porUsuarioId, em: ctx.instante() },
+      data: { projetoId: vendaId, tipo: "VINCULO_PROJETO", payload: { projetoId: existente.id, criado: false }, usuarioId: ctx.porUsuarioId, em: ctx.instante() },
     });
     await tx.timeline.create({
-      data: { oportunidadeId: existente.id, tipo: "VINCULO_PROJETO", payload: { vendaId, criado: false }, usuarioId: ctx.porUsuarioId, em: ctx.em },
+      data: { projetoId: existente.id, tipo: "VINCULO_PROJETO", payload: { vendaId, criado: false }, usuarioId: ctx.porUsuarioId, em: ctx.em },
     });
     return;
   }
@@ -177,11 +177,11 @@ async function garantirProjeto(ctx: ContextoTerminal) {
     : null;
   if (!inicial || inicial.arquivadaEm || inicial.isTerminal) throw new ErroDeRegra("FASE_INICIAL_PROJETOS_INDISPONIVEL");
 
-  const venda = await tx.oportunidade.findUniqueOrThrow({
+  const venda = await tx.projeto.findUniqueOrThrow({
     where: { id: vendaId },
     select: { titulo: true, responsavelId: true, empresaId: true, contatoId: true, cidade: true, estado: true },
   });
-  const projeto = await tx.oportunidade.create({
+  const cardProjetos = await tx.projeto.create({
     data: {
       ...venda,
       pipelineId: inicial.pipelineId,
@@ -189,25 +189,26 @@ async function garantirProjeto(ctx: ContextoTerminal) {
       // O enum CriadoVia não tem SISTEMA (§4.2): nasceu de uma ação na UI; a
       // origem automática fica em `origem_oportunidade_id` e na TransicaoFase.
       criadoVia: "UI",
-      origemOportunidadeId: vendaId,
+      vendaOrigemId: vendaId,
       faseDesde: ctx.em,
       criadoEm: ctx.em,
     },
     select: { id: true },
   });
   await tx.transicaoFase.create({
-    data: { oportunidadeId: projeto.id, deFaseId: null, paraFaseId: inicial.id, usuarioId: ctx.porUsuarioId, origem: "SISTEMA", em: ctx.em },
+    data: { projetoId: cardProjetos.id, deFaseId: null, paraFaseId: inicial.id, usuarioId: ctx.porUsuarioId, origem: "SISTEMA", em: ctx.em },
   });
   await tx.timeline.create({
     data: {
-      oportunidadeId: projeto.id,
+      projetoId: cardProjetos.id,
       tipo: "CRIACAO",
+      // `origemOportunidadeId` é chave PERSISTIDA no payload (Timeline antiga usa o mesmo nome): não renomear.
       payload: { faseId: inicial.id, via: "GANHO", origemOportunidadeId: vendaId },
       usuarioId: ctx.porUsuarioId,
       em: ctx.em,
     },
   });
   await tx.timeline.create({
-    data: { oportunidadeId: vendaId, tipo: "VINCULO_PROJETO", payload: { projetoId: projeto.id, criado: true }, usuarioId: ctx.porUsuarioId, em: ctx.instante() },
+    data: { projetoId: vendaId, tipo: "VINCULO_PROJETO", payload: { projetoId: cardProjetos.id, criado: true }, usuarioId: ctx.porUsuarioId, em: ctx.instante() },
   });
 }

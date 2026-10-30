@@ -6,8 +6,8 @@ import { CONFIG_TECNICA, resolverConfigTecnica, validarCombinacao } from "@/lib/
 import { obterConfiguracao } from "@/lib/configuracao/servico";
 import { comTratamento, ehInesperado, registrarErro } from "@/lib/erros/registrar";
 import { contarOutroChatUltimaHora } from "@/lib/logs/tecnicos";
-import { formatarDataHora } from "@/lib/oportunidades/formatar";
-import { nomesDeUsuarios } from "@/lib/oportunidades/oportunidades";
+import { formatarDataHora } from "@/lib/projetos/formatar";
+import { nomesDeUsuarios } from "@/lib/projetos/projetos";
 import { ErroEvolutionAdmin, estadoConexao, type EstadoConexao } from "@/lib/whatsapp/evolution-admin";
 import { AbasAdmin } from "./abas";
 import { ConfigTecnicaForm } from "./config-form";

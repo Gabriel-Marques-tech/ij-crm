@@ -12,7 +12,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { QUEM_ATUA } from "@/lib/auth/papeis";
 import { db } from "@/lib/db";
 import { resolverContatos } from "@/lib/contatos/match";
-import { PIPELINE_PROJETOS, PIPELINE_VENDAS } from "@/lib/oportunidades/terminal-regras";
+import { PIPELINE_PROJETOS, PIPELINE_VENDAS } from "@/lib/projetos/terminal-regras";
 import { aplicarCards, type GanchosTeste, type Relatorio } from "./aplicar";
 import { opcoesCanonicas, validarOpcoes, type OpcoesImport } from "./opcoes";
 import { emLotes } from "./lotes";
@@ -87,7 +87,7 @@ export async function calcularPrevia(
 
   const ids = interp.cards.map((c) => c.pipefyId);
   const existentes = new Map(
-    (await emLotes(ids, (lote) => db.oportunidade.findMany({ where: { pipefyId: { in: lote } }, select: { pipefyId: true, deletadoEm: true, contatoId: true, faseId: true } }))).map((o) => [
+    (await emLotes(ids, (lote) => db.projeto.findMany({ where: { pipefyId: { in: lote } }, select: { pipefyId: true, deletadoEm: true, contatoId: true, faseId: true } }))).map((o) => [
       o.pipefyId!,
       o,
     ]),

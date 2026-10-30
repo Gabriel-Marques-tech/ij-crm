@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { REDIRECTS_ROTAS_ANTIGAS } from "./src/lib/rotas/antigas";
 
 const nextConfig: NextConfig = {
   // Não gerar AGENTS.md automático no dev (o contexto do projeto vive no design doc / README).
@@ -9,6 +10,10 @@ const nextConfig: NextConfig = {
   // Sem otimizador (/_next/image): a imagem de produção poda o sharp. Os
   // assets da marca já saem pré-dimensionados em WebP (public/images/marca).
   images: { unoptimized: true },
+  // Detalhe do card mudou para /projetos/[id] (GAB-80); links antigos redirecionam.
+  async redirects() {
+    return REDIRECTS_ROTAS_ANTIGAS;
+  },
   // App inteiro é autenticado (cookie lido no layout) → tudo é dinâmico por
   // natureza; cacheComponents/PPR não trazem ganho aqui e exigem Suspense em
   // cada rota. Reavaliar se surgir página pública pesada.

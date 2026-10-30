@@ -5,11 +5,11 @@ import { removerFase } from "@/lib/fases/fases";
 import { adicionarPonto, criarContato } from "@/lib/contatos/contatos";
 import { encontrarContatoPorIdentificador } from "@/lib/contatos/match";
 import { criarEmpresa } from "@/lib/empresas/empresas";
-import { criarCard, moverCard, obterCard } from "@/lib/oportunidades/oportunidades";
-import { listarQuadro } from "@/lib/oportunidades/oportunidades";
+import { criarCard, moverCard, obterCard } from "@/lib/projetos/projetos";
+import { listarQuadro } from "@/lib/projetos/projetos";
 import { listarCardsDoVendedor } from "@/lib/semana/semana";
 import { travarPipelines } from "@/lib/fases/fases";
-import { vincularAoCard } from "@/lib/oportunidades/vinculos";
+import { vincularAoCard } from "@/lib/projetos/vinculos";
 import { apagarCardDefinitivo, excluirCard, restaurarCard } from "./cards";
 import { apagarEntidadeDefinitivo, excluirEntidade, restaurarEntidade } from "./entidades";
 import { listarCardsNaLixeira, listarContatosNaLixeira } from "./lixeira";
@@ -47,7 +47,7 @@ async function semear() {
 }
 
 const fase = (p: { fases: { chave: string; id: string }[] }, chave: string) => p.fases.find((f) => f.chave === chave)!;
-const tipos = async (id: string) => (await db.timeline.findMany({ where: { oportunidadeId: id }, orderBy: [{ em: "asc" }, { id: "asc" }] })).map((t) => t.tipo);
+const tipos = async (id: string) => (await db.timeline.findMany({ where: { projetoId: id }, orderBy: [{ em: "asc" }, { id: "asc" }] })).map((t) => t.tipo);
 
 beforeEach(async () => {
   await limparBanco(["mensagem_enviada", "transicao_fase", "timeline", "oportunidade", "contato_ponto", "contato", "empresa", "fase", "pipeline", "sessao", "usuario"]);
@@ -62,7 +62,7 @@ describe("soft-delete e restauração de card", () => {
     expect((await listarQuadro("vendas"))!.cards).toHaveLength(0);
     expect(await listarCardsDoVendedor(vend.id)).toHaveLength(0);
     expect(await obterCard(cardId)).toBeNull();
-    const ex = await db.timeline.findFirstOrThrow({ where: { oportunidadeId: cardId, tipo: "EXCLUSAO" } });
+    const ex = await db.timeline.findFirstOrThrow({ where: { projetoId: cardId, tipo: "EXCLUSAO" } });
     expect(ex.usuarioId).toBe(vend.id);
 
     const lix = await listarCardsNaLixeira("padaria");
@@ -95,20 +95,20 @@ describe("soft-delete e restauração de card", () => {
     expect(await restaurarCard(cardId, gestor, { faseId: fase(vendas, "proposta").id })).toMatchObject({ ok: false, erro: "FASE_INVALIDA" });
 
     expect(await restaurarCard(cardId, gestor, { faseId: fase(vendas, "primeiro_contato").id })).toEqual({ ok: true, faseId: fase(vendas, "primeiro_contato").id });
-    const card = await db.oportunidade.findUniqueOrThrow({ where: { id: cardId } });
+    const card = await db.projeto.findUniqueOrThrow({ where: { id: cardId } });
     expect([card.deletadoEm, card.faseId]).toEqual([null, fase(vendas, "primeiro_contato").id]);
     expect(await tipos(cardId)).toEqual(["CRIACAO", "EXCLUSAO", "RESTAURACAO", "MOVIMENTACAO"]);
-    expect(await db.transicaoFase.count({ where: { oportunidadeId: cardId, deFaseId: fase(vendas, "proposta").id } })).toBe(1);
+    expect(await db.transicaoFase.count({ where: { projetoId: cardId, deFaseId: fase(vendas, "proposta").id } })).toBe(1);
   });
 
   it("excluir venda com projeto vivo: projeto vê a venda removida; restaurar limpa o aviso", async () => {
     const { vendas, vend, gestor, cardId } = await semear();
     expect(await moverCard(cardId, fase(vendas, "contrato_assinado").id, vend, { dadosTerminal: {} })).toMatchObject({ ok: true });
-    const projeto = await db.oportunidade.findFirstOrThrow({ where: { origemOportunidadeId: cardId } });
+    const projeto = await db.projeto.findFirstOrThrow({ where: { vendaOrigemId: cardId } });
     await excluirCard(cardId, vend);
-    expect((await obterCard(projeto.id))!.origemOportunidade!.deletadoEm).not.toBeNull();
+    expect((await obterCard(projeto.id))!.vendaOrigem!.deletadoEm).not.toBeNull();
     await restaurarCard(cardId, gestor);
-    expect((await obterCard(projeto.id))!.origemOportunidade!.deletadoEm).toBeNull();
+    expect((await obterCard(projeto.id))!.vendaOrigem!.deletadoEm).toBeNull();
   });
 });
 
@@ -116,7 +116,7 @@ describe("deleção definitiva de card", () => {
   it("só admin, só da lixeira, com o título digitado; leva Timeline/transições; projeto fica sem vínculo e com nota", async () => {
     const { vendas, vend, gestor, admin, cardId } = await semear();
     await moverCard(cardId, fase(vendas, "contrato_assinado").id, vend, { dadosTerminal: {} });
-    const projeto = await db.oportunidade.findFirstOrThrow({ where: { origemOportunidadeId: cardId } });
+    const projeto = await db.projeto.findFirstOrThrow({ where: { vendaOrigemId: cardId } });
 
     expect(await apagarCardDefinitivo(cardId, admin, "Site da padaria")).toMatchObject({ ok: false, erro: "NAO_ESTA_NA_LIXEIRA" });
     await excluirCard(cardId, vend);
@@ -124,12 +124,12 @@ describe("deleção definitiva de card", () => {
     expect(await apagarCardDefinitivo(cardId, admin, "site da padaria")).toMatchObject({ ok: false, erro: "CONFIRMACAO_NAO_CONFERE" });
     expect(await apagarCardDefinitivo(cardId, admin, " Site da padaria ")).toEqual({ ok: true });
 
-    expect(await db.oportunidade.count({ where: { id: cardId } })).toBe(0);
-    expect(await db.timeline.count({ where: { oportunidadeId: cardId } })).toBe(0);
-    expect(await db.transicaoFase.count({ where: { oportunidadeId: cardId } })).toBe(0);
-    const p = await db.oportunidade.findUniqueOrThrow({ where: { id: projeto.id } });
-    expect(p.origemOportunidadeId).toBeNull();
-    expect(await db.timeline.count({ where: { oportunidadeId: projeto.id, tipo: "VINCULO_PROJETO", payload: { path: ["evento"], equals: "venda_apagada" } } })).toBe(1);
+    expect(await db.projeto.count({ where: { id: cardId } })).toBe(0);
+    expect(await db.timeline.count({ where: { projetoId: cardId } })).toBe(0);
+    expect(await db.transicaoFase.count({ where: { projetoId: cardId } })).toBe(0);
+    const p = await db.projeto.findUniqueOrThrow({ where: { id: projeto.id } });
+    expect(p.vendaOrigemId).toBeNull();
+    expect(await db.timeline.count({ where: { projetoId: projeto.id, tipo: "VINCULO_PROJETO", payload: { path: ["evento"], equals: "venda_apagada" } } })).toBe(1);
   });
 });
 
@@ -138,7 +138,7 @@ describe("lixeira de contatos e empresas", () => {
     const { gestor, admin, vend, cardId } = await semear();
     const c = await criarContato({ nome: "Zé da Padaria", pontos: ["11 99999-8888"] });
     if (!c.ok) throw new Error("setup");
-    await db.oportunidade.update({ where: { id: cardId }, data: { contatoId: c.id } });
+    await db.projeto.update({ where: { id: cardId }, data: { contatoId: c.id } });
 
     expect(await excluirEntidade("contato", c.id, vend)).toEqual({ ok: false, erro: "SEM_PERMISSAO" });
     expect(await excluirEntidade("contato", c.id, gestor)).toEqual({ ok: true });
@@ -157,9 +157,9 @@ describe("lixeira de contatos e empresas", () => {
 
     expect(await encontrarContatoPorIdentificador("11 99999-8888")).toEqual({ tipo: "NAO_ENCONTRADO" });
     expect(await criarContato({ nome: "Novo dono", pontos: ["11 99999-8888"] })).toMatchObject({ ok: true });
-    const card = await db.oportunidade.findUniqueOrThrow({ where: { id: cardId } });
+    const card = await db.projeto.findUniqueOrThrow({ where: { id: cardId } });
     expect(card.contatoId).toBeNull();
-    const nota = await db.timeline.findFirstOrThrow({ where: { oportunidadeId: cardId, tipo: "CAMPO_ALTERADO" } });
+    const nota = await db.timeline.findFirstOrThrow({ where: { projetoId: cardId, tipo: "CAMPO_ALTERADO" } });
     expect(nota.payload).toEqual({ campo: "contato", antes: "Zé da Padaria", depois: null, motivo: "apagado_definitivamente" });
   });
 
@@ -254,7 +254,7 @@ describe("review do PR #12", () => {
       const c = await criarCard({ pipelineId: vendas.id, faseId: fase(vendas, "proposta").id, titulo: `Venda ${i}` }, vend);
       if (!c.ok) throw new Error(c.erro);
       await moverCard(c.id, fase(vendas, "contrato_assinado").id, vend, { dadosTerminal: {} });
-      const projeto = await db.oportunidade.findFirstOrThrow({ where: { origemOportunidadeId: c.id } });
+      const projeto = await db.projeto.findFirstOrThrow({ where: { vendaOrigemId: c.id } });
       await excluirCard(projeto.id, vend);
       const e = empresas[i];
       if (!e.ok) throw new Error("setup");
@@ -271,18 +271,18 @@ describe("review do PR #12", () => {
     const { vendas, vend, admin, cardId } = await semear();
     const r = await criarCard({ pipelineId: vendas.id, faseId: fase(vendas, "primeiro_contato").id, titulo: "Site da padaria (reaberto)" }, vend);
     if (!r.ok) throw new Error(r.erro);
-    await db.oportunidade.update({ where: { id: r.id }, data: { reabertaDeId: cardId } });
-    await db.mensagemEnviada.create({ data: { eventoId: "ev-1", oportunidadeId: cardId, grupoJid: "g@g.us", texto: "oi" } });
+    await db.projeto.update({ where: { id: r.id }, data: { reabertaDeId: cardId } });
+    await db.mensagemEnviada.create({ data: { eventoId: "ev-1", projetoId: cardId, grupoJid: "g@g.us", texto: "oi" } });
     await excluirCard(cardId, vend);
     const [lix] = await listarCardsNaLixeira();
     expect(lix).toMatchObject({ id: cardId, mensagensEnviadas: 1, reaberturas: 1 });
 
     expect(await apagarCardDefinitivo(cardId, admin, "Site da padaria")).toEqual({ ok: true });
-    expect((await db.oportunidade.findUniqueOrThrow({ where: { id: r.id } })).reabertaDeId).toBeNull();
-    const nota = await db.timeline.findFirstOrThrow({ where: { oportunidadeId: r.id, tipo: "VINCULO_PROJETO" } });
+    expect((await db.projeto.findUniqueOrThrow({ where: { id: r.id } })).reabertaDeId).toBeNull();
+    const nota = await db.timeline.findFirstOrThrow({ where: { projetoId: r.id, tipo: "VINCULO_PROJETO" } });
     expect(nota.payload).toEqual({ evento: "origem_reabertura_apagada", titulo: "Site da padaria" });
     expect(nota.usuarioId).toBe(admin.id);
-    expect((await db.mensagemEnviada.findUniqueOrThrow({ where: { eventoId: "ev-1" } })).oportunidadeId).toBeNull();
+    expect((await db.mensagemEnviada.findUniqueOrThrow({ where: { eventoId: "ev-1" } })).projetoId).toBeNull();
   });
 
   it("Kanban e Minha Semana: principal excluído não empresta o nome; mesclado mostra o próprio", async () => {
@@ -291,7 +291,7 @@ describe("review do PR #12", () => {
     const dup = await criarEmpresa({ nome: "Acme Ltda" });
     if (!acme.ok || !dup.ok) throw new Error("setup");
     await db.empresa.update({ where: { id: dup.id }, data: { mergedIntoId: acme.id } });
-    await db.oportunidade.update({ where: { id: cardId }, data: { empresaId: dup.id } });
+    await db.projeto.update({ where: { id: cardId }, data: { empresaId: dup.id } });
     const nomes = async () => [(await listarQuadro("vendas"))!.cards[0].empresa?.nome, (await listarCardsDoVendedor(vend.id))[0].empresa?.nome];
 
     expect(await nomes()).toEqual(["Acme", "Acme"]);

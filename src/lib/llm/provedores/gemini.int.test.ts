@@ -88,7 +88,7 @@ describe("LLM_PROVEDOR=gemini ponta a ponta (fetch falso)", () => {
     const depois = await dbT.mensagemBruta.findUniqueOrThrow({ where: { id: m.id } });
     expect(depois.status).toBe("PROCESSADA");
     expect(depois.resultadoLlm).toMatchObject({ provedor: "gemini", modelo: "gemini-3.8-flash", saida: F.saida });
-    expect(await dbT.oportunidade.count()).toBe(1);
+    expect(await dbT.projeto.count()).toBe(1);
     const l = logs(console.info);
     expect(l).toMatch(/provedor=gemini modelo=gemini-3\.8-flash .* tokens_in=1500 tokens_out=260 tokens_reasoning=64 ok/);
     expect(l).not.toContain(F.texto);

@@ -5,7 +5,7 @@ import { FIXTURES_EXTRACAO, RECEBIDA_EM } from "./fixtures/extracao";
 import { definirRespostaMock } from "./provedores/mock";
 import type { ContextoExtracao } from "./prompts/extracao.v2";
 
-const CTX: ContextoExtracao = { remetente: "João", recebidaEm: RECEBIDA_EM, respondendoA: null, fases: [], contatos: [], empresas: [], oportunidades: [], alvoResposta: null };
+const CTX: ContextoExtracao = { remetente: "João", recebidaEm: RECEBIDA_EM, respondendoA: null, fases: [], contatos: [], empresas: [], projetos: [], alvoResposta: null };
 const envOriginal = { ...process.env };
 
 function logs(spy: unknown): string {

@@ -1,5 +1,5 @@
 /**
- * Serviço de oportunidades do Kanban (GAB-29): criar card, mover, editar
+ * Serviço de projetos do Kanban (GAB-29): criar card, mover, editar
  * inline, notas e leitura. Permissão é do chamador (`exigirEscrita`): pela
  * matriz de papéis (§4.5) qualquer usuário que escreve cria/edita/move. O
  * serviço ainda recusa VISUALIZADOR (`SEM_PERMISSAO`) quando o ator traz papel.
@@ -22,16 +22,16 @@ import { listarPipelines, travarPipelines } from "@/lib/fases/fases";
 import { diaEmFuso } from "./aging";
 import { validarTitulo, type CampoEditavel, type ValorCampo } from "./campos";
 import { mudancaDescricao, PREVIA_DESCRICAO } from "./descricao";
-import { ErroDeRegra, type ErroOportunidade } from "./erros";
+import { ErroDeRegra, type ErroProjeto } from "./erros";
 
 // Reexport: `feita.ts` (Minha Semana) importa daqui.
 export { ErroDeRegra };
-import { aoEntrarEmTerminal, aoSairDeTerminal, ehConflitoDeProjetoDaVenda, pipelinesExtrasDoTerminal } from "./terminal";
+import { aoEntrarEmTerminal, aoSairDeTerminal, ehConflitoDeCardProjetosDaVenda, pipelinesExtrasDoTerminal } from "./terminal";
 import type { DadosTerminal } from "./terminal-regras";
 
-export type { ErroOportunidade } from "./erros";
+export type { ErroProjeto } from "./erros";
 
-export type Resultado<T = object> = ({ ok: true } & T) | { ok: false; erro: ErroOportunidade };
+export type Resultado<T = object> = ({ ok: true } & T) | { ok: false; erro: ErroProjeto };
 
 type Tx = Prisma.TransactionClient;
 /** `papel` opcional: import/WhatsApp agem em nome de alguém sem sessão. Veio → é conferido. */
@@ -83,7 +83,7 @@ export type CardDoQuadro = {
   valorFechado: { toFixed(n: number): string } | null;
   motivoPerda: string | null;
   /** Card de projeto: a venda que o gerou (para o aviso de venda reaberta/perdida). */
-  origemOportunidade: { deletadoEm: Date | null; fase: { tipoTerminal: TipoTerminal | null } } | null;
+  vendaOrigem: { deletadoEm: Date | null; fase: { tipoTerminal: TipoTerminal | null } } | null;
 };
 
 export type Quadro = {
@@ -101,7 +101,7 @@ export async function listarQuadro(pipelineChave: string): Promise<Quadro | null
   const p = (await listarPipelines()).find((x) => x.chave === pipelineChave);
   if (!p) return null;
   const [cards, previas] = await Promise.all([
-    db.oportunidade.findMany({
+    db.projeto.findMany({
       where: { pipelineId: p.id, deletadoEm: null, faseId: { in: p.fases.map((f) => f.id) } },
       orderBy: [{ faseDesde: "desc" }, { id: "asc" }],
       select: {
@@ -119,7 +119,7 @@ export async function listarQuadro(pipelineChave: string): Promise<Quadro | null
         empresa: { select: SELECAO_NOME_EXIBIDO },
         valorFechado: true,
         motivoPerda: true,
-        origemOportunidade: { select: { deletadoEm: true, fase: { select: { tipoTerminal: true } } } },
+        vendaOrigem: { select: { deletadoEm: true, fase: { select: { tipoTerminal: true } } } },
       },
     }),
     // Descrição pode ter 5000 caracteres: o quadro recebe só a prévia, cortada no
@@ -143,7 +143,7 @@ export async function listarQuadro(pipelineChave: string): Promise<Quadro | null
 }
 
 export async function obterCard(id: string) {
-  return db.oportunidade.findFirst({
+  return db.projeto.findFirst({
     where: { id, deletadoEm: null },
     include: {
       pipeline: { select: { id: true, chave: true, nome: true } },
@@ -152,8 +152,8 @@ export async function obterCard(id: string) {
       empresa: { select: { id: true, nome: true } },
       contato: { select: { id: true, nome: true } },
       // Venda ↔ projeto (GAB-32). Inclui soft-deletado: a UI mostra "removido".
-      origemOportunidade: { select: { id: true, titulo: true, deletadoEm: true, pipeline: { select: { chave: true } }, fase: { select: { tipoTerminal: true } } } },
-      projeto: { select: { id: true, titulo: true, deletadoEm: true, pipeline: { select: { chave: true } } } },
+      vendaOrigem: { select: { id: true, titulo: true, deletadoEm: true, pipeline: { select: { chave: true } }, fase: { select: { tipoTerminal: true } } } },
+      cardProjetos: { select: { id: true, titulo: true, deletadoEm: true, pipeline: { select: { chave: true } } } },
       timeline: {
         orderBy: [{ em: "asc" }, { id: "asc" }],
         include: { usuario: { select: { id: true, nome: true } } },
@@ -180,7 +180,7 @@ export async function nomesDeUsuarios(ids: Iterable<string>): Promise<Map<string
 // ---------------------------------------------------------------- escrita
 
 /**
- * Núcleo de "card nasce" (UI, import): grava a oportunidade, a TransicaoFase
+ * Núcleo de "card nasce" (UI, import): grava o projeto, a TransicaoFase
  * de entrada no funil (`de_fase_id` null — base das métricas de tempo por
  * fase) e a Timeline de criação. Pressupõe o lock do pipeline e a fase já
  * validada pelo chamador. `entrada` = fase/instante em que o card entrou no
@@ -189,18 +189,18 @@ export async function nomesDeUsuarios(ids: Iterable<string>): Promise<Map<string
 export async function inserirCard(
   tx: Tx,
   args: {
-    data: Prisma.OportunidadeUncheckedCreateInput;
+    data: Prisma.ProjetoUncheckedCreateInput;
     entrada: { faseId: string; em: Date };
     porId: string;
     origem: OrigemTransicao;
     timeline: { tipo: TipoTimeline; payload: Prisma.InputJsonValue; em: Date };
   },
 ): Promise<string> {
-  const op = await tx.oportunidade.create({ data: args.data, select: { id: true } });
+  const op = await tx.projeto.create({ data: args.data, select: { id: true } });
   await tx.transicaoFase.create({
-    data: { oportunidadeId: op.id, deFaseId: null, paraFaseId: args.entrada.faseId, usuarioId: args.porId, origem: args.origem, em: args.entrada.em },
+    data: { projetoId: op.id, deFaseId: null, paraFaseId: args.entrada.faseId, usuarioId: args.porId, origem: args.origem, em: args.entrada.em },
   });
-  await tx.timeline.create({ data: { oportunidadeId: op.id, tipo: args.timeline.tipo, payload: args.timeline.payload, usuarioId: args.porId, em: args.timeline.em } });
+  await tx.timeline.create({ data: { projetoId: op.id, tipo: args.timeline.tipo, payload: args.timeline.payload, usuarioId: args.porId, em: args.timeline.em } });
   return op.id;
 }
 
@@ -214,7 +214,7 @@ export async function inserirCard(
 export async function registrarMovimento(
   tx: Tx,
   args: {
-    oportunidadeId: string;
+    projetoId: string;
     pipelineChave: string;
     origem: Fase;
     destino: Fase;
@@ -227,24 +227,24 @@ export async function registrarMovimento(
     dadosTerminal?: unknown;
   },
 ): Promise<void> {
-  const { oportunidadeId: id, origem, destino, em } = args;
+  const { projetoId: id, origem, destino, em } = args;
   // Entradas da Timeline depois da MOVIMENTACAO: `em` estritamente crescente.
   let passo = 0;
   const instante = () => new Date(em.getTime() + ++passo);
-  await tx.oportunidade.update({ where: { id }, data: { faseId: destino.id, faseDesde: em } });
+  await tx.projeto.update({ where: { id }, data: { faseId: destino.id, faseDesde: em } });
   if (args.transicao !== false) {
-    await tx.transicaoFase.create({ data: { oportunidadeId: id, deFaseId: origem.id, paraFaseId: destino.id, usuarioId: args.porId, origem: args.origemTransicao, em } });
+    await tx.transicaoFase.create({ data: { projetoId: id, deFaseId: origem.id, paraFaseId: destino.id, usuarioId: args.porId, origem: args.origemTransicao, em } });
   }
   const payload = { deFaseId: origem.id, paraFaseId: destino.id, ...(args.via ? { via: args.via } : {}) };
-  await tx.timeline.create({ data: { oportunidadeId: id, tipo: "MOVIMENTACAO", payload, usuarioId: args.porId, em } });
+  await tx.timeline.create({ data: { projetoId: id, tipo: "MOVIMENTACAO", payload, usuarioId: args.porId, em } });
   // Sai antes de entrar: ganho → perdido avisa o projeto e depois grava o motivo.
   if (origem.isTerminal) {
-    await aoSairDeTerminal({ tx, oportunidadeId: id, pipelineChave: args.pipelineChave, origem, destino, porUsuarioId: args.porId, em, instante });
+    await aoSairDeTerminal({ tx, projetoId: id, pipelineChave: args.pipelineChave, origem, destino, porUsuarioId: args.porId, em, instante });
   }
   if (destino.isTerminal) {
     await aoEntrarEmTerminal({
       tx,
-      oportunidadeId: id,
+      projetoId: id,
       pipelineChave: args.pipelineChave,
       deFaseId: origem.id,
       destino,
@@ -282,7 +282,7 @@ export type NovoCard = {
   responsavelId: string;
   via: "UI" | "WHATSAPP";
   /** Campos já interpretados (ingestão do WhatsApp, GAB-34). */
-  campos?: Omit<Prisma.OportunidadeUncheckedCreateInput, "id" | "pipelineId" | "faseId" | "titulo" | "responsavelId" | "criadoVia" | "faseDesde" | "criadoEm">;
+  campos?: Omit<Prisma.ProjetoUncheckedCreateInput, "id" | "pipelineId" | "faseId" | "titulo" | "responsavelId" | "criadoVia" | "faseDesde" | "criadoEm">;
   agora?: Date;
 };
 
@@ -338,7 +338,7 @@ export async function moverCard(
     // esta venda entre a leitura e o INSERT do gancho. O Postgres abortou a
     // transação, então não dá para tratar lá dentro: refaz o movimento UMA vez
     // numa transação nova, que agora enxerga o projeto e só registra o vínculo.
-    if (!ehConflitoDeProjetoDaVenda(e)) return traduzir(e);
+    if (!ehConflitoDeCardProjetosDaVenda(e)) return traduzir(e);
     try {
       return await tentar();
     } catch (e2) {
@@ -354,7 +354,7 @@ async function moverUmaVez(
   opts: { dadosTerminal?: DadosTerminal },
 ): Promise<Resultado<{ mudou: boolean; terminal: TipoTerminal | null }>> {
   return db.$transaction(async (tx) => {
-    const alvo = await tx.oportunidade.findFirst({
+    const alvo = await tx.projeto.findFirst({
       where: { id, deletadoEm: null },
       select: { pipelineId: true, pipeline: { select: { chave: true } } },
     });
@@ -365,7 +365,7 @@ async function moverUmaVez(
     const extras = await idsDePipelines(tx, pipelinesExtrasDoTerminal(alvo.pipeline.chave, previa?.tipoTerminal ?? null));
     await travarPipelines(tx, [alvo.pipelineId, ...extras]);
 
-    const op = await tx.oportunidade.findFirst({ where: { id, deletadoEm: null }, select: { faseId: true } });
+    const op = await tx.projeto.findFirst({ where: { id, deletadoEm: null }, select: { faseId: true } });
     if (!op) throw new ErroDeRegra("CARD_NAO_ENCONTRADO");
     const destino = await faseDestino(tx, paraFaseId, alvo.pipelineId);
     if (destino.id === op.faseId) return { ok: true as const, mudou: false, terminal: null };
@@ -377,7 +377,7 @@ async function moverUmaVez(
     const origem = await tx.fase.findUniqueOrThrow({ where: { id: op.faseId } });
 
     await registrarMovimento(tx, {
-      oportunidadeId: id,
+      projetoId: id,
       pipelineChave: alvo.pipeline.chave,
       origem,
       destino,
@@ -429,7 +429,7 @@ export async function aplicarPatch(tx: Tx, id: string, patch: PatchCard, por: At
   const campos = Object.keys(patch) as CampoEditavel[];
   const travado = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM oportunidade WHERE id = ${id} AND deletado_em IS NULL FOR UPDATE`;
   if (travado.length === 0) throw new ErroDeRegra("CARD_NAO_ENCONTRADO");
-  const atual = await tx.oportunidade.findUniqueOrThrow({ where: { id } });
+  const atual = await tx.projeto.findUniqueOrThrow({ where: { id } });
 
   const mudancas: { campo: CampoEditavel; antes: string | boolean | null; depois: string | boolean | null }[] = [];
   for (const campo of campos) {
@@ -439,7 +439,7 @@ export async function aplicarPatch(tx: Tx, id: string, patch: PatchCard, por: At
   }
   if (mudancas.length === 0) return [];
 
-  const data: Prisma.OportunidadeUncheckedUpdateInput = {};
+  const data: Prisma.ProjetoUncheckedUpdateInput = {};
   for (const { campo } of mudancas) {
     const v = patch[campo] ?? null;
     if (campo === "responsavelId") {
@@ -458,14 +458,14 @@ export async function aplicarPatch(tx: Tx, id: string, patch: PatchCard, por: At
       (data as Record<string, unknown>)[campo] = v;
     }
   }
-  await tx.oportunidade.update({ where: { id }, data });
+  await tx.projeto.update({ where: { id }, data });
 
   // `em` estritamente crescente: a Timeline ordena por `em` e as entradas
   // de um mesmo patch precisam manter a ordem.
   const base = aPartirDe ?? Date.now();
   await tx.timeline.createMany({
     data: mudancas.map((m, i) => ({
-      oportunidadeId: id,
+      projetoId: id,
       tipo: "CAMPO_ALTERADO" as TipoTimeline,
       // Descrição (até 5000): a Timeline guarda só a prévia de antes/depois.
       payload: m.campo === "descricao" ? mudancaDescricao(m.campo, m.antes as string | null, m.depois as string | null) : m,
@@ -482,8 +482,8 @@ export async function adicionarNota(id: string, texto: string, por: Ator): Promi
   if (soLeitura(por)) return { ok: false, erro: "SEM_PERMISSAO" };
   const t = texto.trim();
   if (t.length === 0 || t.length > NOTA_MAX) return { ok: false, erro: "NOTA_INVALIDA" };
-  const op = await db.oportunidade.findFirst({ where: { id, deletadoEm: null }, select: { id: true } });
+  const op = await db.projeto.findFirst({ where: { id, deletadoEm: null }, select: { id: true } });
   if (!op) return { ok: false, erro: "CARD_NAO_ENCONTRADO" };
-  await db.timeline.create({ data: { oportunidadeId: id, tipo: "NOTA", payload: { texto: t }, usuarioId: por.id } });
+  await db.timeline.create({ data: { projetoId: id, tipo: "NOTA", payload: { texto: t }, usuarioId: por.id } });
   return { ok: true };
 }
