@@ -30,10 +30,10 @@ describe("schema extracao.v2", () => {
     expect(Object.keys(JSON_SCHEMA_EXTRACAO.properties).sort()).toEqual(Object.keys(V1.properties).sort());
     expect(JSON_SCHEMA_EXTRACAO.required).toEqual(V1.required);
     expect(JSON_SCHEMA_EXTRACAO.additionalProperties).toBe(false);
-    expect(JSON_SCHEMA_EXTRACAO.properties.oportunidade_id.description).toMatch(/PROJETOS CANDIDATOS/);
+    expect(JSON_SCHEMA_EXTRACAO.properties.oportunidade_id.description).toMatch(/OPORTUNIDADES CANDIDATAS/);
   });
 
-  it("lista os projetos candidatos com id, fase, motivo e se está fechado", () => {
+  it("lista as oportunidades candidatas com id, fase, motivo e se está fechada", () => {
     const u = montarMensagemUsuario("#crm é da Economia Sensata", {
       ...CTX,
       projetos: [
@@ -42,13 +42,13 @@ describe("schema extracao.v2", () => {
       ],
     });
     expect(u).toContain('- id=op1 titulo="Gustavo" fase="Primeiro Contato" via=recente tocada=24/10, 09:00');
-    expect(u).toContain('- id=op2 titulo="Ana — Acme" fase="Perdido" (fechado) via=contato,empresa');
+    expect(u).toContain('- id=op2 titulo="Ana — Acme" fase="Perdido" (fechada) via=contato,empresa');
     expect(u).not.toContain("Card da confirmação respondida");
     expect(u.endsWith("<mensagem>\n#crm é da Economia Sensata\n</mensagem>")).toBe(true);
   });
 
-  it("sem candidatos diz 'nenhum'; reply a confirmação cita o card", () => {
-    expect(montarMensagemUsuario("#crm x", CTX)).toMatch(/Projetos candidatos.*\n- nenhum/);
+  it("sem candidatas diz 'nenhuma'; reply a confirmação cita o card", () => {
+    expect(montarMensagemUsuario("#crm x", CTX)).toMatch(/Oportunidades candidatas.*\n- nenhuma/);
     const u = montarMensagemUsuario("#crm na verdade é a X", { ...CTX, alvoResposta: "op9", respondendoA: "✅ Gustavo → Primeiro Contato" });
     expect(u).toContain("Card da confirmação respondida: id=op9");
     expect(u).toContain("<respondendo_a>\n✅ Gustavo → Primeiro Contato\n</respondendo_a>");
