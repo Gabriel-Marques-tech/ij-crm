@@ -8,14 +8,25 @@
 -- Funciona com o schema antigo e com o novo: as colunas novas (marco,
 -- absorvido_por_id) são lidas via to_jsonb, que devolve NULL se não existem.
 --
--- O que tem de bater (antes → depois):
---   projetos_entidades(depois) = cards_total(antes) - pares_venda_projeto(antes)
---   pares_venda_projeto(depois) = 0 e cards_absorvidos(depois) = pares_venda_projeto(antes)
+-- Tudo dentro de BEGIN READ ONLY … ROLLBACK: o Postgres recusa qualquer escrita.
+--
+-- Saída 1 (contagens). O que tem de bater (antes → depois):
+--   projetos_entidades(depois) = cards_total(antes) - cards_absorvidos(depois)
+--   pares_venda_projeto(depois) = pares_nao_unidos (os que ficam separados, ver saída 2)
+--   cards_absorvidos(depois) = pares_venda_projeto(antes) - pares_nao_unidos(antes)
 --   cards_total, transicoes_total, prazos_total e mensagens_enviadas_total: iguais
---   timeline_total(depois) = timeline_total(antes) + pares_venda_projeto(antes)
+--   timeline_total(depois) = timeline_total(antes) + cards_absorvidos(depois)
+--     + 2 × pares_nao_unidos + 1 NOTA por descrição longa (> 5000) concatenada
 --   pipefy_ids e reaberturas: iguais; marcos(depois) = 7
---   vivos_em_vendas + vivos_em_projetos (depois) = vivos (antes) - pares com os dois lados vivos
---     (pares_dois_vivos, antes)
+--   vivos(depois) = vivos(antes) - pares unidos com os dois lados vivos
+--
+-- Saída 2 (pares NÃO unidos): pares venda → projeto em que a venda saiu do ganho
+-- ("reaberta" = fase aberta, "perdida" = perdida depois do ganho) com o card de
+-- projetos vivo. Por decisão do usuário a migration NÃO junta esses pares: os dois
+-- seguem como Projetos separados (venda em Vendas, projeto em Projetos). A lista é
+-- a mesma antes e depois da migration.
+BEGIN READ ONLY;
+
 SELECT metrica, valor FROM (
   WITH c AS (
     SELECT o.*, p.chave AS quadro, (to_jsonb(o) ->> 'absorvido_por_id') AS absorvido_por
@@ -30,6 +41,8 @@ SELECT metrica, valor FROM (
   UNION ALL SELECT 2, 'cards_absorvidos', (SELECT count(*) FROM c WHERE absorvido_por IS NOT NULL)
   UNION ALL SELECT 3, 'projetos_entidades', (SELECT count(*) FROM c WHERE absorvido_por IS NULL)
   UNION ALL SELECT 4, 'pares_venda_projeto', (SELECT count(*) FROM pares)
+  UNION ALL SELECT 4, 'pares_nao_unidos', (SELECT count(*) FROM pares x JOIN c vd ON vd.id = x.v_id JOIN fase f ON f.id = vd.fase_id
+                                             WHERE x.p_del IS NULL AND f.tipo_terminal IS DISTINCT FROM 'GANHO')
   UNION ALL SELECT 5, 'pares_dois_vivos', (SELECT count(*) FROM pares WHERE p_del IS NULL AND v_del IS NULL)
   UNION ALL SELECT 6, 'orfaos_projetos', (SELECT count(*) FROM c WHERE quadro = 'projetos' AND origem_oportunidade_id IS NULL AND absorvido_por IS NULL
                                             AND NOT EXISTS (SELECT 1 FROM c a WHERE a.absorvido_por = c.id))
@@ -52,3 +65,23 @@ SELECT metrica, valor FROM (
   UNION ALL SELECT 22, 'cards_em_fase_de_outro_quadro', (SELECT count(*) FROM c JOIN fase f ON f.id = c.fase_id WHERE f.pipeline_id <> c.pipeline_id)
 ) m
 ORDER BY ord;
+
+SELECT CASE WHEN fv.tipo_terminal = 'PERDIDO' THEN 'nao_unido_perdida' ELSE 'nao_unido_reaberta' END AS conflito,
+       vd.id AS venda_id, vd.titulo AS venda_titulo, fv.nome AS venda_fase, uv.nome AS venda_responsavel,
+       vd.data_ganho AS venda_data_ganho, vd.fase_desde AS venda_fase_desde,
+       pj.id AS projeto_id, pj.titulo AS projeto_titulo, fp.nome AS projeto_fase, up.nome AS projeto_responsavel,
+       pj.fase_desde AS projeto_fase_desde
+  FROM oportunidade pj
+  JOIN oportunidade vd ON vd.id = pj.origem_oportunidade_id
+  JOIN pipeline ppj ON ppj.id = pj.pipeline_id AND ppj.chave = 'projetos'
+  JOIN pipeline pvd ON pvd.id = vd.pipeline_id AND pvd.chave = 'vendas'
+  JOIN fase fv ON fv.id = vd.fase_id
+  JOIN fase fp ON fp.id = pj.fase_id
+  JOIN usuario uv ON uv.id = vd.responsavel_id
+  JOIN usuario up ON up.id = pj.responsavel_id
+ WHERE (to_jsonb(pj) ->> 'absorvido_por_id') IS NULL
+   AND pj.deletado_em IS NULL
+   AND fv.tipo_terminal IS DISTINCT FROM 'GANHO'
+ ORDER BY conflito, vd.titulo;
+
+ROLLBACK;

@@ -83,6 +83,14 @@ function Descricao({
         </>
       );
     case "VINCULO_PROJETO":
+      if (p.evento === "ciclo_unico_nao_unido") {
+        return (
+          <>
+            manteve separados, no ciclo único, a venda e o card de projetos da v1: a venda tinha saído do ganho
+            {typeof p.vendaFase === "string" ? <> (estava em “{p.vendaFase}”)</> : null}
+          </>
+        );
+      }
       if (p.evento === "ciclo_unico") {
         return <>uniu a venda e o card de projetos da v1 neste card (ciclo único): histórico dos dois juntos</>;
       }
