@@ -234,7 +234,7 @@ function paraLetras(content: NoTexto[] | undefined): Letra[] {
     if (n.type !== "text" || typeof n.text !== "string") continue;
     const marcas = new Set((n.marks ?? []).map((m) => m.type));
     // Sem quebra de linha nem caracteres de controle dentro do texto (o editor não tem "hard break").
-    const texto = n.text.replace(/\r\n?|\n/g, " ").replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, ""); // U+E001 e U+E002: reservados à âncora dos blocos
+    const texto = n.text.replace(/\r\n?|\n/g, " ").replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\uE001\uE002]/g, ""); // U+E001 e U+E002: reservados à âncora dos blocos
     for (const c of texto) letras.push({ c: c === "\t" ? " " : c, bold: marcas.has("bold"), italic: marcas.has("italic") });
   }
   return letras;

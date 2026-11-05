@@ -28,6 +28,12 @@ const SEM_LAYOUT = { calt: false, liga: false, clig: false, kern: false, ccmp: f
 
 const PAD_TABELA_V = 4;
 const PAD_TABELA_H = 5;
+/**
+ * Quantos títulos seguidos um título reserva junto consigo. Até aqui, nenhum fica órfão. Numa
+ * sequência maior a reserva para neste limite, senão cada título pediria o resto da sequência e
+ * sairia um por página.
+ */
+const TITULOS_JUNTOS = 3;
 
 type Fontes = { regular: PDFFont; negrito: PDFFont; italico: PDFFont; negritoItalico: PDFFont; capa?: { regular: PDFFont; negrito: PDFFont } };
 
@@ -288,17 +294,18 @@ export async function gerarPdf(doc: DocumentoPdf, template: TemplatePdf, opts: {
   const alturaDaLinhaDeTabela = (b: Extract<BlocoPdf, { tipo: "tabela" }>, textos: string[], negrito: boolean) =>
     Math.max(1, ...textos.map((t, i) => quebrarLinhas([{ texto: t, negrito }], est.tabela, f, limpar, b.colunas[i].largura * larguraUtil - PAD_TABELA_H * 2).length)) * est.tabela.tamanho * est.tabela.entrelinha + PAD_TABELA_V * 2;
 
-  /** Altura real do começo do bloco `i`, para o título que vem antes não ficar órfão. Título seguido de título soma os dois. */
-  const alturaDoComeco = (i: number): number => {
+  /** Altura real do começo do bloco `i`, para o título que vem antes não ficar órfão. Título seguido de título soma, até `TITULOS_JUNTOS`. */
+  const alturaDoComeco = (i: number, titulos = 1): number => {
     const b = blocos[i];
     const linhaDeTexto = est.texto.tamanho * est.texto.entrelinha;
     switch (b?.tipo) {
       case undefined:
         return 0;
       case "titulo": {
+        if (titulos >= TITULOS_JUNTOS) return 0;
         const e = estiloDoTitulo(b.nivel);
         const largura = larguraUtil - (e.recuo ?? 0);
-        return e.antes + quebrarLinhas(b.trechos, e, f, limpar, largura).length * e.tamanho * e.entrelinha + e.depois + alturaDoComeco(i + 1);
+        return e.antes + quebrarLinhas(b.trechos, e, f, limpar, largura).length * e.tamanho * e.entrelinha + e.depois + alturaDoComeco(i + 1, titulos + 1);
       }
       case "tabela":
         return est.tabela.antes + alturaDaLinhaDeTabela(b, b.colunas.map((c) => c.titulo), true) + alturaDaLinhaDeTabela(b, b.linhas[0] ?? b.total ?? [], !b.linhas[0]);

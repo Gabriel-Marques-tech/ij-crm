@@ -215,16 +215,17 @@ export function paraEnvio(f: FormularioEstruturado): FormularioEstruturado {
 /**
  * O que dá para gravar agora de um formulário com parte inválida (ao sair da tela, ao marcar
  * inviável): cada campo válido vai, e o inválido fica como estava em `salvo`. No cronograma, só
- * linha marcada como nova (`chaveNova`) pode ser descartada. Qualquer linha já gravada incompleta
- * mantém `salvo.entregas` inteiro: nada aqui apaga entrega gravada. `chaves` = linhas novas que foram junto.
+ * linha marcada como nova (`chaveNova`) pode ser descartada. Com alguma linha já gravada incompleta,
+ * vai `salvo.entregas` inteiro mais as linhas novas válidas: nada aqui apaga entrega gravada, e a
+ * nova não se perde por causa da outra. `chaves` = linhas novas que foram junto.
  */
 export function formularioGravavel(f: FormularioEstruturado, salvo: FormularioEstruturado): { form: FormularioEstruturado; chaves: string[] } {
   const ok = (e: EstruturadoEntrada) => interpretarEstruturado(e).ok;
   const valida = (en: FormularioEstruturado["entregas"][number]) => ok({ entregas: paraEnvio({ ...f, entregas: [en] }).entregas });
   const gravadaIncompleta = f.entregas.some((en) => !en.chaveNova && !valida(en));
-  const linhas = gravadaIncompleta ? [] : f.entregas.filter(valida);
+  const linhas = gravadaIncompleta ? [...salvo.entregas, ...f.entregas.filter((en) => en.chaveNova && valida(en))] : f.entregas.filter(valida);
   const entregas = paraEnvio({ ...f, entregas: linhas }).entregas;
-  const cabe = !gravadaIncompleta && ok({ entregas });
+  const cabe = ok({ entregas });
   return {
     form: {
       valor: ok({ valor: f.valor }) ? f.valor : salvo.valor,

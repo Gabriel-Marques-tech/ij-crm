@@ -116,6 +116,57 @@ describe("PainelProposta", () => {
     expect(acoes.salvarTextoAction).toHaveBeenCalledTimes(2);
   });
 
+  it("versão que falhou: 'tentar de novo' repete a versão, e o aviso não some até lá", async () => {
+    acoes.salvarVersaoAction.mockResolvedValueOnce({ ok: false, erro: "INESPERADO", ref: "a1b2c3d4" });
+    montar();
+    fireEvent.change(screen.getByLabelText("Nota da versão (opcional)"), { target: { value: "primeira" } });
+    fireEvent.click(screen.getByRole("button", { name: "Salvar versão" }));
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(screen.getByRole("alert")).toHaveTextContent("ref: a1b2c3d4");
+    expect(screen.getByText("A versão não foi salva.")).toBeInTheDocument();
+    expect(screen.queryByText("Rascunho salvo")).toBeNull();
+
+    acoes.salvarVersaoAction.mockResolvedValueOnce({ ok: true, revisao: 4, numero: 1 });
+    fireEvent.click(screen.getByRole("button", { name: "Tentar de novo" }));
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(acoes.salvarVersaoAction).toHaveBeenCalledTimes(2);
+    expect(acoes.salvarVersaoAction).toHaveBeenLastCalledWith("p1", 4, { documento: expect.objectContaining({ type: "doc" }), nota: "primeira" });
+    expect(screen.getByText("Versão v1 salva.")).toBeInTheDocument();
+    expect(screen.queryByText("A versão não foi salva.")).toBeNull();
+  });
+
+  it("versão que caiu por falta de rede também avisa e repete", async () => {
+    acoes.salvarVersaoAction.mockRejectedValueOnce(new Error("rede"));
+    montar();
+    fireEvent.click(screen.getByRole("button", { name: "Salvar versão" }));
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(screen.getByText("A versão não foi salva.")).toBeInTheDocument();
+    acoes.salvarVersaoAction.mockResolvedValueOnce({ ok: true, revisao: 4, numero: 1 });
+    fireEvent.click(screen.getByRole("button", { name: "Tentar de novo" }));
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(screen.getByText("Versão v1 salva.")).toBeInTheDocument();
+  });
+
+  it("versão que falhou e texto gravado depois: o aviso fica até a próxima tentativa, e 'tentar de novo' volta a ser só do texto", async () => {
+    acoes.salvarVersaoAction.mockResolvedValueOnce({ ok: false, erro: "INESPERADO", ref: "a1b2c3d4" });
+    acoes.salvarTextoAction.mockResolvedValueOnce({ ok: true, revisao: 5 });
+    montar();
+    fireEvent.click(screen.getByRole("button", { name: "Salvar versão" }));
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    fireEvent.change(screen.getByLabelText("texto"), { target: { value: "novo" } });
+    await act(() => vi.advanceTimersByTimeAsync(1500));
+    expect(screen.getByText("A versão não foi salva.")).toBeInTheDocument();
+
+    acoes.salvarTextoAction.mockResolvedValueOnce({ ok: false, erro: "INESPERADO", ref: "b2" });
+    fireEvent.change(screen.getByLabelText("texto"), { target: { value: "mais" } });
+    await act(() => vi.advanceTimersByTimeAsync(1500));
+    acoes.salvarTextoAction.mockResolvedValueOnce({ ok: true, revisao: 6 });
+    fireEvent.click(screen.getByRole("button", { name: "Tentar de novo" }));
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(acoes.salvarVersaoAction).toHaveBeenCalledTimes(1);
+    expect(acoes.salvarTextoAction).toHaveBeenCalledTimes(3);
+  });
+
   it("salvar versão manda o texto do editor e a nota; mostra o número", async () => {
     acoes.salvarVersaoAction.mockResolvedValue({ ok: true, revisao: 4, numero: 1 });
     montar();
@@ -198,9 +249,10 @@ describe("PainelProposta", () => {
         fireEvent.change(screen.getByLabelText(`Entrega ${n}: nome`), { target: { value: titulo } });
         fireEvent.change(screen.getByLabelText(`Entrega ${n}: duração`), { target: { value: "1 semana" } });
       };
+      const linhaNova = (titulo: string) => ({ titulo, dia: "", duracao: "1 semana", valor: "" });
       const limparData = (n: number) => fireEvent.change(screen.getByLabelText(`Entrega ${n}: data`), { target: { value: "" } });
 
-      it("B incompleta + D nova: as três gravadas continuam, e o valor válido vai", async () => {
+      it("B incompleta + D nova: as três gravadas continuam, a D entra, e o valor válido vai", async () => {
         acoes.salvarEstruturadoAction.mockResolvedValue({ ok: true, revisao: 5 });
         const { unmount } = montarSalvas();
         fireEvent.change(screen.getByPlaceholderText("ex.: 12.500,00"), { target: { value: "5.000,00" } });
@@ -209,10 +261,11 @@ describe("PainelProposta", () => {
         unmount();
         await act(() => vi.advanceTimersByTimeAsync(0));
         expect(acoes.salvarEstruturadoAction).toHaveBeenCalledTimes(1);
-        expect(acoes.salvarEstruturadoAction).toHaveBeenCalledWith("p1", 4, { ...vazio, valor: "5.000,00", entregas: salvas });
+        expect(acoes.salvarEstruturadoAction).toHaveBeenCalledWith("p1", 4, { ...vazio, valor: "5.000,00", entregas: [...salvas, linhaNova("D")] });
       });
 
-      it("A e C incompletas com D e E novas: nada de gravar cronograma diferente", async () => {
+      it("A e C incompletas com D e E novas: as gravadas ficam como estavam e as novas entram", async () => {
+        acoes.salvarEstruturadoAction.mockResolvedValue({ ok: true, revisao: 5 });
         const { unmount } = montarSalvas();
         limparData(1);
         limparData(3);
@@ -220,7 +273,7 @@ describe("PainelProposta", () => {
         nova(5, "E");
         unmount();
         await act(() => vi.advanceTimersByTimeAsync(0));
-        expect(acoes.salvarEstruturadoAction).not.toHaveBeenCalled();
+        expect(acoes.salvarEstruturadoAction).toHaveBeenCalledWith("p1", 4, { ...vazio, entregas: [...salvas, linhaNova("D"), linhaNova("E")] });
       });
 
       it("linha nova já gravada deixa de ser nova: incompleta depois, não é descartada", async () => {
@@ -256,7 +309,7 @@ describe("PainelProposta", () => {
         fireEvent.change(screen.getByLabelText(/Motivo/), { target: { value: "sem verba" } });
         fireEvent.click(screen.getAllByRole("button", { name: "Marcar inviável" }).at(-1)!);
         await act(() => vi.advanceTimersByTimeAsync(0));
-        expect(acoes.salvarEstruturadoAction).toHaveBeenCalledWith("p1", 4, { ...vazio, prazoDias: "30", entregas: salvas });
+        expect(acoes.salvarEstruturadoAction).toHaveBeenCalledWith("p1", 4, { ...vazio, prazoDias: "30", entregas: [...salvas, linhaNova("D")] });
         expect(acoes.marcarInviavelAction).toHaveBeenCalled();
       });
     });

@@ -2,8 +2,9 @@
  * Nome da empresa na capa (GAB-100): quebra em até 3 linhas, depois encolhe, e só por
  * último corta com reticências. Decide por uma estimativa de largura (sem as métricas da
  * fonte) para dar EXATAMENTE as mesmas linhas no PDF e na folha, que não mede igual.
- * A estimativa nunca fica abaixo da Poppins Bold (`nome-capa.test.ts` confere na fonte), então a
- * linha cabe na moldura. Pode quebrar antes do necessário em nome com muita letra larga. Puro.
+ * Para nomes em português a estimativa nunca fica abaixo da Poppins Bold (`nome-capa.test.ts` confere
+ * esses caracteres na fonte), então a linha cabe na moldura. Outros alfabetos não têm essa garantia.
+ * Pode quebrar antes do necessário em nome com muita letra larga. Puro.
  */
 export const TAMANHOS_NOME_CAPA = [19, 16, 14, 12] as const;
 const LINHAS_MAX = 3;
