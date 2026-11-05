@@ -120,6 +120,39 @@ describe("modelo da IJ", () => {
     }
   });
 
+  it("muitos títulos seguidos ocupam o espaço das páginas, em vez de um por página", async () => {
+    const blocos = Array.from({ length: 40 }, (_, i): DocumentoPdf["blocos"][number] => ({ tipo: "titulo", nivel: 2, trechos: [{ texto: `Titulo ${i}` }] }));
+    const t = await texto(await gerarPdf({ titulo: "T", blocos: [...blocos, { tipo: "paragrafo", trechos: [{ texto: "FIM" }] }] }, TEMPLATE_IJ));
+    expect(t.paginas).toBeLessThanOrEqual(4);
+    for (let i = 0; i < 40; i++) expect(t.texto.join(" ")).toContain(`Titulo ${i} `);
+  });
+
+  it("até três títulos seguidos não ficam órfãos, em qualquer ponto da página", async () => {
+    const enche = Array.from({ length: 900 }, (_, i) => `palavra${i}`).join(" ");
+    for (let n = 0; n < 16; n++) {
+      const blocos: DocumentoPdf["blocos"] = [
+        { tipo: "paragrafo", trechos: [{ texto: enche.slice(0, 3000 + n * 70) }] },
+        { tipo: "titulo", nivel: 2, trechos: [{ texto: "TITULOUM" }] },
+        { tipo: "titulo", nivel: 3, trechos: [{ texto: "TITULODOIS" }] },
+        { tipo: "titulo", nivel: 3, trechos: [{ texto: "TITULOTRES" }] },
+        { tipo: "paragrafo", trechos: [{ texto: "COMECODOTEXTO" }] },
+      ];
+      const t = await texto(await gerarPdf({ titulo: "T", blocos }, TEMPLATE_IJ));
+      const pag = (s: string) => t.texto.findIndex((p) => p.includes(s));
+      expect(pag("TITULOUM")).toBe(pag("COMECODOTEXTO"));
+    }
+  });
+
+  it("no fim de uma sequência longa, o último título ainda leva o começo do texto", async () => {
+    const titulos = Array.from({ length: 60 }, (_, i): DocumentoPdf["blocos"][number] => ({ tipo: "titulo", nivel: 2, trechos: [{ texto: `Titulo ${i}X` }] }));
+    for (let n = 0; n < 16; n++) {
+      const blocos: DocumentoPdf["blocos"] = [...titulos.slice(n), { tipo: "paragrafo", trechos: [{ texto: "COMECODOTEXTO" }] }];
+      const t = await texto(await gerarPdf({ titulo: "T", blocos }, TEMPLATE_IJ));
+      const pag = (s: string) => t.texto.findIndex((p) => p.includes(s));
+      expect(pag("Titulo 59X")).toBe(pag("COMECODOTEXTO"));
+    }
+  });
+
   it("marca de rascunho aparece na capa e nas páginas; sem marca, não aparece", async () => {
     const doc: DocumentoPdf = { titulo: "T", capa: { titulo: "A", empresa: "B", data: "C", endereco: "D" }, blocos: [{ tipo: "paragrafo", trechos: [{ texto: "x" }] }] };
     const com = await texto(await gerarPdf({ ...doc, marca: "RASCUNHO: prévia" }, TEMPLATE_IJ));
