@@ -474,6 +474,19 @@ infos abrem em painel.
   continua com o mesmo Markdown. `<!-- bloco:nenhum -->` registra que os dois saíram da folha. Na âncora
   de comentário, o bloco entra por um caractere reservado (`TOKEN_BLOCO`), nunca pelos dados nem pelo título; o MCP
   comenta o bloco citando o título. O diff compara a forma de exibição, com os blocos explícitos.
+- **Tabela livre** (GAB-102): nó `table` em `documento.ts`, só no nível de cima, sempre retangular, com a primeira linha de
+  cabeçalho, um parágrafo por célula (texto, negrito, itálico) e sem mesclar. Limites em `tabela.ts`: 100 linhas (com o
+  cabeçalho), 8 colunas e 1000 caracteres por célula. No Markdown é a tabela GFM padrão, com `| --- |` em cada coluna e
+  `<!-- total -->` no começo da 1ª célula da linha de total. **Total é só uma marca de quem escreve**: muda fundo e negrito, e
+  nada soma nem confere. Pipe na célula sai `\|`; `<br>` vira espaço; linha irregular alarga a tabela ou completa com vazias,
+  sem perder texto; `:---:` perde o alinhamento (o modelo é um só: 1ª coluna à esquerda, demais ao centro). Além dos limites, o
+  MCP recebe erro (`TABELA_GRANDE`), o editor recusa a edição com aviso, e a canonização (OCR) deixa como parágrafos `a | b`.
+  Documento antigo não muda: `a | b` em parágrafo continua texto. No PDF, a tabela quebra entre páginas repetindo o
+  cabeçalho, sem partir linha; só a linha maior que uma página inteira parte, para não sair texto da folha. A largura das
+  colunas é a mesma conta na folha e no PDF (`largurasDaTabela`). Em tela estreita, a tabela rola por dentro, e nunca a
+  página. Teclado: Tab anda entre células, Alt+F10 vai para os controles, Esc volta; Alt+Shift+setas, Alt+Shift+Backspace e
+  Delete, Alt+Shift+T. Na âncora de comentário, cada célula não vazia é um bloco do texto plano. No diff, uma linha por
+  linha da tabela, sem a régua, e `[linha de total]` no lugar da marca.
 - **Totais**: a tabela só mostra total de valor com parcela em todas as entregas e soma igual ao valor, e total de
   duração só com duração em todas as entregas e sem contradizer o prazo. O que não fecha vira aviso no cartão, sem travar.
 - **Duração**: a entrega tem `dia` ou `duracao` ("2 semanas"), nunca as duas. `dia` é `null` na que só tem duração;

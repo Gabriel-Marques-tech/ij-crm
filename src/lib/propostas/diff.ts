@@ -13,6 +13,10 @@
  * (a mesma regra de `documentoComBlocos`, por linha), para dizer o que aconteceu com eles:
  * sem marcador, os dois estão no fim; `bloco:nenhum`, nenhum dos dois. Aparecem em
  * palavras, e nunca pareados com texto: mover o bloco não é "texto alterado".
+ *
+ * Tabela (GAB-102): uma linha de diff por linha da tabela, com as palavras trocadas. A régua
+ * `| --- |` não aparece, e a marca de total sai por extenso no fim da linha. Parágrafo nunca
+ * começa por `|` no canônico (sai `\|`), então só tabela cai aqui.
  */
 import { MARCADORES_BLOCO, rotuloDaEntrega } from "./blocos-dados";
 import type { Estruturado } from "./estruturado";
@@ -99,10 +103,25 @@ function diffPalavras(antes: string, depois: string): { antes: Trecho[]; depois:
 
 const MARCADOR_NENHUM = "<!-- bloco:nenhum -->";
 
+const REGUA_DA_TABELA = /^\|( --- \|)+$/;
+const COM_TOTAL = /^\| <!-- total -->(?: (?!\|))?/;
+export const ROTULO_TOTAL = "[linha de total]";
+
+/** Linhas do Markdown como a pessoa lê: a régua da tabela (a 2ª linha do bloco) sai, e o total fica por extenso. */
+function linhasLegiveis(md: string): string[] {
+  const brutas = md.split("\n");
+  return brutas.flatMap((l, i) => {
+    if (l.trim() === "") return [];
+    const segundaDoBloco = i > 0 && brutas[i - 1].startsWith("|") && (i === 1 || brutas[i - 2].trim() === "");
+    if (segundaDoBloco && REGUA_DA_TABELA.test(l)) return [];
+    return [COM_TOTAL.test(l) ? `${l.replace(COM_TOTAL, "| ")} ${ROTULO_TOTAL}` : l];
+  });
+}
+
 /** Linhas do Markdown canônico com os blocos em lugares explícitos. */
 function linhas(md: string | null): string[] {
   if (md === null) return [];
-  const todas = md.split("\n").filter((l) => l.trim() !== "");
+  const todas = linhasLegiveis(md);
   const semMarcador = todas.filter((l) => l !== MARCADOR_NENHUM);
   if (semMarcador.length < todas.length || semMarcador.some((l) => Object.hasOwn(MARCADORES_BLOCO, l))) return semMarcador;
   return [...semMarcador, ...Object.keys(MARCADORES_BLOCO)];

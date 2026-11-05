@@ -58,6 +58,7 @@ import { criarPrazo, listarPrazosDoCard, marcarPrazoFeito } from "@/lib/prazos/p
 import { carregarPainelPara, INDICADORES } from "@/lib/painel/servico";
 import { DEFINICOES_PAINEL, VISIBILIDADE_PAINEL } from "@/lib/painel/definicoes";
 import { resolverPeriodo } from "@/lib/ranking/periodo";
+import { CELULA_MAX, TABELA_COLUNAS_MAX, TABELA_LINHAS_MAX } from "@/lib/propostas/tabela";
 import { MARKDOWN_MAX } from "@/lib/propostas/documento";
 import { DURACAO_MAX_CAMPO, estruturadoParaEntrada, type Estruturado, type EstruturadoEntrada } from "@/lib/propostas/estruturado";
 import { acoesPossiveis, ladoDaCaneta, MOTIVO_INVIAVEL_MAX, podeEditarProposta, type AcaoCaneta } from "@/lib/propostas/caneta";
@@ -648,7 +649,7 @@ const lerProposta = ferramenta({
       estruturado: estruturadoMcp(p.estruturado),
       rascunho: { por: p.rascunhoPor?.nome ?? null, em: p.rascunhoEm?.toISOString() ?? null, viaMcp: p.rascunhoViaMcp },
       versoes: p.versoes.map((v) => ({ numero: v.numero, nota: v.nota, autor: v.autor.nome, lado: v.autorLado ? ROTULO_AREA[v.autorLado] : null, em: v.criadoEm.toISOString(), viaMcp: v.viaMcp })),
-      formatacao: "Markdown aceito: # / ## / ### títulos, **negrito**, *itálico*, listas (- e 1.), --- linha. O resto (link, imagem, HTML, tabela, código) entra como texto.",
+      formatacao: `Markdown aceito: # / ## / ### títulos, **negrito**, *itálico*, listas (- e 1.), --- linha e tabela (| a | b | com | --- | --- | na 2ª linha; primeira linha é o cabeçalho; até ${TABELA_LINHAS_MAX} linhas, ${TABELA_COLUNAS_MAX} colunas e ${CELULA_MAX} caracteres por célula; só texto, negrito e itálico; pipe na célula: \\|; <!-- total --> no começo da 1ª célula marca a linha de total, sem somar nada). O resto (link, imagem, HTML, código) entra como texto. Ao comentar um trecho em célula, cite o texto da célula, sem o \\ do pipe.`,
       url: urlProposta(a.projeto_id),
     });
   },

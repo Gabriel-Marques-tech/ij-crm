@@ -7,6 +7,7 @@ import type { StatusProposta } from "@prisma/client";
 import { ladoDe, type PessoaComLado } from "@/lib/auth/areas";
 import { podeEscrever, temPapelMinimo } from "@/lib/auth/papeis";
 import { MOTIVO_INVIAVEL_MAX } from "./caneta";
+import { CELULA_MAX, TABELA_COLUNAS_MAX, TABELA_LINHAS_MAX } from "./tabela";
 
 export const ROTULO_STATUS_PROPOSTA: Record<StatusProposta, string> = {
   RASCUNHO: "Rascunho",
@@ -44,6 +45,7 @@ export type ErroProposta =
   | "SEM_PERMISSAO"
   | "CONTEUDO_INVALIDO"
   | "CONTEUDO_LONGO"
+  | "TABELA_GRANDE"
   | "NOTA_LONGA"
   | "SEM_MUDANCAS"
   | "VERSAO_NAO_ENCONTRADA"
@@ -85,8 +87,9 @@ export const MENSAGEM_ERRO_PROPOSTA: Record<ErroProposta, string> = {
   PROPOSTA_NAO_ENCONTRADA: "Este projeto ainda não tem proposta.",
   PROPOSTA_JA_EXISTE: "Este projeto já tem uma proposta (é uma por projeto).",
   SEM_PERMISSAO: "Só quem é de vendas e responsável pelo projeto (ou a gestão) cria a proposta. Você pode ler.",
-  CONTEUDO_INVALIDO: "Conteúdo inválido: use só a formatação do editor (títulos, negrito, itálico, listas e linha).",
+  CONTEUDO_INVALIDO: "Conteúdo inválido: use só a formatação do editor (títulos, negrito, itálico, listas, linha e tabela).",
   CONTEUDO_LONGO: "A proposta passou do tamanho máximo (100 mil caracteres).",
+  TABELA_GRANDE: `Uma tabela passou do limite: até ${TABELA_LINHAS_MAX} linhas, ${TABELA_COLUNAS_MAX} colunas e ${CELULA_MAX} caracteres por célula.`,
   NOTA_LONGA: `A nota da versão pode ter até ${NOTA_VERSAO_MAX} caracteres.`,
   SEM_MUDANCAS: "Nada mudou desde a última versão: não há o que salvar.",
   VERSAO_NAO_ENCONTRADA: "Versão não encontrada.",
