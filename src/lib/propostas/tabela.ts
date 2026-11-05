@@ -31,7 +31,7 @@ export function medirTabela(t: Tabela): MedidasTabela {
 }
 
 /** Acima disto, mais texto na célula não pede coluna mais larga: ele quebra em linhas. */
-const PESO_MAX = 30;
+const PESO_MAX = 14;
 const PESO_MIN = 4;
 
 /**

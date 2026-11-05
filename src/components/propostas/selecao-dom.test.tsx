@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { textoPlano } from "@/lib/propostas/ancora";
 import type { Documento } from "@/lib/propostas/documento";
+import { markdownParaDocumento } from "@/lib/propostas/markdown";
 import { DocumentoView } from "./documento-view";
 import { ancoraDaSelecaoDom } from "./selecao-dom";
 
@@ -74,5 +75,26 @@ describe("ancoraDaSelecaoDom: seleção do leitor → âncora no texto plano", (
     expect(ancoraDaSelecaoDom(raiz, plano, selecionar([fora, 0], [fora, 2]))).toBeNull();
     const t = textoDe(raiz.querySelector("p")!);
     expect(ancoraDaSelecaoDom(raiz, plano, selecionar([t, 1], [t, 1]))).toBeNull();
+  });
+});
+
+describe("seleção em tabela (GAB-102)", () => {
+  it("dentro da célula e atravessando células dá a mesma âncora do texto plano", () => {
+    const d = markdownParaDocumento("Antes.\n\n| Item | a\\|b |\n| --- | --- |\n|  | fim |");
+    const { texto } = textoPlano(d);
+    const { container } = render(<DocumentoView documento={d} destaques={[]} />);
+    const pedaco = (t: string) => [...container.querySelectorAll("[data-o]")].find((e) => e.textContent === t)!;
+    const selecionar = (de: Element, ate: Element) => {
+      const r = document.createRange();
+      r.setStart(de.firstChild!, 0);
+      r.setEnd(ate.firstChild!, ate.textContent!.length);
+      const s = window.getSelection()!;
+      s.removeAllRanges();
+      s.addRange(r);
+    };
+    selecionar(pedaco("a|b"), pedaco("a|b"));
+    expect(ancoraDaSelecaoDom(container, texto)?.trecho).toBe("a|b");
+    selecionar(pedaco("Item"), pedaco("fim"));
+    expect(ancoraDaSelecaoDom(container, texto)?.trecho).toBe("Item\na|b\nfim");
   });
 });

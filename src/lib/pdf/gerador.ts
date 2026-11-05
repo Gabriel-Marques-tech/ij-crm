@@ -406,7 +406,8 @@ export async function gerarPdf(doc: DocumentoPdf, template: TemplatePdf, opts: {
       cs.forEach((linhas, i) => {
         const col = b.colunas[i];
         const largCol = col.largura * larguraUtil;
-        let cy = y - padV;
+        // Centralizada na vertical, como no modelo e na folha.
+        let cy = y - padV - ((altura - padV * 2 - linhas.length * alturaLinha) / 2);
         for (const l of linhas) {
           cy -= alturaLinha;
           const largTexto = larguraDaLinha(l);

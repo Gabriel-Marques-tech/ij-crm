@@ -361,12 +361,14 @@
     border-collapse: collapse;
     font-size: 0.8125rem;
     line-height: 1.3;
-    min-width: max(100%, calc(var(--colunas, 1) * 64px));
+    min-width: max(100%, calc(var(--colunas, 1) * 54px));
     table-layout: fixed;
     text-align: left;
     text-indent: 0;
     width: 100%;
   }
+  /* No celular a coluna não aperta até partir toda palavra: a tabela rola. */
+  @media (max-width: 640px) { .proposta-texto .tabela-livre { min-width: max(100%, calc(var(--colunas, 1) * 76px)); } }
   .tabela-livre th,
   .tabela-livre td { border: 1px solid var(--border-strong); padding: 4px 5px; overflow-wrap: anywhere; vertical-align: middle; }
   .tabela-livre th { background: var(--surface-strong); font-weight: 600; }

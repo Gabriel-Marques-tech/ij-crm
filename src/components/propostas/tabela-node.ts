@@ -241,6 +241,29 @@ export function alternarTotal(editor: Pick<Editor, "state" | "view">) {
   return true;
 }
 
+export type LadoNovo = "acima" | "abaixo" | "esquerda" | "direita";
+
+/**
+ * Linha ou coluna nova, com o cursor nela: quem adiciona vai escrever ali, e "remover" logo em seguida
+ * tira a nova, e não a linha em que o cursor estava. Acima do cabeçalho não existe (ele é sempre a 1ª).
+ */
+export function adicionarNaTabela(editor: Editor, lado: LadoNovo): boolean {
+  const p = posicaoNaTabela(editor.state);
+  if (!p || (lado === "acima" && p.linha === 0)) return false;
+  const c = editor.commands;
+  const feito = lado === "acima" ? c.addRowBefore() : lado === "abaixo" ? c.addRowAfter() : lado === "esquerda" ? c.addColumnBefore() : c.addColumnAfter();
+  if (!feito) return false;
+  const atual = posicaoNaTabela(editor.state);
+  // A edição foi recusada pelo limite: o cursor fica onde estava.
+  if (!atual || (atual.linhas === p.linhas && atual.colunas === p.colunas)) return false;
+  const $celula = selectionCell(editor.state);
+  const tabela = $celula.node(-1);
+  const pos = $celula.start(-1) + TableMap.get(tabela).positionAt(p.linha + (lado === "abaixo" ? 1 : 0), p.coluna + (lado === "direita" ? 1 : 0), tabela);
+  const { state, view } = editor;
+  view.dispatch(state.tr.setSelection(TextSelection.near(state.doc.resolve(pos + 1))));
+  return true;
+}
+
 export const podeAdicionarLinha = (p: PosicaoNaTabela) => p.linhas < TABELA_LINHAS_MAX;
 export const podeAdicionarColuna = (p: PosicaoNaTabela) => p.colunas < TABELA_COLUNAS_MAX;
 
@@ -255,10 +278,10 @@ const atalhos = Extension.create({
       return p ? f(p) : false;
     };
     return {
-      "Alt-Shift-ArrowUp": naTabela((p) => p.linha > 0 && this.editor.commands.addRowBefore()),
-      "Alt-Shift-ArrowDown": naTabela(() => this.editor.commands.addRowAfter()),
-      "Alt-Shift-ArrowLeft": naTabela(() => this.editor.commands.addColumnBefore()),
-      "Alt-Shift-ArrowRight": naTabela(() => this.editor.commands.addColumnAfter()),
+      "Alt-Shift-ArrowUp": naTabela(() => adicionarNaTabela(this.editor, "acima")),
+      "Alt-Shift-ArrowDown": naTabela(() => adicionarNaTabela(this.editor, "abaixo")),
+      "Alt-Shift-ArrowLeft": naTabela(() => adicionarNaTabela(this.editor, "esquerda")),
+      "Alt-Shift-ArrowRight": naTabela(() => adicionarNaTabela(this.editor, "direita")),
       "Alt-Shift-Backspace": naTabela(() => this.editor.commands.deleteRow()),
       "Alt-Shift-Delete": naTabela(() => this.editor.commands.deleteColumn()),
       "Alt-Shift-t": naTabela(() => alternarTotal(this.editor)),
