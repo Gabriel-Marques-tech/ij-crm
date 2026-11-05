@@ -10,7 +10,7 @@ import { DocumentoView } from "./documento-view";
 import { EXTENSOES, jsonDoEditor } from "./editor-texto";
 import { documentoParaMarkdown, markdownParaDocumento } from "@/lib/propostas/markdown";
 import { TABELA_COLUNAS_MAX, TABELA_LINHAS_MAX, CELULA_MAX } from "@/lib/propostas/tabela";
-import { alternarTotal, inserirTabela, posicaoNaTabela } from "./tabela-node";
+import { adicionarNaTabela, alternarTotal, inserirTabela, posicaoNaTabela } from "./tabela-node";
 
 const doc: Documento = {
   type: "doc",
@@ -272,6 +272,31 @@ describe("tabela no editor (GAB-102)", () => {
     cursorEm(e, "Total");
     e.commands.addRowBefore();
     expect(lido(e)).toContain("|  |  |\n| <!-- total --> Total | a\\|b |");
+    e.destroy();
+  });
+
+  it("linha e coluna novas levam o cursor junto: remover em seguida tira a nova, e não a de antes", () => {
+    const e = editorCom(markdownParaDocumento("| a | b |\n| --- | --- |\n| c | d |\n| e | f |"));
+    cursorEm(e, "d");
+    expect(adicionarNaTabela(e, "abaixo")).toBe(true);
+    expect(posicaoNaTabela(e.state)).toMatchObject({ linha: 2, coluna: 1, linhas: 4 });
+    expect(e.commands.deleteRow()).toBe(true);
+    expect(lido(e)).toBe("| a | b |\n| --- | --- |\n| c | d |\n| e | f |");
+    cursorEm(e, "e");
+    adicionarNaTabela(e, "acima");
+    expect(posicaoNaTabela(e.state)).toMatchObject({ linha: 2, coluna: 0, linhas: 4 });
+    e.commands.deleteRow();
+    cursorEm(e, "c");
+    adicionarNaTabela(e, "direita");
+    expect(posicaoNaTabela(e.state)).toMatchObject({ linha: 1, coluna: 1, colunas: 3 });
+    e.commands.deleteColumn();
+    cursorEm(e, "d");
+    adicionarNaTabela(e, "esquerda");
+    expect(posicaoNaTabela(e.state)).toMatchObject({ linha: 1, coluna: 1, colunas: 3 });
+    e.commands.deleteColumn();
+    expect(lido(e)).toBe("| a | b |\n| --- | --- |\n| c | d |\n| e | f |");
+    cursorEm(e, "a");
+    expect(adicionarNaTabela(e, "acima")).toBe(false);
     e.destroy();
   });
 

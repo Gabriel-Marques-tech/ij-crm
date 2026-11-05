@@ -39,7 +39,7 @@ import { documentoDoEditor, documentoParaEditor, type Documento } from "@/lib/pr
 import { alternarBloco, BlocoDadosNode, blocosNoEditor } from "./bloco-dados-node";
 import { ancoraDaSelecao, chaveDestaques, DestaquesComentarios, type EntradaDestaques } from "./destaques-editor";
 import { Folha, type DadosCapa } from "./folha";
-import { alternarTotal, definirAvisoDaTabela, EXTENSOES_TABELA, inserirTabela, LinhaHorizontalForaDaTabela, podeAdicionarColuna, podeAdicionarLinha, posicaoNaTabela, ROTULO_BARRA_TABELA } from "./tabela-node";
+import { adicionarNaTabela, alternarTotal, definirAvisoDaTabela, EXTENSOES_TABELA, inserirTabela, LinhaHorizontalForaDaTabela, podeAdicionarColuna, podeAdicionarLinha, posicaoNaTabela, ROTULO_BARRA_TABELA, type LadoNovo } from "./tabela-node";
 
 /**
  * Editor rich text da proposta (Tiptap). Carrega SÓ as extensões do
@@ -113,6 +113,11 @@ function Botao({ ativo, rotulo, dica, onClick, children, desativado, largo, gran
   );
 }
 
+/** No toque não há dica ao passar o mouse: abaixo de 1024 px, o botão diz o que faz. */
+function RotuloTabela({ children }: { children: ReactNode }) {
+  return <span className="hidden max-lg:inline">{children}</span>;
+}
+
 /**
  * Aparece com o cursor na tabela, na barra fixa: visível no celular (sem hover) e alcançável pelo
  * teclado (Alt+F10 entra, Esc volta para a célula). As mesmas ações têm atalho (`tabela-node.ts`).
@@ -122,6 +127,10 @@ function BarraTabela({ editor, aviso }: { editor: Editor; aviso: string | null }
   if (!p) return aviso ? <p role="status" className="basis-full px-1 pt-1 text-xs text-warn">{aviso}</p> : null;
   const c = () => editor.chain().focus();
   const cabecalho = p.linha === 0;
+  const adicionar = (lado: LadoNovo) => {
+    adicionarNaTabela(editor, lado);
+    editor.view.focus();
+  };
   return (
     <div
       role="group"
@@ -132,24 +141,24 @@ function BarraTabela({ editor, aviso }: { editor: Editor; aviso: string | null }
       }}
     >
       <span className="eyebrow px-1">Tabela</span>
-      <Botao grande rotulo="Linha acima" dica={cabecalho ? "O cabeçalho é sempre a primeira linha" : "Linha acima (Alt+Shift+↑)"} desativado={cabecalho || !podeAdicionarLinha(p)} onClick={() => c().addRowBefore().run()}>
-        <ArrowUpToLine className="size-4" />
+      <Botao grande largo rotulo="Linha acima" dica={cabecalho ? "O cabeçalho é sempre a primeira linha" : "Linha acima (Alt+Shift+↑)"} desativado={cabecalho || !podeAdicionarLinha(p)} onClick={() => adicionar("acima")}>
+        <ArrowUpToLine className="size-4" /> <RotuloTabela>Acima</RotuloTabela>
       </Botao>
-      <Botao grande rotulo="Linha abaixo" dica="Linha abaixo (Alt+Shift+↓)" desativado={!podeAdicionarLinha(p)} onClick={() => c().addRowAfter().run()}>
-        <ArrowDownToLine className="size-4" />
+      <Botao grande largo rotulo="Linha abaixo" dica="Linha abaixo (Alt+Shift+↓)" desativado={!podeAdicionarLinha(p)} onClick={() => adicionar("abaixo")}>
+        <ArrowDownToLine className="size-4" /> <RotuloTabela>Abaixo</RotuloTabela>
       </Botao>
-      <Botao grande rotulo="Remover linha" dica="Remover linha (Alt+Shift+Backspace)" desativado={p.linhas <= 1} onClick={() => c().deleteRow().run()}>
-        <Rows2 className="size-4" />
+      <Botao grande largo rotulo="Remover linha" dica="Remover linha (Alt+Shift+Backspace)" desativado={p.linhas <= 1} onClick={() => c().deleteRow().run()}>
+        <Rows2 className="size-4" /> <RotuloTabela>Tirar linha</RotuloTabela>
       </Botao>
       <span aria-hidden className="mx-0.5 h-4 w-px bg-border" />
-      <Botao grande rotulo="Coluna à esquerda" dica="Coluna à esquerda (Alt+Shift+←)" desativado={!podeAdicionarColuna(p)} onClick={() => c().addColumnBefore().run()}>
-        <ArrowLeftToLine className="size-4" />
+      <Botao grande largo rotulo="Coluna à esquerda" dica="Coluna à esquerda (Alt+Shift+←)" desativado={!podeAdicionarColuna(p)} onClick={() => adicionar("esquerda")}>
+        <ArrowLeftToLine className="size-4" /> <RotuloTabela>À esquerda</RotuloTabela>
       </Botao>
-      <Botao grande rotulo="Coluna à direita" dica="Coluna à direita (Alt+Shift+→)" desativado={!podeAdicionarColuna(p)} onClick={() => c().addColumnAfter().run()}>
-        <ArrowRightToLine className="size-4" />
+      <Botao grande largo rotulo="Coluna à direita" dica="Coluna à direita (Alt+Shift+→)" desativado={!podeAdicionarColuna(p)} onClick={() => adicionar("direita")}>
+        <ArrowRightToLine className="size-4" /> <RotuloTabela>À direita</RotuloTabela>
       </Botao>
-      <Botao grande rotulo="Remover coluna" dica="Remover coluna (Alt+Shift+Delete)" desativado={p.colunas <= 1} onClick={() => c().deleteColumn().run()}>
-        <Columns2 className="size-4" />
+      <Botao grande largo rotulo="Remover coluna" dica="Remover coluna (Alt+Shift+Delete)" desativado={p.colunas <= 1} onClick={() => c().deleteColumn().run()}>
+        <Columns2 className="size-4" /> <RotuloTabela>Tirar coluna</RotuloTabela>
       </Botao>
       <span aria-hidden className="mx-0.5 h-4 w-px bg-border" />
       <Botao
@@ -166,8 +175,8 @@ function BarraTabela({ editor, aviso }: { editor: Editor; aviso: string | null }
       >
         <Sigma className="size-4" /> <span>Total</span>
       </Botao>
-      <Botao grande rotulo="Remover tabela" onClick={() => c().deleteTable().run()}>
-        <Trash2 className="size-4" />
+      <Botao grande largo rotulo="Remover tabela" onClick={() => c().deleteTable().run()}>
+        <Trash2 className="size-4" /> <RotuloTabela>Tirar tabela</RotuloTabela>
       </Botao>
       {aviso ? (
         <span role="status" className="basis-full px-1 text-xs text-warn">
