@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
+import type { BlocoPdf } from "@/lib/pdf/tipos";
 import { avisosDosDados } from "./blocos-dados";
+import { ESTRUTURADO_VAZIO } from "./estruturado";
 import { documentoPdfDaProposta, ENDERECO_IJ, formatarReais, nomeArquivoPdf } from "./pdf";
 
 const base = {
@@ -111,5 +113,37 @@ describe("documentoPdfDaProposta", () => {
     expect(formatarReais("1234567.5")).toBe("R$ 1.234.567,50");
     expect(nomeArquivoPdf('Site / "Padaria"', 2)).toBe("Proposta - Site Padaria - v2.pdf");
     expect(nomeArquivoPdf("Site", null)).toBe("Proposta - Site - rascunho.pdf");
+  });
+});
+
+describe("tabela livre (GAB-102)", () => {
+  const dados = (markdown: string) => ({ projeto: "P", empresa: "E", numero: 1, data: new Date("2026-11-04T12:00:00Z"), markdown, estruturado: ESTRUTURADO_VAZIO });
+  const tabela = (markdown: string) => documentoPdfDaProposta(dados(markdown)).blocos.find((b) => b.tipo === "tabela") as Extract<BlocoPdf, { tipo: "tabela" }>;
+
+  it("no lugar dela, com primeira coluna à esquerda, demais ao centro, larguras somando 1", () => {
+    const blocos = documentoPdfDaProposta(dados("Antes.\n\n| Item | Valor |\n| --- | --- |\n| Site | 10 |\n\nDepois.\n\n<!-- bloco:nenhum -->")).blocos;
+    expect(blocos.map((b) => b.tipo)).toEqual(["paragrafo", "tabela", "paragrafo"]);
+    const t = blocos[1] as Extract<BlocoPdf, { tipo: "tabela" }>;
+    expect(t.colunas.map((c) => c.alinhar)).toEqual(["esquerda", "centro"]);
+    expect(t.colunas.reduce((s, c) => s + c.largura, 0)).toBeCloseTo(1);
+  });
+
+  it("negrito e itálico chegam às células e ao cabeçalho", () => {
+    const t = tabela("| **A** | b |\n| --- | --- |\n| *c* | d |");
+    expect(t.colunas[0].titulo).toEqual([{ texto: "A", negrito: true }]);
+    expect(t.linhas[0][0]).toEqual([{ texto: "c", italico: true }]);
+  });
+
+  it("total é só a marca de quem escreveu, em qualquer linha do corpo; o texto sai como está, sem soma", () => {
+    const t = tabela("| a | b |\n| --- | --- |\n| x | 1 |\n| <!-- total --> Subtotal | 999 |\n| y | 2 |\n| <!-- total --> Total | 3 |");
+    expect(t.totais).toEqual([1, 3]);
+    expect(t.linhas[1][1]).toEqual([{ texto: "999" }]);
+    expect(t.total).toBeUndefined();
+    expect(tabela("| a |\n| --- |\n| x |").totais).toBeUndefined();
+  });
+
+  it("tabela só com cabeçalho e com célula vazia não quebram", () => {
+    expect(tabela("| a |  |\n| --- | --- |").linhas).toEqual([]);
+    expect(tabela("| a |  |\n| --- | --- |").colunas[1].titulo).toEqual([]);
   });
 });

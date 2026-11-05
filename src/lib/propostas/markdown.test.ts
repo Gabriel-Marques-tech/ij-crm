@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { documentoComBlocos, documentoDoEditor, herdarBlocos, lerDocumento, normalizarDocumento, type Bloco, type Documento, type NoTexto } from "./documento";
-import { documentoParaMarkdown, markdownParaDocumento, normalizarMarkdown } from "./markdown";
+import { documentoComBlocos, documentoDoEditor, herdarBlocos, lerDocumento, normalizarDocumento, textoDoDocumento, type Bloco, type Documento, type NoTexto, type Paragrafo, type Tabela } from "./documento";
+import { documentoParaMarkdown, markdownParaDocumento, motivoTabelaForaDoLimite, normalizarMarkdown } from "./markdown";
+import { CELULA_MAX, TABELA_COLUNAS_MAX, TABELA_LINHAS_MAX } from "./tabela";
 
 const t = (text: string, ...marks: ("bold" | "italic")[]): NoTexto => (marks.length ? { type: "text", text, marks: marks.map((type) => ({ type })) } : { type: "text", text });
 const p = (...content: NoTexto[]): Bloco => ({ type: "paragraph", content });
@@ -109,9 +110,9 @@ describe("Markdown de fora (MCP) vira o subconjunto; o resto entra como texto li
     expect(normalizarMarkdown("Título\n======\n\n__forte__ _ênfase_\n\n* a\n* b\n\n#### fundo")).toBe("# Título\n\n**forte** *ênfase*\n\n- a\n- b\n\n### fundo");
   });
 
-  it("citação, código e tabela: conteúdo preservado como parágrafos de texto", () => {
-    const d = markdownParaDocumento("> citado\n\n```\nlinha 1\nlinha 2\n```\n\n| a | b |\n|---|---|\n| 1 | 2 |");
-    expect(d).toEqual(doc(p(t("citado")), p(t("linha 1")), p(t("linha 2")), p(t("a | b")), p(t("1 | 2"))));
+  it("citação e código: conteúdo preservado como parágrafos de texto", () => {
+    const d = markdownParaDocumento("> citado\n\n```\nlinha 1\nlinha 2\n```");
+    expect(d).toEqual(doc(p(t("citado")), p(t("linha 1")), p(t("linha 2"))));
   });
 
   it("quebra de linha simples dentro do parágrafo vira espaço", () => {
@@ -163,7 +164,7 @@ function gerador(semente: number) {
 
 const PEDACOS = ["a", "b", "ção", "R$", "10", "1.", "2)", " ", " ", " ", "*", "**", "_", "#", "-", "+", ">", "<", "[", "]", "(", ")", "!", "\\", "`", "~", "&", ";", ":", ".", ",", "|", "=", "'", '"', "é", "😀"];
 
-function docAleatorio(r: () => number): Documento {
+function docAleatorio(r: () => number, comTabelas = false): Documento {
   const inline = (): NoTexto[] => {
     const n = 1 + Math.floor(r() * 5);
     return Array.from({ length: n }, () => {
@@ -174,8 +175,21 @@ function docAleatorio(r: () => number): Documento {
       return t(texto, ...marks);
     });
   };
+  const tabela = (): Bloco => {
+    const colunas = 1 + Math.floor(r() * 4);
+    const linhas = 1 + Math.floor(r() * 4);
+    return {
+      type: "table",
+      content: Array.from({ length: linhas }, (_, i) => ({
+        type: "tableRow" as const,
+        ...(r() < 0.3 ? { attrs: { total: true as const } } : {}),
+        content: Array.from({ length: colunas }, () => ({ type: (i === 0 ? "tableHeader" : "tableCell") as "tableHeader" | "tableCell", content: [r() < 0.2 ? { type: "paragraph" as const } : { type: "paragraph" as const, content: inline() }] as [Paragrafo] })),
+      })),
+    };
+  };
   const bloco = (nivel: number): Bloco => {
     const x = r();
+    if (nivel === 0 && comTabelas && r() < 0.2) return tabela();
     if (x < 0.45 || nivel > 2) return p(...inline());
     if (x < 0.6) return { type: "heading", attrs: { level: (1 + Math.floor(r() * 3)) as 1 | 2 | 3 }, content: inline() };
     if (x < 0.65) return { type: "horizontalRule" };
@@ -205,9 +219,23 @@ describe("propriedade: qualquer documento normalizado faz ida e volta exata", ()
     }
   });
 
+  it("2000 documentos aleatórios com tabelas: pipes, marcas e células vazias voltam iguais", () => {
+    const r = gerador(Number(process.env.SEMENTE ?? 11));
+    let tabelas = 0;
+    for (let i = 0; i < Number(process.env.N ?? 2000); i++) {
+      const d = docAleatorio(r, true);
+      tabelas += d.content.filter((b) => b.type === "table").length;
+      const md = documentoParaMarkdown(d);
+      const volta = markdownParaDocumento(md);
+      expect(JSON.stringify(volta), md).toBe(JSON.stringify(d));
+      expect(documentoParaMarkdown(volta)).toBe(md);
+    }
+    expect(tabelas).toBeGreaterThan(500);
+  });
+
   it("Markdown arbitrário: a forma canônica é ponto fixo (md → canônico → canônico)", () => {
     const r = gerador(7);
-    const linhas = ["# t", "- a", "1. b", "  - c", "> q", "**x** _y_", "***z***", "---", "", "", "a*b*c", "<b>h</b>", "[l](u)", "`c`", "\\*", "x  ", "    code", "| a | b |", "|---|---|"];
+    const linhas = ["# t", "- a", "1. b", "  - c", "> q", "**x** _y_", "***z***", "---", "", "", "a*b*c", "<b>h</b>", "[l](u)", "`c`", "\\*", "x  ", "    code", "| a | b |", "|---|---|", "| 1 |", "| 1 | 2 | 3 |", "a | b", "--- | ---", "| <!-- total --> c | d |", "<!-- bloco:cronograma -->", "<!-- total -->", "| a\\|b |"];
     for (let i = 0; i < 1000; i++) {
       const md = Array.from({ length: 1 + Math.floor(r() * 8) }, () => linhas[Math.floor(r() * linhas.length)]).join("\n");
       const um = normalizarMarkdown(md);
@@ -327,5 +355,186 @@ describe("blocos móveis (GAB-100)", () => {
     expect(lerDocumento({ type: "doc", content: [{ type: "blocoDados", attrs: { tipo: "outro" } }] })).toBeNull();
     const dentro = lerDocumento({ type: "doc", content: [{ type: "bulletList", content: [{ type: "listItem", content: [p("a"), b("cronograma")] }] }] });
     expect(JSON.stringify(dentro)).not.toContain("blocoDados");
+  });
+});
+
+describe("tabela (GAB-102)", () => {
+  const celula = (tipo: "tableHeader" | "tableCell", ...content: NoTexto[]) => ({ type: tipo, content: [content.length ? { type: "paragraph" as const, content } : { type: "paragraph" as const }] as [Paragrafo] });
+  const tabela = (cabecalho: NoTexto[][], ...corpo: (NoTexto[][] | { total: NoTexto[][] })[]): Tabela => ({
+    type: "table",
+    content: [
+      { type: "tableRow", content: cabecalho.map((c) => celula("tableHeader", ...c)) },
+      ...corpo.map((l) => (Array.isArray(l) ? { type: "tableRow" as const, content: l.map((c) => celula("tableCell", ...c)) } : { type: "tableRow" as const, attrs: { total: true as const }, content: l.total.map((c) => celula("tableCell", ...c)) })),
+    ],
+  });
+
+  it("formato padrão, com negrito, itálico, célula vazia e marca de total: ida e volta exata", () => {
+    idaEVolta(
+      doc(p(t("antes")), tabela([[t("Item")], [t("Valor")]], [[t("Site", "bold")], [t("R$ 10", "italic")]], [[], [t("x")]], { total: [[t("Total")], [t("R$ 10")]] }), p(t("depois"))),
+      "antes\n\n| Item | Valor |\n| --- | --- |\n| **Site** | *R$ 10* |\n|  | x |\n| <!-- total --> Total | R$ 10 |\n\ndepois",
+    );
+  });
+
+  it("total com a primeira célula vazia; tabela só com cabeçalho; tabela toda vazia não some", () => {
+    idaEVolta(doc(tabela([[t("A")], [t("B")]], { total: [[], [t("9")]] })), "| A | B |\n| --- | --- |\n| <!-- total --> | 9 |");
+    idaEVolta(doc(tabela([[t("A")]])), "| A |\n| --- |");
+    idaEVolta(doc(tabela([[], []], [[], []])), "|  |  |\n| --- | --- |\n|  |  |");
+  });
+
+  it("pipe, barra invertida e o que parece Markdown na célula continuam texto", () => {
+    for (const texto of ["a|b", "|", "||", "a\\|b", "\\", "x\\", "<!-- total -->", "<!-- bloco:cronograma -->", "---", "# t", "- i", "1. x", "**n**", "`c`", "<br>", "&amp;", ":---:"]) {
+      const d = normalizarDocumento(doc(tabela([[t(texto)], [t("b")]], [[t(texto)], [t(texto, "bold")]])));
+      const md = documentoParaMarkdown(d);
+      expect(markdownParaDocumento(md), md).toEqual(d);
+      expect(normalizarMarkdown(md)).toBe(md);
+    }
+  });
+
+  it("texto com marca de total só marca a linha quando é o marcador de verdade, no começo da 1ª célula", () => {
+    const [b] = markdownParaDocumento("| a | b |\n| --- | --- |\n| x | <!-- total --> |\n| \\<!-- total --> y | z |").content as Tabela[];
+    expect(b.content[1].attrs).toBeUndefined();
+    expect(b.content[1].content[1].content[0].content).toEqual([t("<!-- total -->")]);
+    expect(b.content[2].attrs).toBeUndefined();
+    expect(b.content[2].content[0].content[0].content).toEqual([t("<!-- total --> y")]);
+  });
+
+  it("cabeçalho nunca é total: a marca nele fica como texto", () => {
+    const [b] = markdownParaDocumento("| <!-- total --> a |\n| --- |").content as Tabela[];
+    expect(b.content[0].attrs).toBeUndefined();
+    expect(b.content[0].content[0].content[0].content).toEqual([t("<!-- total --> a")]);
+  });
+
+  it("tabela irregular: nenhuma célula se perde, e a forma canônica é retangular", () => {
+    // O `marked` cortaria o "3" e o "4".
+    expect(normalizarMarkdown("| a | b |\n|---|---|\n| 1 | 2 | 3 | 4 |\n| 5 |")).toBe("| a | b |  |  |\n| --- | --- | --- | --- |\n| 1 | 2 | 3 | 4 |\n| 5 |  |  |  |");
+    expect(normalizarMarkdown("a | b\n--- | ---\n1 | 2")).toBe("| a | b |\n| --- | --- |\n| 1 | 2 |");
+    expect(normalizarMarkdown("|a|b|\n|:--|--:|\n|1|2|")).toBe("| a | b |\n| --- | --- |\n| 1 | 2 |");
+  });
+
+  it("régua que não bate com o cabeçalho não é tabela: entra como texto, sem perder nada", () => {
+    const d = markdownParaDocumento("| a | b |\n| --- |\n| 1 | 2 |");
+    expect(d.content.every((b) => b.type === "paragraph")).toBe(true);
+    const texto = JSON.stringify(d);
+    for (const c of ["a", "b", "1", "2"]) expect(texto).toContain(c);
+    const canonico = documentoParaMarkdown(d);
+    expect(normalizarMarkdown(canonico)).toBe(canonico);
+  });
+
+  it("<br> na célula vira espaço; pipe escapado não divide; texto com pipe em parágrafo não muda", () => {
+    expect(normalizarMarkdown("| a<br>b<br/>c | d\\|e |\n| --- | --- |")).toBe("| a b c | d\\|e |\n| --- | --- |");
+    expect(normalizarMarkdown("a | b")).toBe("a | b");
+  });
+
+  it("marcador de bloco colado na tabela, antes e depois, continua bloco, e a tabela, tabela", () => {
+    const d = markdownParaDocumento("<!-- bloco:investimento -->\n| a |\n| --- |\n| 1 |\n<!-- bloco:cronograma -->");
+    expect(d.content.map((b) => b.type)).toEqual(["blocoDados", "table", "blocoDados"]);
+    const md = documentoParaMarkdown(d);
+    expect(md).toBe("<!-- bloco:investimento -->\n\n| a |\n| --- |\n| 1 |\n\n<!-- bloco:cronograma -->");
+    expect(markdownParaDocumento(md)).toEqual(d);
+  });
+
+  it("marcador de bloco dentro da célula é texto: nenhum bloco nasce daí", () => {
+    const d = markdownParaDocumento("| <!-- bloco:cronograma --> |\n| --- |");
+    expect(d.content.map((b) => b.type)).toEqual(["table"]);
+    expect(documentoParaMarkdown(d)).toBe("| \\<!-- bloco:cronograma --> |\n| --- |");
+  });
+
+  it("tabela no fim com os blocos na posição padrão: o marcador padrão não se escreve", () => {
+    const d = normalizarDocumento(doc(tabela([[t("a")]]), { type: "blocoDados", attrs: { tipo: "cronograma" } }, { type: "blocoDados", attrs: { tipo: "investimento" } }));
+    expect(documentoParaMarkdown(d)).toBe("| a |\n| --- |");
+  });
+
+  it("dentro de lista não é do subconjunto: vira parágrafos, sem perder texto (nem no JSON)", () => {
+    const md = normalizarMarkdown("- item\n\n  | a | b |\n  | --- | --- |\n  | 1 | 2 |");
+    expect(md).not.toContain("---");
+    expect(md).toContain("a | b");
+    expect(md).toContain("1 | 2");
+    const d = lerDocumento(doc({ type: "bulletList", content: [item(p(t("i")), tabela([[t("a")], [t("b")]]))] }))!;
+    expect(documentoParaMarkdown(d)).toBe("- i\n\n  a | b");
+  });
+
+  it("citação solta no nível de cima leva a tabela junto", () => {
+    expect(markdownParaDocumento("> | a |\n> | --- |").content.map((b) => b.type)).toEqual(["table"]);
+  });
+
+  it("documento antigo não muda: Markdown com pipes continua ponto fixo e sem tabela", () => {
+    for (const antigo of ["a | b\n\n1 | 2", "\\| a | b |", "a | b\n\n\\--- | ---", "- a | b\n- c | d", "# Fase | 1\n\ntexto | fim", "\\---|---"]) {
+      expect(normalizarMarkdown(antigo)).toBe(antigo);
+      expect(markdownParaDocumento(antigo).content.some((b) => b.type === "table")).toBe(false);
+    }
+  });
+
+  it("limites: dentro passa; fora vira parágrafos na canonização (OCR não quebra) e o motivo é conhecido (MCP)", () => {
+    const md = (linhas: number, colunas: number, texto = "x") => {
+      const l = `| ${Array.from({ length: colunas }, () => texto).join(" | ")} |`;
+      return [l, `| ${Array.from({ length: colunas }, () => "---").join(" | ")} |`, ...Array.from({ length: linhas - 1 }, () => l)].join("\n");
+    };
+    expect(motivoTabelaForaDoLimite(md(TABELA_LINHAS_MAX, TABELA_COLUNAS_MAX))).toBeNull();
+    expect(markdownParaDocumento(md(TABELA_LINHAS_MAX, TABELA_COLUNAS_MAX)).content.map((b) => b.type)).toEqual(["table"]);
+    expect(motivoTabelaForaDoLimite(md(1, 1, "y".repeat(CELULA_MAX)))).toBeNull();
+    for (const fora of [md(TABELA_LINHAS_MAX + 1, 2), md(2, TABELA_COLUNAS_MAX + 1), md(2, 1, "y".repeat(CELULA_MAX + 1))]) {
+      expect(motivoTabelaForaDoLimite(fora)).toMatch(/até/);
+      const d = markdownParaDocumento(fora);
+      expect(d.content.every((b) => b.type === "paragraph")).toBe(true);
+      const c = documentoParaMarkdown(d);
+      expect(normalizarMarkdown(c)).toBe(c);
+    }
+  });
+
+  it("OCR: texto com tabela passa pela canonização, estável e sem bloco novo", () => {
+    const ocr = "PROPOSTA\nCliente: ACME <acme@x.com>\n\n| a | b |\n|---|---|\n| 1 | 2 | 3 |\n\n| só cabeçalho |\n\n```\ncódigo\n```";
+    const md = normalizarMarkdown(ocr);
+    expect(md).toContain("| a | b |  |");
+    expect(md).not.toContain("bloco:");
+    expect(normalizarMarkdown(md)).toBe(md);
+  });
+});
+
+describe("lerDocumento com tabela (o JSON do editor)", () => {
+  const cel = (type: string, texto?: string, attrs?: object) => ({ type, ...(attrs ? { attrs } : {}), content: [texto ? { type: "paragraph", content: [{ type: "text", text: texto }] } : { type: "paragraph" }] });
+  const linha = (cels: object[], attrs?: object) => ({ type: "tableRow", ...(attrs ? { attrs } : {}), content: cels });
+  const docTabela = (...linhas: object[]) => ({ type: "doc", content: [{ type: "table", content: linhas }] });
+
+  it("atributos do Tiptap somem, e só a marca de total fica", () => {
+    const d = lerDocumento(docTabela(linha([cel("tableHeader", "a", { colspan: 1, rowspan: 1, colwidth: null })], { total: false }), linha([cel("tableCell", "b", { colspan: 1, rowspan: 1, colwidth: null })], { total: true })));
+    expect(d).toEqual({ type: "doc", content: [{ type: "table", content: [{ type: "tableRow", content: [{ type: "tableHeader", content: [{ type: "paragraph", content: [{ type: "text", text: "a" }] }] }] }, { type: "tableRow", attrs: { total: true }, content: [{ type: "tableCell", content: [{ type: "paragraph", content: [{ type: "text", text: "b" }] }] }] }] }] });
+  });
+
+  it("primeira linha vira cabeçalho, sem total; as demais, células; linhas curtas completam", () => {
+    const d = lerDocumento(docTabela(linha([cel("tableCell", "a"), cel("tableCell", "b")], { total: true }), linha([cel("tableHeader", "c")])))!;
+    const [t0] = d.content as Tabela[];
+    expect(t0.content[0].attrs).toBeUndefined();
+    expect(t0.content.map((l) => l.content.map((c) => c.type))).toEqual([["tableHeader", "tableHeader"], ["tableCell", "tableCell"]]);
+  });
+
+  it("recusa célula mesclada, bloco que não é parágrafo na célula e tipo estranho", () => {
+    expect(lerDocumento(docTabela(linha([cel("tableHeader", "a", { colspan: 2 })])))).toBeNull();
+    expect(lerDocumento(docTabela(linha([cel("tableHeader", "a", { rowspan: 2 })])))).toBeNull();
+    expect(lerDocumento(docTabela(linha([{ type: "tableHeader", content: [{ type: "heading", attrs: { level: 1 } }] }])))).toBeNull();
+    expect(lerDocumento(docTabela({ type: "outra", content: [] }))).toBeNull();
+  });
+
+  it("vários parágrafos na célula viram um, sem perder texto", () => {
+    const d = lerDocumento(docTabela(linha([{ type: "tableHeader", content: [{ type: "paragraph", content: [{ type: "text", text: "a" }] }, { type: "paragraph", content: [{ type: "text", text: "b" }] }] }])))!;
+    expect(documentoParaMarkdown(d)).toBe("| a b |\n| --- |");
+  });
+
+  it("recusa além dos limites: o editor não gera, e o Markdown não representaria", () => {
+    const larga = linha(Array.from({ length: TABELA_COLUNAS_MAX + 1 }, () => cel("tableHeader", "a")));
+    expect(lerDocumento(docTabela(larga))).toBeNull();
+    const alta = Array.from({ length: TABELA_LINHAS_MAX + 1 }, () => linha([cel("tableCell", "a")]));
+    expect(lerDocumento(docTabela(...alta))).toBeNull();
+    expect(lerDocumento(docTabela(linha([cel("tableHeader", "x".repeat(CELULA_MAX + 1))])))).toBeNull();
+    expect(lerDocumento(docTabela(linha([cel("tableHeader", "x".repeat(CELULA_MAX))])))).not.toBeNull();
+  });
+
+  it("quebra de linha, tab e controle em célula são normalizados como no parágrafo", () => {
+    const d = lerDocumento(docTabela(linha([cel("tableHeader", "a\nb\t c\u0007")])))!;
+    expect(documentoParaMarkdown(d)).toBe("| a b c |\n| --- |");
+  });
+
+  it("texto corrido inclui as células", () => {
+    const d = markdownParaDocumento("| a | b |\n| --- | --- |\n| c |  |");
+    expect(textoDoDocumento(d)).toBe("a\nb\nc");
   });
 });

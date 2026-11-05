@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { inflateSync } from "node:zlib";
+import { PDFDocument } from "pdf-lib";
 import { extractText, getDocumentProxy } from "unpdf";
 import { describe, expect, it } from "vitest";
 import { gerarPdf, limparTexto } from "./gerador";
@@ -193,6 +195,109 @@ describe("modelo da IJ", () => {
     const bytes = await gerarPdf({ titulo: "T", capa: { titulo: "A", empresa: "B", data: "C", endereco: "D" }, blocos }, TEMPLATE_IJ);
     expect(performance.now() - ini).toBeLessThan(5000);
     expect(bytes.length).toBeLessThan(2_000_000);
+  });
+});
+
+describe("tabela grande (GAB-102)", () => {
+  type Item = { str: string; transform: number[]; width: number };
+  async function paginas(bytes: Uint8Array) {
+    const doc = await getDocumentProxy(new Uint8Array(bytes));
+    return Promise.all(Array.from({ length: doc.numPages }, async (_, i) => (await (await doc.getPage(i + 1)).getTextContent()).items as Item[]));
+  }
+  const colunas = (n: number, titulo = (j: number) => `Col${j}`): Extract<DocumentoPdf["blocos"][number], { tipo: "tabela" }>["colunas"] => Array.from({ length: n }, (_, j) => ({ titulo: titulo(j), largura: 1 / n }));
+  const { margem, largura, altura } = TEMPLATE_IJ.pagina;
+
+  it("quebra entre páginas repetindo o cabeçalho, sem partir linha", async () => {
+    const linhas = Array.from({ length: 100 }, (_, i) => [`LINHA${i}`, `b${i} ${"palavra ".repeat(30)}`]);
+    const t = await paginas(await gerarPdf({ titulo: "T", blocos: [{ tipo: "tabela", colunas: colunas(2), linhas }] }, TEMPLATE_IJ));
+    expect(t.length).toBeGreaterThan(2);
+    for (const p of t) expect(p.some((i) => i.str.includes("Col0"))).toBe(true);
+    const achadas = t.flatMap((p) => p.map((i) => i.str)).join(" ");
+    for (let i = 0; i < 100; i++) expect(achadas).toContain(`LINHA${i}`);
+    // Nenhuma linha de tabela começa numa página e termina na outra: cada célula tem 'b<i>' junto do rótulo.
+    for (const p of t) {
+      const rotulos = p.filter((i) => i.str.startsWith("LINHA")).map((i) => i.str.slice(5));
+      for (const n of rotulos) expect(p.some((i) => i.str.startsWith(`b${n} `))).toBe(true);
+    }
+  });
+
+  it("palavra longa quebra dentro da célula; muitas colunas não saem da página", async () => {
+    const linhas = [Array.from({ length: 8 }, (_, j) => `${"W".repeat(60)}${j}`)];
+    const [p] = await paginas(await gerarPdf({ titulo: "T", blocos: [{ tipo: "tabela", colunas: colunas(8), linhas }] }, TEMPLATE_IJ));
+    const direita = largura - margem.direita;
+    for (const i of p) {
+      if (i.str.includes("WW")) {
+        expect(i.transform[4]).toBeGreaterThanOrEqual(margem.esquerda);
+        expect(i.transform[4] + i.width).toBeLessThanOrEqual(direita);
+        expect(i.width).toBeLessThanOrEqual((largura - margem.esquerda - margem.direita) / 8);
+      }
+    }
+    expect(p.map((i) => i.str).join("").replace(/\s/g, "")).toContain(`${"W".repeat(60)}7`.slice(-20));
+  });
+
+  it("linha maior que a página inteira parte só ela, sem texto fora da folha", async () => {
+    const enorme = Array.from({ length: 500 }, (_, i) => `t${i}`).join(" ");
+    const blocos: DocumentoPdf["blocos"] = [{ tipo: "tabela", colunas: colunas(8), linhas: [Array.from({ length: 8 }, () => enorme), ["fim", "", "", "", "", "", "", ""]] }];
+    const t = await paginas(await gerarPdf({ titulo: "T", blocos }, TEMPLATE_IJ));
+    expect(t.length).toBeGreaterThan(1);
+    const texto = t.flatMap((p) => p.map((i) => i.str)).join(" ");
+    expect(texto).toContain("t499");
+    expect(texto).toContain("fim");
+    for (const p of t) {
+      for (const i of p) {
+        expect(i.transform[5]).toBeGreaterThanOrEqual(margem.base);
+        expect(i.transform[5]).toBeLessThanOrEqual(altura);
+      }
+      expect(p.some((i) => i.str.includes("Col7"))).toBe(true);
+    }
+  });
+
+  it("cabeçalho enorme não se repete nem deixa página em branco", async () => {
+    const enorme = Array.from({ length: 900 }, (_, i) => `c${i}`).join(" ");
+    const linhas = Array.from({ length: 60 }, (_, i) => [`LINHA${i}`]);
+    const t = await paginas(await gerarPdf({ titulo: "T", blocos: [{ tipo: "tabela", colunas: colunas(1, () => enorme), linhas }] }, TEMPLATE_IJ));
+    const texto = t.flatMap((p) => p.map((i) => i.str)).join(" ");
+    expect(texto).toContain("c899");
+    expect(texto).toContain("LINHA59");
+    for (const p of t) expect(p.length).toBeGreaterThan(0);
+    expect(t.filter((p) => p.some((i) => i.str.includes("c899"))).length).toBe(1);
+  });
+
+  it("trechos: negrito e itálico nas células; linha de total em qualquer posição; texto igual ao escrito", async () => {
+    const bytes = await gerarPdf(
+      {
+        titulo: "T",
+        blocos: [
+          {
+            tipo: "tabela",
+            colunas: [{ titulo: [{ texto: "Item", italico: true }], largura: 0.5 }, { titulo: "Valor", largura: 0.5, alinhar: "centro" }],
+            linhas: [[[{ texto: "forte", negrito: true }, { texto: " e " }, { texto: "inclinado", italico: true }], "10"], ["Subtotal", "999"], [[], "20"]],
+            totais: [1],
+          },
+        ],
+      },
+      TEMPLATE_IJ,
+    );
+    const [p] = await paginas(bytes);
+    const texto = p.map((i) => i.str).join(" ");
+    for (const s of ["Item", "forte", "inclinado", "Subtotal", "999", "20"]) expect(texto).toContain(s);
+    const valor = p.find((i) => i.str.trim() === "Valor")!;
+    const col = (largura - margem.esquerda - margem.direita) / 2;
+    expect(valor.transform[4] + valor.width / 2).toBeCloseTo(margem.esquerda + col * 1.5, 0);
+  });
+
+  it("a linha marcada ganha o fundo do total, e as outras não", async () => {
+    const base: DocumentoPdf = { titulo: "T", blocos: [{ tipo: "tabela", colunas: colunas(1), linhas: [["a"], ["b"]] }] };
+    const sem = await gerarPdf(base, TEMPLATE_IJ);
+    const com = await gerarPdf({ ...base, blocos: [{ tipo: "tabela", colunas: colunas(1), linhas: [["a"], ["b"]], totais: [1] }] }, TEMPLATE_IJ);
+    const doc = await PDFDocument.load(com);
+    const conteudo = (d: PDFDocument) => {
+      const fluxos = d.getPages().flatMap((pg) => pg.node.normalizedEntries().Contents?.asArray() ?? []);
+      return fluxos.map((r) => inflateSync((d.context.lookup(r) as unknown as { getContents(): Uint8Array }).getContents()).toString("latin1")).join("\n");
+    };
+    const total = /0\.9529\d* 0\.8901\d* 0\.8901\d* rg/; // #F3E3E3
+    expect(conteudo(doc)).toMatch(total);
+    expect(conteudo(await PDFDocument.load(sem))).not.toMatch(total);
   });
 });
 

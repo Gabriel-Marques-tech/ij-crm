@@ -15,7 +15,7 @@
  */
 import fontkit from "@pdf-lib/fontkit";
 import { beginText, endText, moveText, PDFDocument, popGraphicsState, pushGraphicsState, rgb, setFillingColor, setFontAndSize, showText, type PDFFont, type PDFHexString, type PDFImage, type PDFName, type PDFOperator, type PDFPage } from "pdf-lib";
-import type { BlocoPdf, ContextoPagina, Cor, DocumentoPdf, EstiloTexto, Pincel, TemplatePdf, Trecho } from "./tipos";
+import type { BlocoPdf, CelulaPdf, ContextoPagina, Cor, DocumentoPdf, EstiloTexto, Pincel, TemplatePdf, Trecho } from "./tipos";
 
 /**
  * Sem as features de layout do OpenType (contextuais, ligaduras, kerning):
@@ -34,6 +34,8 @@ const PAD_TABELA_H = 5;
  * sairia um por página.
  */
 const TITULOS_JUNTOS = 3;
+/** Cabeçalho de tabela mais alto que esta parte da página não se repete: sobraria pouco para as linhas. */
+const CABECALHO_REPETIDO_MAX = 0.4;
 
 type Fontes = { regular: PDFFont; negrito: PDFFont; italico: PDFFont; negritoItalico: PDFFont; capa?: { regular: PDFFont; negrito: PDFFont } };
 
@@ -117,6 +119,11 @@ function quebrarLinhas(trechos: Trecho[], estilo: EstiloTexto, f: Fontes, limpar
   }
   if (atual.length) linhas.push(atual);
   return linhas;
+}
+
+/** Negrito da linha (cabeçalho, total) vale para a célula toda; o itálico de quem escreveu continua. */
+function trechosDaCelula(c: CelulaPdf, negrito: boolean): Trecho[] {
+  return typeof c === "string" ? [{ texto: c, negrito }] : c.map((t) => ({ ...t, negrito: negrito || t.negrito }));
 }
 
 /**
@@ -248,9 +255,9 @@ export async function gerarPdf(doc: DocumentoPdf, template: TemplatePdf, opts: {
     pagina = pdf.addPage([W, H]);
     y = H - margem.topo;
   };
-  /** Garante `altura` livre; senão vai para a próxima página. */
+  /** Garante `altura` livre; senão vai para a próxima página. Página ainda vazia fica: trocar só deixaria uma em branco. */
   const caber = (altura: number) => {
-    if (y - altura < margem.base) novaPagina();
+    if (y - altura < margem.base && y < H - margem.topo) novaPagina();
   };
 
   const larguraDaLinha = (l: Palavra[]) => l.reduce((s, p, i) => s + p.largura + (i < l.length - 1 ? p.espaco : 0), 0);
@@ -291,8 +298,17 @@ export async function gerarPdf(doc: DocumentoPdf, template: TemplatePdf, opts: {
   blocos.push(...doc.blocos);
 
   const estiloDoTitulo = (nivel: 1 | 2 | 3) => (nivel === 1 ? est.titulo1 : nivel === 2 ? est.titulo2 : est.titulo3);
-  const alturaDaLinhaDeTabela = (b: Extract<BlocoPdf, { tipo: "tabela" }>, textos: string[], negrito: boolean) =>
-    Math.max(1, ...textos.map((t, i) => quebrarLinhas([{ texto: t, negrito }], est.tabela, f, limpar, b.colunas[i].largura * larguraUtil - PAD_TABELA_H * 2).length)) * est.tabela.tamanho * est.tabela.entrelinha + PAD_TABELA_V * 2;
+  const alturaUtil = H - margem.topo - margem.base;
+  const alturaDaLinhaDeTabela = (b: Extract<BlocoPdf, { tipo: "tabela" }>, celulas: CelulaPdf[], negrito: boolean) =>
+    Math.max(1, ...celulas.map((c, i) => quebrarLinhas(trechosDaCelula(c, negrito), est.tabela, f, limpar, b.colunas[i].largura * larguraUtil - PAD_TABELA_H * 2).length)) * est.tabela.tamanho * est.tabela.entrelinha + PAD_TABELA_V * 2;
+  /** Cabeçalho e 1ª linha, que não se separam. A 1ª linha maior que a página vai partir: basta o começo dela. */
+  const alturaDoInicioDaTabela = (b: Extract<BlocoPdf, { tipo: "tabela" }>) => {
+    const cabecalho = alturaDaLinhaDeTabela(b, b.colunas.map((c) => c.titulo), true);
+    const primeira = b.linhas[0] ?? b.total;
+    if (!primeira) return Math.min(cabecalho, alturaUtil);
+    const inteira = alturaDaLinhaDeTabela(b, primeira, !b.linhas[0] || Boolean(b.totais?.includes(0)));
+    return cabecalho + inteira <= alturaUtil ? cabecalho + inteira : Math.min(cabecalho, alturaUtil / 2) + est.tabela.tamanho * est.tabela.entrelinha + PAD_TABELA_V * 2;
+  };
 
   /** Altura real do começo do bloco `i`, para o título que vem antes não ficar órfão. Título seguido de título soma, até `TITULOS_JUNTOS`. */
   const alturaDoComeco = (i: number, titulos = 1): number => {
@@ -308,7 +324,7 @@ export async function gerarPdf(doc: DocumentoPdf, template: TemplatePdf, opts: {
         return e.antes + quebrarLinhas(b.trechos, e, f, limpar, largura).length * e.tamanho * e.entrelinha + e.depois + alturaDoComeco(i + 1, titulos + 1);
       }
       case "tabela":
-        return est.tabela.antes + alturaDaLinhaDeTabela(b, b.colunas.map((c) => c.titulo), true) + alturaDaLinhaDeTabela(b, b.linhas[0] ?? b.total ?? [], !b.linhas[0]);
+        return est.tabela.antes + alturaDoInicioDaTabela(b);
       case "paragrafo":
       case "campos":
         return est.texto.antes + linhaDeTexto * 2;
@@ -380,11 +396,11 @@ export async function gerarPdf(doc: DocumentoPdf, template: TemplatePdf, opts: {
       xs.push(acc);
       acc += col.largura * larguraUtil;
     }
-    const celulas = (textos: string[], negrito: boolean) => textos.map((t, i) => quebrarLinhas([{ texto: t, negrito }], e, f, limpar, b.colunas[i].largura * larguraUtil - padH * 2));
+    const celulas = (cs: CelulaPdf[], negrito: boolean) => cs.map((cel, i) => quebrarLinhas(trechosDaCelula(cel, negrito), e, f, limpar, b.colunas[i].largura * larguraUtil - padH * 2));
     const alturaDe = (cs: Palavra[][][]) => Math.max(1, ...cs.map((l) => l.length)) * alturaLinha + padV * 2;
-    const linhaDaTabela = (cs: Palavra[][][], fundo: Cor | null, tinta: Cor) => {
+    /** Desenha onde está: quem chama já garantiu o espaço. */
+    const faixa = (cs: Palavra[][][], fundo: Cor | null, tinta: Cor) => {
       const altura = alturaDe(cs);
-      caber(altura);
       pagina.drawRectangle({ x: margem.esquerda, y: y - altura, width: larguraUtil, height: altura, color: fundo ? cor(fundo) : undefined, borderColor: cor(c.borda), borderWidth: 0.6 });
       for (const x of xs.slice(1)) pagina.drawLine({ start: { x, y }, end: { x, y: y - altura }, thickness: 0.6, color: cor(c.borda) });
       cs.forEach((linhas, i) => {
@@ -405,20 +421,43 @@ export async function gerarPdf(doc: DocumentoPdf, template: TemplatePdf, opts: {
     };
     y -= e.antes;
     const cabecalho = celulas(b.colunas.map((col) => col.titulo), true);
-    const desenharCabecalho = () => linhaDaTabela(cabecalho, c.cabecalho, c.textoCabecalho);
-    const primeira = b.linhas[0] ? celulas(b.linhas[0], false) : null;
-    // Cabeçalho nunca fica sozinho no pé da página.
-    caber(alturaDe(cabecalho) + (primeira ? alturaDe(primeira) : 0));
-    desenharCabecalho();
-    const corpo = (cs: Palavra[][][], fundo: Cor | null) => {
-      if (y - alturaDe(cs) < margem.base) {
-        novaPagina();
-        desenharCabecalho();
-      }
-      linhaDaTabela(cs, fundo, e.cor);
+    const repete = alturaDe(cabecalho) <= alturaUtil * CABECALHO_REPETIDO_MAX;
+    const proximaPagina = () => {
+      novaPagina();
+      if (repete) faixa(cabecalho, c.cabecalho, c.textoCabecalho);
     };
-    for (const l of b.linhas) corpo(celulas(l, false), null);
-    if (b.total) corpo(celulas(b.total, true), c.total);
+    /**
+     * Linha inteira, na página atual ou na próxima. Só a que não cabe numa página inteira parte,
+     * pelas linhas de texto: é isso ou o fim dela sair fora da folha.
+     */
+    const linha = (cs: Palavra[][][], fundo: Cor | null, tinta: Cor) => {
+      const altura = alturaDe(cs);
+      if (altura <= alturaUtil - (repete ? alturaDe(cabecalho) : 0)) {
+        if (y - altura < margem.base) proximaPagina();
+        faixa(cs, fundo, tinta);
+        return;
+      }
+      let resto = cs;
+      while (resto.some((l) => l.length > 0)) {
+        const cabem = Math.floor((y - margem.base - padV * 2) / alturaLinha);
+        if (cabem < 1) {
+          proximaPagina();
+          continue;
+        }
+        faixa(resto.map((l) => l.slice(0, cabem)), fundo, tinta);
+        resto = resto.map((l) => l.slice(cabem));
+      }
+    };
+    // Cabeçalho nunca fica sozinho no pé da página.
+    caber(alturaDoInicioDaTabela(b));
+    if (repete) faixa(cabecalho, c.cabecalho, c.textoCabecalho);
+    else linha(cabecalho, c.cabecalho, c.textoCabecalho);
+    const totais = new Set(b.totais);
+    b.linhas.forEach((l, i) => {
+      const destaque = totais.has(i);
+      linha(celulas(l, destaque), destaque ? c.total : null, e.cor);
+    });
+    if (b.total) linha(celulas(b.total, true), c.total, e.cor);
     y -= e.depois;
   }
 

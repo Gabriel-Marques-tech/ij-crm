@@ -120,6 +120,19 @@ describe("sugerir a partir de anexo (GAB-90)", () => {
     expect(r.sugestao.revisar).toEqual([{ campo: "valor", motivo: "leitura incerta: confira no arquivo", lido: "12500.00", trecho: "R$ 12.5?0" }]);
   });
 
+  it("tabela vinda do modelo só passa pela canonização, inclusive torta ou grande, sem quebrar", async () => {
+    const { ana, projeto } = await semear();
+    await criarProposta(projeto.id, ana);
+    const id = await anexo(projeto.id, "escaneada.pdf", pdfDeTexto([""]), ana);
+    const grande = ["| x |", "|---|", ...Array.from({ length: 150 }, () => "| y |")].join("\n");
+    definirPropostaArquivoMock(() => ({ markdown: `Antes.\n\n| a | b |\n|---|---|\n| 1 | 2 | 3 |\n\n${grande}`, ...LEITURA_BOA }));
+    const r = await sugerirDeAnexo(projeto.id, id, ana, { provedor });
+    if (!r.ok) throw new Error(r.mensagem);
+    expect(r.sugestao.markdown).toContain("| a | b |  |\n| --- | --- | --- |\n| 1 | 2 | 3 |");
+    // A grande não cabe nos limites da tabela: entra como texto, sem perder nada.
+    expect(r.sugestao.markdown).toContain("\n\ny\n\ny");
+  });
+
   it("imagem: vai como image/png", async () => {
     const { projeto, ana } = await semear();
     await criarProposta(projeto.id, ana);

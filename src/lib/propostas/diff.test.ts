@@ -115,3 +115,50 @@ describe("blocos móveis no diff (GAB-100)", () => {
     expect(diffEstruturado(data, dur)).toEqual([{ campo: "Cronograma de entregas", antes: "A · 01/12/2026", depois: "A · 2 semanas" }]);
   });
 });
+
+describe("tabela (GAB-102)", () => {
+  const TABELA = "| Item | Valor |\n| --- | --- |\n| Site | R$ 10 |\n| Total | R$ 10 |";
+
+  it("sem mudança, sem mudança: a régua não aparece", () => {
+    const d = doTexto(diffMarkdown(TABELA, TABELA));
+    expect(temMudanca(d)).toBe(false);
+    expect(d.map((l) => (l.tipo === "igual" ? l.texto : ""))).toEqual(["| Item | Valor |", "| Site | R$ 10 |", "| Total | R$ 10 |"]);
+  });
+
+  it("célula alterada mostra só as palavras trocadas na linha", () => {
+    const d = doTexto(diffMarkdown(TABELA, TABELA.replace("R$ 10 |\n| Total", "R$ 20 |\n| Total")));
+    const alterada = d.find((l) => l.tipo === "alterada");
+    expect(alterada).toMatchObject({ antes: expect.arrayContaining([{ tipo: "removido", texto: "10" }]), depois: expect.arrayContaining([{ tipo: "adicionado", texto: "20" }]) });
+    expect(d.filter((l) => l.tipo !== "igual")).toHaveLength(1);
+  });
+
+  it("linha nova entra, linha removida sai, sem tocar nas outras", () => {
+    const nova = "| Item | Valor |\n| --- | --- |\n| Site | R$ 10 |\n| App | R$ 5 |\n| Total | R$ 10 |";
+    expect(doTexto(diffMarkdown(TABELA, nova)).filter((l) => l.tipo !== "igual")).toEqual([{ tipo: "adicionada", texto: "| App | R$ 5 |" }]);
+    expect(doTexto(diffMarkdown(nova, TABELA)).filter((l) => l.tipo !== "igual")).toEqual([{ tipo: "removida", texto: "| App | R$ 5 |" }]);
+  });
+
+  it("marcar a linha de total é mudança, em palavras e sem comentário HTML à vista", () => {
+    const marcada = TABELA.replace("| Total", "| <!-- total --> Total");
+    const d = doTexto(diffMarkdown(TABELA, marcada));
+    expect(temMudanca(d)).toBe(true);
+    const texto = diffParaTexto(d);
+    expect(texto).toContain("+ | Total | R$ 10 | [linha de total]");
+    expect(texto).not.toContain("<!--");
+    expect(diffParaTexto(doTexto(diffMarkdown(marcada, marcada)))).toContain("| Total | R$ 10 | [linha de total]");
+  });
+
+  it("total com a primeira célula vazia continua legível", () => {
+    const d = doTexto(diffMarkdown(null, "| a | b |\n| --- | --- |\n| <!-- total --> | 9 |"));
+    expect(d.filter((l) => l.tipo === "adicionada" && l.texto.startsWith("|")).at(-1)).toEqual({ tipo: "adicionada", texto: "|  | 9 | [linha de total]" });
+  });
+
+  it("célula com o texto --- no corpo aparece; só a régua (2ª linha do bloco) some", () => {
+    const d = doTexto(diffMarkdown(null, "| a |\n| --- |\n| --- |"));
+    expect(d.flatMap((l) => (l.tipo === "adicionada" && l.texto.startsWith("|") ? [l.texto] : []))).toEqual(["| a |", "| --- |"]);
+  });
+
+  it("parágrafo com pipe não é tabela, e documento antigo compara como antes", () => {
+    expect(doTexto(diffMarkdown("a | b\n\n\\--- | ---", "a | b\n\n\\--- | ---")).map((l) => (l.tipo === "igual" ? l.texto : ""))).toEqual(["a | b", "\\--- | ---"]);
+  });
+});

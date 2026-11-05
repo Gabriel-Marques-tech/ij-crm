@@ -156,6 +156,10 @@ describe("rascunho (autosave): Markdown canônico, controle otimista", () => {
       erro: "CONTEUDO_INVALIDO",
     });
     expect(await salvarRascunho(projeto.id, { revisao: 0, conteudo: { markdown: "x".repeat(100_001) } }, ana)).toEqual({ ok: false, erro: "CONTEUDO_LONGO" });
+    const larga = `| ${Array.from({ length: 9 }, () => "a").join(" | ")} |\n| ${Array.from({ length: 9 }, () => "---").join(" | ")} |`;
+    expect(await salvarRascunho(projeto.id, { revisao: 0, conteudo: { markdown: larga } }, ana)).toEqual({ ok: false, erro: "TABELA_GRANDE" });
+    const merge = { type: "doc", content: [{ type: "table", content: [{ type: "tableRow", content: [{ type: "tableHeader", attrs: { colspan: 2 }, content: [{ type: "paragraph" }] }] }] }] };
+    expect(await salvarRascunho(projeto.id, { revisao: 0, conteudo: { documento: merge } }, ana)).toEqual({ ok: false, erro: "CONTEUDO_INVALIDO" });
     const r = await salvarRascunho(projeto.id, { revisao: 0, conteudo: { markdown: "<script>alert(1)</script>" } }, ana);
     expect(r).toMatchObject({ ok: true, markdown: "\\<script>alert(1)\\</script>" });
   });

@@ -350,6 +350,37 @@
   .folha-tabela .esquerda { text-align: left; }
   .folha-tabela .centro { text-align: center; }
   .folha-tabela .direita { text-align: right; }
+
+  /*
+   * GAB-102: tabela livre, igual no editor, na leitura e no PDF (`lib/propostas/pdf.ts`): primeira
+   * coluna à esquerda, demais centralizadas. Cores do modelo só na folha; fora dela, os tokens da tela.
+   * Colunas demais para o celular rolam dentro da tabela, nunca a página.
+   */
+  .tabela-rolagem { max-width: 100%; overflow-x: auto; }
+  .proposta-texto .tabela-livre {
+    border-collapse: collapse;
+    font-size: 0.8125rem;
+    line-height: 1.3;
+    min-width: max(100%, calc(var(--colunas, 1) * 64px));
+    table-layout: fixed;
+    text-align: left;
+    text-indent: 0;
+    width: 100%;
+  }
+  .tabela-livre th,
+  .tabela-livre td { border: 1px solid var(--border-strong); padding: 4px 5px; overflow-wrap: anywhere; vertical-align: middle; }
+  .tabela-livre th { background: var(--surface-strong); font-weight: 600; }
+  .tabela-livre th:not(:first-child),
+  .tabela-livre td:not(:first-child) { text-align: center; }
+  .tabela-livre .total td { background: var(--surface-hover); font-weight: 600; }
+  .proposta-texto .tabela-livre p { margin: 0; text-indent: 0; }
+  .tabela-livre .selectedCell { box-shadow: inset 0 0 0 2px var(--ring); }
+
+  .folha .proposta-texto .tabela-livre { font-size: max(11.5px, 1.6cqw); }
+  .folha .tabela-livre th,
+  .folha .tabela-livre td { border-color: #000; padding: max(4px, 0.67cqw) max(5px, 0.84cqw); }
+  .folha .tabela-livre th { background: var(--papel-tabela); color: #fff; font-weight: 700; }
+  .folha .tabela-livre .total td { background: var(--papel-total); font-weight: 700; }
   .folha .proposta-texto .ProseMirror-gapcursor::after { border-top-color: var(--papel-tinta); }
 }
 
