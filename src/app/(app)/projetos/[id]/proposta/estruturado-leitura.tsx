@@ -1,6 +1,7 @@
 import { formatarDinheiro } from "@/lib/projetos/formatar";
 import { avisosDosDados, rotuloDaEntrega } from "@/lib/propostas/blocos-dados";
 import { somaDasParcelas, type Estruturado } from "@/lib/propostas/estruturado";
+import { BotaoComentarCampo } from "./comentarios-contexto";
 
 /** Parcelas ou durações que não fecham com o valor ou o prazo: avisa, sem travar. */
 export function AvisosDosDados({ dados }: { dados: Estruturado }) {
@@ -22,20 +23,20 @@ export function EstruturadoLeitura({ e }: { e: Estruturado }) {
     <dl className="space-y-3 text-sm">
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <dt className="font-mono text-[11px] text-fg-mute uppercase">Valor</dt>
+          <dt className="font-mono text-[11px] text-fg-mute uppercase">Valor<BotaoComentarCampo campo="valor" /></dt>
           <dd>{e.valor ? formatarDinheiro(e.valor) : "—"}</dd>
         </div>
         <div>
-          <dt className="font-mono text-[11px] text-fg-mute uppercase">Prazo</dt>
+          <dt className="font-mono text-[11px] text-fg-mute uppercase">Prazo<BotaoComentarCampo campo="prazo" /></dt>
           <dd>{e.prazoDias ? `${e.prazoDias} dias` : "—"}</dd>
         </div>
       </div>
       <div>
-        <dt className="font-mono text-[11px] text-fg-mute uppercase">Escopo resumido</dt>
+        <dt className="font-mono text-[11px] text-fg-mute uppercase">Escopo resumido<BotaoComentarCampo campo="escopo" /></dt>
         <dd className="break-words whitespace-pre-wrap">{e.escopoResumo ?? "—"}</dd>
       </div>
       <div>
-        <dt className="font-mono text-[11px] text-fg-mute uppercase">Cronograma</dt>
+        <dt className="font-mono text-[11px] text-fg-mute uppercase">Cronograma<BotaoComentarCampo campo="entregas" /></dt>
         <dd>
           {e.entregas.length === 0 ? (
             "—"

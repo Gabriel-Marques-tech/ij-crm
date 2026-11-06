@@ -7,6 +7,7 @@ import type { PessoaComId } from "@/lib/auth/visibilidade";
 import { recusaDaProposta } from "@/lib/propostas/acesso";
 import { comTratamento, type Inesperado } from "@/lib/erros/registrar";
 import type { ConflitoCliente } from "@/lib/propostas/autosave";
+import { aplicarSugestao, MENSAGEM_ERRO_COMENTARIO, type ErroComentario } from "@/lib/propostas/comentarios";
 import type { Documento } from "@/lib/propostas/documento";
 import { estruturadoParaEntrada, type FormularioEstruturado } from "@/lib/propostas/estruturado";
 import { markdownParaDocumento } from "@/lib/propostas/markdown";
@@ -136,6 +137,21 @@ export async function salvarVersaoAction(
     if (!r.ok) return falhaParaTela(r);
     revalidar(projetoId);
     return { ok: true, revisao: r.revisao, numero: r.numero };
+  });
+}
+
+/**
+ * GAB-101: aplica a sugestão no texto da tela, pela fila do autosave (`revisao`, conflito e a regra de
+ * edição são os dele). A recusa da própria sugestão não é falha de gravação: o texto segue na fila.
+ */
+export async function aplicarSugestaoAction(projetoId: string, comentarioId: string, revisao: number, documento: unknown): Promise<RespostaProposta> {
+  return comTratamento("proposta.aplicarSugestao", async (): Promise<RespostaProposta> => {
+    const ator = await exigirEscrita();
+    if (!id.safeParse(projetoId).success || !id.safeParse(comentarioId).success || !revisaoSchema.safeParse(revisao).success) return { erro: "Dados inválidos." };
+    const r = await aplicarSugestao(projetoId, comentarioId, { revisao, conteudo: { documento } }, ator);
+    if (r.ok) return { ok: true, revisao: r.revisao };
+    if (r.erro in MENSAGEM_ERRO_COMENTARIO) return { ok: false, erro: MENSAGEM_ERRO_COMENTARIO[r.erro as ErroComentario], semMudancas: true };
+    return falhaParaTela(r as Falha);
   });
 }
 

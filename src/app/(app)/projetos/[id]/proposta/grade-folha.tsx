@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import type { Documento } from "@/lib/propostas/documento";
 import type { Estruturado } from "@/lib/propostas/estruturado";
+import { ComentarNaFolha } from "./comentar-na-folha";
 import { BotaoComentarTrecho, TextoComentavel, useComentarios } from "./comentarios-contexto";
 import { PainelComentarios } from "./painel-comentarios";
 
@@ -48,16 +49,16 @@ export function GradeFolha({ centro, direita }: { centro: ReactNode; direita: Re
 
   // `centro` fica sempre no mesmo lugar da árvore: cruzar os 1024 px (girar o tablet, redimensionar a
   // janela) não pode remontar o editor, que voltaria ao texto da abertura e o gravaria por cima.
-  const abertos = c?.threads.filter((t) => !t.resolvido).length ?? 0;
+  const abertos = c?.threads.filter((t) => !t.resolvido && !t.pendente).length ?? 0;
   return (
     <div className="grade-proposta">
       {larga ? (
-        <div className="min-w-0">{c ? <PainelComentarios alinhar /> : null}</div>
+        <div className="flex min-w-0 flex-col">{c ? <PainelComentarios alinhar /> : null}</div>
       ) : (
         <div className="flex min-w-0 flex-wrap gap-2">
           {c ? (
             <Button type="button" size="sm" variant="outline" onClick={() => setPainel("comentarios")}>
-              <MessageSquare className="size-3.5" /> Comentários ({abertos})
+              <MessageSquare className="size-3.5" /> Comentários ({abertos}){c.pendentes ? ` · revisão (${c.pendentes})` : ""}
             </Button>
           ) : null}
           <Button type="button" size="sm" variant="outline" onClick={() => setPainel("infos")}>
@@ -65,7 +66,7 @@ export function GradeFolha({ centro, direita }: { centro: ReactNode; direita: Re
           </Button>
         </div>
       )}
-      {centro}
+      <ComentarNaFolha larga={larga}>{centro}</ComentarNaFolha>
       {larga ? (
         <aside className="grade-proposta-direita min-w-0 space-y-3">{direita}</aside>
       ) : (
