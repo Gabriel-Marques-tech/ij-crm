@@ -542,11 +542,25 @@ Serviço em `src/lib/propostas/comentarios.ts` (tela e MCP chamam as mesmas fun�
   na leitura — o Markdown e a validação do subconjunto não mudam. Preso à proposta, não à versão.
 - **Ao vivo**: polling de `GET /api/projetos/[id]/comentarios?v=<versão>` a cada 5 s, pausado com a aba
   oculta; com a versão igual o servidor responde só `{ versao }` (contagem + último `atualizado_em`).
-- **Aviso**: `COMENTARIO`, só no app, para o dono da caneta (nunca para quem comentou).
+- **Aviso**: `COMENTARIO`, só no app, para o dono da caneta (nunca para quem comentou). Pendente não avisa.
 - **Limites**: 2000 caracteres por comentário e 500 no trecho (CHECK no banco também); texto puro.
-- **MCP**: `listar_comentarios_proposta`, `comentar_proposta` (geral ou `trecho` = texto exato do
-  rascunho atual), `responder_comentario_proposta`, `resolver_comentario_proposta`,
-  `reabrir_comentario_proposta`. Mesma permissão da tela (`escrita: false`, `muda: true` nas que gravam).
+- **MCP**: `listar_comentarios_proposta`, `comentar_proposta` (geral, `trecho` = texto exato do
+  rascunho atual, ou `campo`), `responder_comentario_proposta`, `resolver_comentario_proposta`,
+  `reabrir_comentario_proposta`, `sugerir_texto_proposta`, `adicionar_a_revisao_proposta`,
+  `enviar_revisao_proposta`, `descartar_da_revisao_proposta`. Mesma permissão da tela (`escrita: false`,
+  `muda: true` nas que gravam).
+- **Revisão (GAB-101)**:
+  - **Sugestão aplicável** (`sugestao`, `src/lib/propostas/sugestao-trecho.ts`): texto novo de um trecho
+    de um mesmo bloco, mostrado como diff no cartão. Só quem tem a caneta aplica, pela fila do autosave e
+    pelo núcleo de `salvarRascunho` (lock, caneta, `revisao`, conflito); a mesma transação resolve a conversa e
+    registra quem aplicou (`sugestao_aplicada` na Timeline). Aplicar é mais exigente que destacar: a
+    ocorrência precisa ter intacto ao menos um lado do contexto, senão a sugestão está desatualizada e não
+    se aplica. Texto novo herda a formatação do começo do trecho. Reabrir a conversa não desfaz o texto.
+  - **Lote** (`pendente`): "Adicionar à revisão" fica só para o autor, em tudo (lista, carimbo do polling,
+    MCP, id), e não conta como aberto. "Enviar revisão (N)" publica e gera um único aviso.
+  - **Campo** (`campo`): valor, prazo, escopo e entregas aceitam comentário, sem sugestão, assim como os
+    blocos Cronograma e Investimento.
+  - **Por id**: inexistente, sem acesso e pendente de outra pessoa dão a mesma resposta ("não encontrado").
 
 ## Painel de mensagens e cron (GAB-41)
 
