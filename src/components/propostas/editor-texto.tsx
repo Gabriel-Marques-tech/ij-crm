@@ -64,6 +64,8 @@ export type ControleEditor = {
   substituir: (d: Documento) => void;
   /** GAB-91: âncora do trecho selecionado, para comentar (null = nada selecionado). */
   selecao?: () => Ancora | null;
+  /** GAB-101: comentários de revisão (o "+", a sugestão aplicada) trabalham no próprio editor. */
+  editor?: () => Editor | null;
 };
 
 function Botao({ ativo, rotulo, onClick, children, desativado, largo }: { ativo?: boolean; rotulo: string; onClick: () => void; children: React.ReactNode; desativado?: boolean; largo?: boolean }) {
@@ -187,6 +189,7 @@ export default function EditorTexto({
       // emitUpdate: false — carregar o do servidor não é edição (não dispara autosave).
       substituir: (d) => editor?.commands.setContent(documentoParaEditor(d), { emitUpdate: false }),
       selecao: () => (editor ? ancoraDaSelecao(editor.state) : null),
+      editor: () => editor,
     }),
     [editor, inicial],
   );

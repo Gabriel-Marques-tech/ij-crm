@@ -3,6 +3,7 @@
 import { ArrowDown, ArrowUp, CalendarArrowDown, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { BotaoComentarCampo } from "./comentarios-contexto";
 import { DURACAO_MAX_CAMPO, ENTREGAS_MAX, ESCOPO_RESUMO_MAX, TITULO_ENTREGA_MAX, type FormularioEstruturado } from "@/lib/propostas/estruturado";
 
 export type FormEstruturadoValor = FormularioEstruturado;
@@ -11,6 +12,8 @@ type EntregaForm = FormEstruturadoValor["entregas"][number];
 let linhasNovas = 0;
 
 const rotulo = "mb-1 block font-mono text-[11px] text-fg-mute uppercase";
+const rotuloComBotao = `${rotulo} pr-5`;
+const NO_CANTO = "absolute top-0 right-0 z-[1] ml-0";
 
 /**
  * Parte estruturada da proposta: valor, prazo, escopo resumido e cronograma
@@ -32,30 +35,40 @@ export function FormEstruturado({ valor, onChange, desativado }: { valor: FormEs
 
   return (
     <fieldset disabled={desativado} className="min-w-0 space-y-4">
-      <div className="grid grid-cols-2 gap-2">
-        <label className="block min-w-0">
-          <span className={rotulo}>Valor total (R$)</span>
-          <Input inputMode="decimal" placeholder="ex.: 12.500,00" className="placeholder:text-fg-faint" value={valor.valor} onChange={(e) => set("valor", e.target.value)} />
-        </label>
-        <label className="block min-w-0">
-          <span className={rotulo}>Prazo (dias)</span>
-          <Input inputMode="numeric" placeholder="ex.: 60" className="placeholder:text-fg-faint" value={valor.prazoDias} onChange={(e) => set("prazoDias", e.target.value)} />
+      <div className="grid grid-cols-2 items-end gap-2">
+        <div className="relative min-w-0">
+          {/* O botão fica fora do <label>: não entra no nome do campo. */}
+          <BotaoComentarCampo campo="valor" className={NO_CANTO} />
+          <label className="block min-w-0">
+            <span className={rotuloComBotao}>Valor total (R$)</span>
+            <Input inputMode="decimal" placeholder="ex.: 12.500,00" className="placeholder:text-fg-faint" value={valor.valor} onChange={(e) => set("valor", e.target.value)} />
+          </label>
+        </div>
+        <div className="relative min-w-0">
+          <BotaoComentarCampo campo="prazo" className={NO_CANTO} />
+          <label className="block min-w-0">
+            <span className={rotuloComBotao}>Prazo (dias)</span>
+            <Input inputMode="numeric" placeholder="ex.: 60" className="placeholder:text-fg-faint" value={valor.prazoDias} onChange={(e) => set("prazoDias", e.target.value)} />
+          </label>
+        </div>
+      </div>
+      <div className="relative">
+        <BotaoComentarCampo campo="escopo" className={NO_CANTO} />
+        <label className="block">
+          <span className={rotuloComBotao}>Escopo resumido</span>
+          <textarea
+            rows={3}
+            maxLength={ESCOPO_RESUMO_MAX}
+            value={valor.escopoResumo}
+            onChange={(e) => set("escopoResumo", e.target.value)}
+            className="w-full resize-y rounded-lg border border-input bg-input/30 px-2.5 py-1.5 text-sm text-foreground outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+          />
         </label>
       </div>
-      <label className="block">
-        <span className={rotulo}>Escopo resumido</span>
-        <textarea
-          rows={3}
-          maxLength={ESCOPO_RESUMO_MAX}
-          value={valor.escopoResumo}
-          onChange={(e) => set("escopoResumo", e.target.value)}
-          className="w-full resize-y rounded-lg border border-input bg-input/30 px-2.5 py-1.5 text-sm text-foreground outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-        />
-      </label>
 
       <div>
         <div className="mb-2 flex flex-wrap items-center gap-2">
-          <span className={rotulo + " mb-0"}>Cronograma de entregas</span>
+          <span className={rotulo + " mb-0"}>Cronograma de entregas<BotaoComentarCampo campo="entregas" /></span>
           <span className="flex-1" />
           {/* Durações valem em sequência: reordenar por data mudaria a conta. */}
           {entregas.length > 1 && !entregas.some((e) => e.duracao.trim()) ? (

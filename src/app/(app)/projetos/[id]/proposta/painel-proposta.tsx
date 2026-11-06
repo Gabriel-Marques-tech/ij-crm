@@ -8,7 +8,8 @@ import { Input } from "@/components/ui/input";
 import { FolhaProvider } from "@/components/propostas/bloco-dados-view";
 import type { ControleEditor } from "@/components/propostas/editor-texto";
 import type { DadosCapa } from "@/components/propostas/folha";
-import { BotaoComentarTrecho, useComentarios, useDestaquesDoEditor } from "./comentarios-contexto";
+import { ancoraDoElemento, toposNoEditor, transacaoDeSugestao } from "@/components/propostas/destaques-editor";
+import { BotaoComentarTrecho, useComentarios, useDestaquesDoEditor, type ThreadJson } from "./comentarios-contexto";
 import { Autosave, type EstadoAutosave, type RespostaGravacao } from "@/lib/propostas/autosave";
 import { herdarBlocos, normalizarDocumento, type Documento } from "@/lib/propostas/documento";
 import { ESTRUTURADO_VAZIO, formularioGravavel, interpretarEstruturado, paraEnvio, type Estruturado } from "@/lib/propostas/estruturado";
@@ -18,7 +19,7 @@ import type { AcaoCaneta } from "@/lib/propostas/caneta";
 import type { AcaoEnvio } from "@/lib/propostas/envio";
 import { AcoesCaneta, type AcaoTela, type PessoaCaneta, type Preparo } from "./acoes-caneta";
 import { mesclarSugestao, type CamposSugeridos } from "@/lib/propostas/sugestao";
-import { salvarEstruturadoAction, salvarTextoAction, salvarVersaoAction, type ConflitoUI } from "./actions";
+import { aplicarSugestaoAction, salvarEstruturadoAction, salvarTextoAction, salvarVersaoAction, type ConflitoUI } from "./actions";
 import { AvisosDosDados } from "./estruturado-leitura";
 import { FormEstruturado, type FormEstruturadoValor } from "./form-estruturado";
 import { GradeFolha } from "./grade-folha";
@@ -127,9 +128,24 @@ export function PainelProposta({
   // GAB-91: comentários (null fora do provider): trechos destacados no editor e "Comentar trecho" pela seleção.
   const comentarios = useComentarios();
   const destaques = useDestaquesDoEditor();
-  const registrarSelecao = comentarios?.registrarSelecao;
+  const registrarFonte = comentarios?.registrarFonte;
+  const registrarAplicador = comentarios?.registrarAplicador;
   const informarTexto = comentarios?.informarTexto;
-  useEffect(() => registrarSelecao?.(() => editor.current?.selecao?.() ?? null), [registrarSelecao]);
+  useEffect(
+    () =>
+      registrarFonte?.({
+        selecao: () => editor.current?.selecao?.() ?? null,
+        doElemento: (el) => {
+          const e = editor.current?.editor?.();
+          return e ? ancoraDoElemento(e.view, el) : null;
+        },
+        topos: (itens) => {
+          const e = editor.current?.editor?.();
+          return e ? toposNoEditor(e.view, itens) : {};
+        },
+      }),
+    [registrarFonte],
+  );
   const [estado, setEstado] = useState<EstadoAutosave>({ tipo: "salvo", em: null });
   // Props só na montagem: o `router.refresh()` (depois de salvar versão) traz props novas
   // e elas não podem atropelar o que está no editor/cartão.
@@ -347,6 +363,39 @@ export function PainelProposta({
     mudarForm(mesclarSugestao(atual.current.form, s.campos));
     void gravarDados();
   }
+
+  /**
+   * GAB-101: aplica a sugestão pela mesma fila do autosave, levando o texto da tela (como "Salvar
+   * versão"): `revisao`, conflito e a regra de edição são conferidos lá, junto com a resolução. O
+   * editor fica travado durante a ida ao servidor, para ninguém digitar no trecho que está sendo
+   * trocado, e o texto novo entra por uma transação: desfazer funciona, e o `onUpdate` passa pelo autosave.
+   */
+  const aplicarSugestaoDoComentario = useCallback(
+    async (t: ThreadJson): Promise<string | null> => {
+      const e = editor.current?.editor?.();
+      if (!e || !t.ancora || !t.sugestao) return "O editor ainda não carregou. Tente de novo.";
+      const { ancora, sugestao } = t;
+      if (!transacaoDeSugestao(e.state, ancora, sugestao.texto)) return "O trecho mudou depois da sugestão: ela está desatualizada e não se aplica.";
+      e.setEditable(false, false);
+      try {
+        let ref: string | undefined;
+        const r = await autosave.executar(async (rev) => {
+          const g = paraGravacao(await aplicarSugestaoAction(projetoId, t.id, rev, editor.current?.documento()));
+          if (g.ok !== true) ref = g.ref;
+          return g;
+        }, true);
+        if (!r) return "Resolva o conflito de edição do rascunho antes.";
+        if (r.ok !== true) return ref ? `${r.erro} (ref: ${ref})` : r.conflito ? "Conflito de edição: escolha uma versão no aviso acima do texto e aplique de novo." : r.erro;
+        const tr = transacaoDeSugestao(e.state, ancora, sugestao.texto);
+        if (tr) e.view.dispatch(tr);
+        return null;
+      } finally {
+        e.setEditable(true, false);
+      }
+    },
+    [autosave, projetoId],
+  );
+  useEffect(() => registrarAplicador?.(aplicarSugestaoDoComentario), [registrarAplicador, aplicarSugestaoDoComentario]);
 
   function usarDoServidor(c: ConflitoUI) {
     editor.current?.substituir(c.documento);
