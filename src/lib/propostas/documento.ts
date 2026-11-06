@@ -4,9 +4,10 @@
  *
  *   parágrafo · título (níveis 1–3) · negrito · itálico ·
  *   lista com marcadores · lista numerada (aninháveis) · linha horizontal ·
- *   blocos móveis "Cronograma" e "Investimento" (GAB-100, ver abaixo)
+ *   blocos móveis "Cronograma" e "Investimento" (GAB-100, ver abaixo) ·
+ *   tabela livre (GAB-102, ver abaixo)
  *
- * Nada de link, imagem, HTML, tabela, código ou quebra de linha simples: o
+ * Nada de link, imagem, HTML, código ou quebra de linha simples: o
  * editor (Tiptap) só carrega essas extensões e o Markdown que chega pelo MCP
  * vira esse subconjunto (o resto entra como TEXTO literal, ver `./markdown.ts`).
  *
@@ -29,8 +30,25 @@
  *   "proposta antiga".
  * - DE EXIBIÇÃO (`documentoComBlocos`): blocos explícitos e sem marcador. É o que a
  *   folha, o PDF, o editor e o texto plano da âncora usam.
+ *
+ * Tabela (GAB-102, spec proposta-folha §7): só no nível de cima do documento, retangular, com a
+ * primeira linha sempre de cabeçalho. Cada célula tem um parágrafo, com texto, negrito e itálico,
+ * sem mesclar. A linha do corpo pode ser marcada como total (`attrs.total`), o que só muda a
+ * aparência: ninguém soma nada. Limites em `./tabela.ts`.
+ *
+ * Nó novo (o GAB-103 passa por aqui), em cada ponto, com teste:
+ * 1. aqui: tipo em `Bloco`, entrada em `blocoEntrada` e caso em `normalizarBlocos`;
+ * 2. `markdown.ts`: `serializarBloco` e `blocos` (ida e volta, e a forma literal se vier inválido);
+ * 3. editor: extensão em `EXTENSOES`, grupo `blocoDoc` se só existe no nível de cima, e `jsonDoEditor`
+ *    (atributos do ProseMirror têm protótipo nulo);
+ * 4. leitura: `DocumentoView`, e CSS em `globals.css`;
+ * 5. PDF: `blocosDoDocumento` em `pdf.ts`, e o gerador se precisar de `BlocoPdf` novo;
+ * 6. `diff.ts`: a linha do Markdown como a pessoa lê;
+ * 7. `ancora.ts`: o que entra no texto plano, igual ao `planoDoEditor` de `destaques-editor.ts`;
+ * 8. MCP: o texto `formatacao` de `ler_proposta`. O OCR só precisa passar pela canonização.
  */
 import { z } from "zod";
+import { medirTabela, motivoForaDoLimite } from "./tabela";
 
 export type Marca = "bold" | "italic";
 /** Ordem canônica das marcas (negrito por fora, itálico por dentro). */
@@ -48,7 +66,11 @@ export type TipoBlocoDados = (typeof TIPOS_BLOCO_DADOS)[number];
 export type BlocoDados = { type: "blocoDados"; attrs: { tipo: TipoBlocoDados } };
 /** Os dois blocos foram tirados da folha de propósito (só existe na forma normalizada). */
 export type SemBlocos = { type: "semBlocos" };
-export type Bloco = Paragrafo | Titulo | LinhaHorizontal | ListaMarcadores | ListaNumerada | BlocoDados | SemBlocos;
+export type CelulaTabela = { type: "tableHeader" | "tableCell"; content: [Paragrafo] };
+/** `attrs` só existe na linha marcada: é o ponto fixo do Markdown. */
+export type LinhaTabela = { type: "tableRow"; attrs?: { total: true }; content: CelulaTabela[] };
+export type Tabela = { type: "table"; content: LinhaTabela[] };
+export type Bloco = Paragrafo | Titulo | LinhaHorizontal | ListaMarcadores | ListaNumerada | BlocoDados | SemBlocos | Tabela;
 export type Documento = { type: "doc"; content: Bloco[] };
 
 export const DOCUMENTO_VAZIO: Documento = { type: "doc", content: [] };
@@ -69,9 +91,23 @@ const textoEntrada = z.object({ type: z.literal("text"), text: z.string(), marks
 
 type BlocoEntrada = { type: string; attrs?: Record<string, unknown>; content?: unknown[] };
 
+const paragrafoEntrada = z.object({ type: z.literal("paragraph"), content: z.array(textoEntrada).optional() }).passthrough();
+// Sem mesclar: o editor não gera, e célula mesclada não tem Markdown.
+const celulaEntrada = z
+  .object({
+    type: z.enum(["tableHeader", "tableCell"]),
+    attrs: z.object({ colspan: z.literal(1).nullish(), rowspan: z.literal(1).nullish() }).passthrough().optional(),
+    content: z.array(paragrafoEntrada).optional(),
+  })
+  .passthrough();
+const linhaEntrada = z
+  .object({ type: z.literal("tableRow"), attrs: z.object({ total: z.boolean().nullish() }).passthrough().optional(), content: z.array(celulaEntrada).optional() })
+  .passthrough();
+
 const blocoEntrada: z.ZodType<BlocoEntrada> = z.lazy(() =>
   z.discriminatedUnion("type", [
-    z.object({ type: z.literal("paragraph"), content: z.array(textoEntrada).optional() }).passthrough(),
+    paragrafoEntrada,
+    z.object({ type: z.literal("table"), content: z.array(linhaEntrada).optional() }).passthrough(),
     z
       .object({ type: z.literal("heading"), attrs: z.object({ level: z.number().int().min(1).max(6) }).passthrough(), content: z.array(textoEntrada).optional() })
       .passthrough(),
@@ -111,7 +147,10 @@ export function lerDocumento(bruto: unknown): Documento | null {
   const doc = p.data as unknown as BlocoEntrada;
   // listas aninhadas: lista → item → lista … (2 níveis por lista)
   if (profundidade(doc) > PROFUNDIDADE_MAX * 2 + 2) return null;
-  return normalizarDocumento(doc as unknown as Documento);
+  const normal = normalizarDocumento(doc as unknown as Documento);
+  // O editor recusa antes de chegar aqui (`tabela-node.ts`): só passa disto quem chama a action na mão.
+  if (normal.content.some((b) => b.type === "table" && motivoForaDoLimite(medirTabela(b)))) return null;
+  return normal;
 }
 
 // ---------------------------------------------------------------- normalização
@@ -234,7 +273,7 @@ function paraLetras(content: NoTexto[] | undefined): Letra[] {
     if (n.type !== "text" || typeof n.text !== "string") continue;
     const marcas = new Set((n.marks ?? []).map((m) => m.type));
     // Sem quebra de linha nem caracteres de controle dentro do texto (o editor não tem "hard break").
-    const texto = n.text.replace(/\r\n?|\n/g, " ").replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, ""); // U+E001 e U+E002: reservados à âncora dos blocos
+    const texto = n.text.replace(/\r\n?|\n/g, " ").replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\uE001\uE002]/g, ""); // U+E001 e U+E002: reservados à âncora dos blocos
     for (const c of texto) letras.push({ c: c === "\t" ? " " : c, bold: marcas.has("bold"), italic: marcas.has("italic") });
   }
   return letras;
@@ -270,11 +309,47 @@ export function normalizarInline(content: NoTexto[] | undefined): NoTexto[] {
   return deLetras(letras);
 }
 
+/** A tabela fora do lugar ou além dos limites: cada linha vira um parágrafo "a | b", e nenhum texto se perde. */
+export function tabelaComoParagrafos(t: Tabela): Paragrafo[] {
+  return t.content.map((l) => {
+    const content: NoTexto[] = [];
+    l.content.forEach((c, j) => {
+      if (j > 0) content.push({ type: "text", text: " | " });
+      content.push(...(c.content[0]?.content ?? []));
+    });
+    return { type: "paragraph", content };
+  });
+}
+
+/** Retangular, primeira linha de cabeçalho, um parágrafo por célula (vários viram um, separados por espaço). */
+export function normalizarTabela(t: Tabela): Tabela | null {
+  const linhas = (t.content ?? []).filter((l) => l.content?.length);
+  if (linhas.length === 0) return null;
+  const colunas = linhas.reduce((m, l) => Math.max(m, l.content.length), 0);
+  return {
+    type: "table",
+    content: linhas.map((l, i): LinhaTabela => {
+      const content = Array.from({ length: colunas }, (_, j): CelulaTabela => {
+        const partes = ((l.content[j]?.content ?? []) as Paragrafo[]).flatMap((par, k) => [...(k > 0 ? [{ type: "text" as const, text: " " }] : []), ...(par.content ?? [])]);
+        const texto = normalizarInline(partes);
+        return { type: i === 0 ? "tableHeader" : "tableCell", content: [texto.length ? { type: "paragraph", content: texto } : { type: "paragraph" }] };
+      });
+      return i > 0 && l.attrs?.total ? { type: "tableRow", attrs: { total: true }, content } : { type: "tableRow", content };
+    }),
+  };
+}
+
 function normalizarItens(itens: unknown[] | undefined): ItemLista[] {
   const saida: ItemLista[] = [];
   for (const it of itens ?? []) {
-    // Bloco de dados só existe no nível de cima: dentro de item de lista não é do subconjunto.
-    const blocos = normalizarBlocos(((it as BlocoEntrada).content as Bloco[] | undefined)?.filter((b) => b.type !== "blocoDados" && b.type !== "semBlocos"));
+    // Bloco de dados e tabela só existem no nível de cima: dentro de item de lista não são do subconjunto.
+    const dentro = ((it as BlocoEntrada).content as Bloco[] | undefined)?.flatMap((b): Bloco[] => {
+      if (b.type === "blocoDados" || b.type === "semBlocos") return [];
+      const tabela = b.type === "table" ? normalizarTabela(b) : null;
+      if (b.type === "table") return tabela ? tabelaComoParagrafos(tabela) : [];
+      return [b];
+    });
+    const blocos = normalizarBlocos(dentro);
     if (blocos.length === 0) continue;
     // Tiptap: item começa SEMPRE por parágrafo (mesmo vazio, quando só tem sublista).
     if (blocos[0].type !== "paragraph") blocos.unshift({ type: "paragraph" });
@@ -312,6 +387,10 @@ function normalizarBlocos(blocos: Bloco[] | undefined): Bloco[] {
         break;
       case "semBlocos":
         novo = { type: "semBlocos" };
+        break;
+      case "table":
+        // Tabela vazia continua: acabou de ser inserida, e quem escreve ainda vai preencher.
+        novo = normalizarTabela(b);
         break;
       case "bulletList": {
         const content = normalizarItens(b.content);
@@ -379,7 +458,7 @@ export function documentoComBlocos(doc: Documento): Documento {
 /** Documento para o editor: forma de exibição, sempre com onde pôr o cursor no começo. */
 export function documentoParaEditor(doc: Documento): Documento {
   const d = documentoComBlocos(doc);
-  return d.content[0]?.type === "blocoDados" ? { type: "doc", content: [{ type: "paragraph" }, ...d.content] } : d;
+  return d.content[0]?.type === "blocoDados" || d.content[0]?.type === "table" ? { type: "doc", content: [{ type: "paragraph" }, ...d.content] } : d;
 }
 
 /** O editor só tem os blocos que estão na folha: nenhum bloco nele quer dizer que foram tirados. */
@@ -401,9 +480,9 @@ export function herdarBlocos(novo: Documento, atual: Documento): Documento {
 /** Texto corrido do documento (prévia, busca). */
 export function textoDoDocumento(doc: Documento): string {
   const partes: string[] = [];
-  const visitar = (b: Bloco | ItemLista) => {
+  const visitar = (b: Bloco | ItemLista | LinhaTabela | CelulaTabela) => {
     if (b.type === "paragraph" || b.type === "heading") partes.push((b.content ?? []).map((t) => t.text).join(""));
-    else if (b.type === "bulletList" || b.type === "orderedList" || b.type === "listItem") b.content.forEach(visitar);
+    else if (b.type === "bulletList" || b.type === "orderedList" || b.type === "listItem" || b.type === "table" || b.type === "tableRow" || b.type === "tableHeader" || b.type === "tableCell") b.content.forEach(visitar);
   };
   doc.content.forEach(visitar);
   return partes.filter(Boolean).join("\n");

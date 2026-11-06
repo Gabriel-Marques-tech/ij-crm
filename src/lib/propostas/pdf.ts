@@ -7,9 +7,10 @@
  */
 import type { BlocoPdf, DocumentoPdf, Trecho } from "@/lib/pdf/tipos";
 import { linhasInvestimento, tabelaCronograma, TITULO_BLOCO_DADOS } from "./blocos-dados";
-import { documentoComBlocos, type Bloco, type ItemLista, type NoTexto, type TipoBlocoDados } from "./documento";
+import { documentoComBlocos, type Bloco, type ItemLista, type NoTexto, type Tabela, type TipoBlocoDados } from "./documento";
 import type { Estruturado } from "./estruturado";
 import { markdownParaDocumento } from "./markdown";
+import { largurasDaTabela } from "./tabela";
 
 export { formatarDia, formatarReais } from "./blocos-dados";
 
@@ -52,6 +53,20 @@ function blocosDeDados(tipo: TipoBlocoDados, e: Estruturado): BlocoPdf[] {
   return linhas.length ? [titulo, ...linhas.map((l): BlocoPdf => ({ tipo: "paragrafo", semRecuo: true, trechos: [{ texto: `${l.rotulo}: ${l.valor}`, negrito: l.forte || undefined }] }))] : [];
 }
 
+/** Modelo da IJ: primeira coluna à esquerda e as demais centralizadas. Total: só a marca de quem escreveu. */
+function tabelaLivre(t: Tabela): BlocoPdf {
+  const larguras = largurasDaTabela(t);
+  const [cabecalho, ...corpo] = t.content;
+  const celulas = (l: Tabela["content"][number]) => l.content.map((c) => trechos(c.content[0]?.content));
+  const totais = corpo.flatMap((l, i) => (l.attrs?.total ? [i] : []));
+  return {
+    tipo: "tabela",
+    colunas: celulas(cabecalho).map((titulo, j) => ({ titulo, largura: larguras[j], alinhar: j === 0 ? "esquerda" : "centro" })),
+    linhas: corpo.map(celulas),
+    ...(totais.length ? { totais } : {}),
+  };
+}
+
 function blocosDoDocumento(blocos: Bloco[], e: Estruturado, nivel = 0): BlocoPdf[] {
   const saida: BlocoPdf[] = [];
   for (const b of blocos) {
@@ -71,6 +86,9 @@ function blocosDoDocumento(blocos: Bloco[], e: Estruturado, nivel = 0): BlocoPdf
         saida.push(...blocosDeDados(b.attrs.tipo, e));
         break;
       case "semBlocos":
+        break;
+      case "table":
+        saida.push(tabelaLivre(b));
         break;
       case "bulletList":
       case "orderedList":

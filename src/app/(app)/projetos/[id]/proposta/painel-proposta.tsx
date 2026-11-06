@@ -143,7 +143,10 @@ export function PainelProposta({
   const [gravandoDados, setGravandoDados] = useState(false);
   const [nota, setNota] = useState("");
   const [aviso, setAviso] = useState<string | null>(null);
+  const [versaoFalhou, setVersaoFalhou] = useState(false);
   const [ocupado, startTransition] = useTransition();
+  // O erro à vista é o da versão: "Tentar de novo" repete a versão. Gravou outra coisa depois, o erro já não é dela.
+  const repetirVersao = useRef(false);
   const [autosave] = useState(
     () =>
       new Autosave<Documento>({
@@ -261,6 +264,8 @@ export function PainelProposta({
 
   function salvarVersao() {
     setAviso(null);
+    setVersaoFalhou(false);
+    repetirVersao.current = false;
     pararTimerDados();
     startTransition(async () => {
       let numero: number | undefined;
@@ -279,6 +284,10 @@ export function PainelProposta({
         // Nada mudou desde a última versão: avisa, e o que estava pendente segue o caminho normal.
         setAviso(r.erro);
         if (sujo) void gravarDados();
+      } else if (!r?.ok && autosave.situacao.tipo === "erro") {
+        // Não some com o erro: o aviso fica até a próxima tentativa, mesmo que o texto grave depois.
+        setVersaoFalhou(true);
+        repetirVersao.current = true;
       }
       if (r?.ok) {
         if (sujo) confirmarSalvo(f, chavesDe(comMarcas));
@@ -371,7 +380,12 @@ export function PainelProposta({
     });
   }
 
+  useEffect(() => {
+    if (estado.tipo === "salvo") repetirVersao.current = false;
+  }, [estado.tipo]);
+
   const tentarDeNovo = () => {
+    if (repetirVersao.current) return salvarVersao();
     void autosave.agora().then(() => gravarDados());
   };
 
@@ -434,6 +448,7 @@ export function PainelProposta({
       </div>
       <Input aria-label="Nota da versão (opcional)" placeholder="Nota da versão (opcional)" maxLength={NOTA_VERSAO_MAX} value={nota} onChange={(e) => setNota(e.target.value)} />
       <p className="text-[11px] text-fg-faint">Salvar versão congela o texto e os dados como {ultimaVersao ? `v${ultimaVersao + 1}` : "v1"}.</p>
+      {versaoFalhou ? <p className="text-xs text-danger">A versão não foi salva.</p> : null}
       {aviso ? (
         <p role="status" className="text-xs text-fg-soft">
           {aviso}

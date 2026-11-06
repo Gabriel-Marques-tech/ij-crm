@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { normalizarDocumento, type Documento } from "./documento";
+import { markdownParaDocumento } from "./markdown";
 import { TOKEN_BLOCO, trechoLegivel, ancoraDoBloco, CONTEXTO_ANCORA, criarAncora, localizarAncora, normalizarBloco, normalizarContexto, normalizarTrecho, OCORRENCIAS_MAX, segmentosDeDestaque, textoPlano, TRECHO_MAX } from "./ancora";
 
 const doc: Documento = {
@@ -163,5 +164,53 @@ describe("âncora e blocos móveis (GAB-100)", () => {
     const a = criarAncora(texto, 0, 17)!;
     const depois = textoPlano({ type: "doc", content: [p("Trecho comentado."), b("cronograma"), p("Outro.")] }).texto;
     expect(localizarAncora(depois, a)).not.toBeNull();
+  });
+});
+
+describe("tabela (GAB-102)", () => {
+  const md = "Antes da tabela.\n\n| Item | Valor |\n| --- | --- |\n| Site a\\|b | |\n| <!-- total --> **Total** | R$ 10 |\n\nDepois.";
+  const d = markdownParaDocumento(md);
+
+  it("cada célula não vazia é um bloco do texto plano, sem nada do Markdown", () => {
+    expect(textoPlano(d).texto.split(TOKEN_BLOCO.cronograma)[0]).toBe("Antes da tabela.\nItem\nValor\nSite a|b\nTotal\nR$ 10\nDepois.\n");
+  });
+
+  it("documento sem tabela tem o mesmo texto plano de antes, e a âncora antiga continua achada", () => {
+    const antigo = markdownParaDocumento("a | b\n\n- item | x");
+    const { texto } = textoPlano(antigo);
+    expect(texto.startsWith("a | b\nitem | x")).toBe(true);
+    expect(localizarAncora(texto, { trecho: "a | b", antes: "", depois: "\nitem" })).toEqual({ inicio: 0, fim: 5 });
+  });
+
+  it("trecho em célula: criado, achado e com o pipe de verdade", () => {
+    const { texto } = textoPlano(d);
+    const i = texto.indexOf("a|b");
+    const a = criarAncora(texto, i, i + 3)!;
+    expect(a.trecho).toBe("a|b");
+    expect(localizarAncora(texto, a)).toEqual({ inicio: i, fim: i + 3 });
+  });
+
+  it("trecho que atravessa células guarda a quebra entre elas", () => {
+    const { texto } = textoPlano(d);
+    const i = texto.indexOf("Total");
+    const a = criarAncora(texto, i, i + "Total\nR$ 10".length)!;
+    expect(a.trecho).toBe("Total\nR$ 10");
+    expect(localizarAncora(texto, a)?.inicio).toBe(i);
+  });
+
+  it("mudar a célula deixa o comentário como trecho alterado; mudar outra célula não", () => {
+    const { texto } = textoPlano(d);
+    const i = texto.indexOf("R$ 10");
+    const a = criarAncora(texto, i, i + 5)!;
+    expect(localizarAncora(textoPlano(markdownParaDocumento(md.replace("R$ 10", "R$ 20"))).texto, a)).toBeNull();
+    expect(localizarAncora(textoPlano(markdownParaDocumento(md.replace("Antes", "Bem antes"))).texto, a)).not.toBeNull();
+  });
+
+  it("inserir tabela não invalida âncora de parágrafo", () => {
+    const antes = markdownParaDocumento("Um.\n\nDois.");
+    const { texto } = textoPlano(antes);
+    const a = criarAncora(texto, 4, 9)!;
+    const depois = textoPlano(markdownParaDocumento("Um.\n\n| x |\n| --- |\n\nDois.")).texto;
+    expect(depois.slice(localizarAncora(depois, a)!.inicio).startsWith("Dois.")).toBe(true);
   });
 });

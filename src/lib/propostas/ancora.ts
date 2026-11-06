@@ -27,9 +27,13 @@
  * o bloco à parte: quem cita a palavra "Cronograma" no texto nunca cai no bloco, e o
  * comentário do bloco nunca cai num título igual do texto. Tirar o bloco da folha marca o
  * comentário dele como "trecho alterado". Para mostrar a uma pessoa: `trechoLegivel`.
+ *
+ * Tabela (GAB-102): cada célula não vazia é um bloco de texto, linha a linha, sem nada do
+ * Markdown: o pipe de `a\|b` conta como `|`, e comentar um trecho que atravessa células guarda
+ * `\n` entre elas.
  */
 import { TITULO_BLOCO_DADOS } from "./blocos-dados";
-import { documentoComBlocos, TIPOS_BLOCO_DADOS, type Bloco, type Documento, type ItemLista, type TipoBlocoDados } from "./documento";
+import { documentoComBlocos, TIPOS_BLOCO_DADOS, type Bloco, type CelulaTabela, type Documento, type ItemLista, type LinhaTabela, type TipoBlocoDados } from "./documento";
 
 /** Área de uso privado do Unicode: não vem de texto digitado, e a normalização não mexe. */
 export const TOKEN_BLOCO: Record<TipoBlocoDados, string> = { cronograma: "\uE001", investimento: "\uE002" };
@@ -103,14 +107,14 @@ export type Faixa = { inicio: number; fim: number };
 export function textoPlano(doc: Documento): { texto: string; inicios: Map<object, number> } {
   const inicios = new Map<object, number>();
   let texto = "";
-  const visitar = (b: Bloco | ItemLista) => {
+  const visitar = (b: Bloco | ItemLista | LinhaTabela | CelulaTabela) => {
     if (b.type === "paragraph" || b.type === "heading" || b.type === "blocoDados") {
       const t = b.type === "blocoDados" ? TOKEN_BLOCO[b.attrs.tipo] : (b.content ?? []).map((n) => n.text).join("");
       if (!t) return;
       if (texto) texto += "\n";
       inicios.set(b, texto.length);
       texto += t;
-    } else if (b.type === "bulletList" || b.type === "orderedList" || b.type === "listItem") b.content.forEach(visitar);
+    } else if (b.type === "bulletList" || b.type === "orderedList" || b.type === "listItem" || b.type === "table" || b.type === "tableRow" || b.type === "tableHeader" || b.type === "tableCell") b.content.forEach(visitar);
   };
   documentoComBlocos(doc).content.forEach(visitar);
   return { texto, inicios };

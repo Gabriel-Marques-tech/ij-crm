@@ -6,7 +6,7 @@
  *   escapa todo caractere de texto que o Markdown leria como formatação.
  * - `markdownParaDocumento`: o lexer do `marked` (sem dependências, só no
  *   servidor) quebra o Markdown em tokens; cada token fora do subconjunto
- *   (link, imagem, HTML, código, tabela…) vira TEXTO literal. Nada aqui gera
+ *   (link, imagem, HTML, código…) vira TEXTO literal. Nada aqui gera
  *   HTML: a tela desenha o documento como elementos React (texto escapado), e
  *   o editor recebe JSON — Markdown/HTML vindo do MCP nunca injeta marcação.
  *
@@ -17,13 +17,23 @@
  * qualquer outro comentário continua literal. Só esses três viram nó, e o nó não
  * guarda dado nenhum: só o lugar.
  *
+ * Tabela (GAB-102): tabela GFM padrão, no nível de cima, com `| --- |` em todas as colunas.
+ * A linha de total leva `<!-- total -->` no começo da primeira célula: acompanha a linha se
+ * alguém a mover, e outro leitor de Markdown não mostra. `a | b` em parágrafo continua texto, sem
+ * escape novo, e Markdown canônico antigo nunca vira tabela: lá não existem duas linhas de
+ * texto coladas, e a régua precisa vir colada no cabeçalho. Pipe na
+ * célula sai `\|`; `<br>` vira espaço; linha com células a mais alarga a tabela, e com células a
+ * menos completa com vazias. Colunas alinhadas (`:---:`) perdem o alinhamento: o modelo da IJ é
+ * um só. Tabela além dos limites (ou dentro de lista) vira parágrafos `a | b`, sem perder texto.
+ *
  * Garantias (testadas em `markdown.test.ts`, inclusive com documentos
  * aleatórios): para todo documento normalizado `d`,
  * `markdownParaDocumento(documentoParaMarkdown(d))` é `d`; e o Markdown
  * canônico é ponto fixo de `normalizarMarkdown`.
  */
 import { Lexer, type Token, type Tokens } from "marked";
-import { MARCAS, normalizarDocumento, type Bloco, type Documento, type ItemLista, type Marca, type NoTexto, type TipoBlocoDados } from "./documento";
+import { MARCAS, normalizarDocumento, normalizarTabela, tabelaComoParagrafos, type Bloco, type Documento, type ItemLista, type LinhaTabela, type Marca, type NoTexto, type Tabela, type TipoBlocoDados } from "./documento";
+import { medirTabela, motivoForaDoLimite } from "./tabela";
 
 // ---------------------------------------------------------------- doc → Markdown
 
@@ -31,14 +41,21 @@ const DELIM: Record<Marca, string> = { bold: "**", italic: "*" };
 
 const marcadorDe = (tipo: TipoBlocoDados | "nenhum") => `<!-- bloco:${tipo} -->`;
 const MARCADOR = /^<!--\s*bloco:(cronograma|investimento|nenhum)\s*-->$/;
+const MARCA_TOTAL = "<!-- total -->";
+const MARCA_TOTAL_NA_CELULA = /^<!--\s*total\s*-->\s*/;
 
 /** Caracteres que o Markdown pode ler como formatação em qualquer ponto da linha. */
 const ESCAPAR_SEMPRE = /[\\*_`[\]<~]/g;
 
-function escaparTexto(texto: string, inicioDeLinha: boolean, emTitulo: boolean): string {
+/** Onde o texto vai: o que precisa de escape além do que vale em todo lugar. */
+type Lugar = "bloco" | "titulo" | "celula";
+
+function escaparTexto(texto: string, inicioDeLinha: boolean, lugar: Lugar): string {
   // `&` só antes de algo com cara de entidade (`&#42;`, `&amp;`): o `marked` decodifica algumas.
   let s = texto.replace(ESCAPAR_SEMPRE, (c) => `\\${c}`).replace(/&(?=#?[0-9A-Za-z]+;)/g, "\\&");
-  if (emTitulo) s = s.replace(/#/g, "\\#");
+  if (lugar === "titulo") s = s.replace(/#/g, "\\#");
+  // Na célula só o pipe é especial: ela nunca é lida como início de bloco.
+  if (lugar === "celula") return s.replace(/\|/g, "\\|");
   if (inicioDeLinha) {
     if (/^[#>+\-=|]/.test(s)) s = `\\${s}`;
     else s = s.replace(/^(\d{1,9})([.)])/, "$1\\$2");
@@ -51,7 +68,7 @@ function escaparTexto(texto: string, inicioDeLinha: boolean, emTitulo: boolean):
  * longe abre primeiro (fica por fora): assim "itálico que contém um negrito"
  * sai `*a **b** c*` e não fecha/reabre delimitadores colados.
  */
-function serializarInline(content: NoTexto[] | undefined, emTitulo = false): string {
+function serializarInline(content: NoTexto[] | undefined, lugar: Lugar = "bloco"): string {
   const nos = content ?? [];
   const marcasDe = (n: NoTexto) => MARCAS.filter((m) => (n.marks ?? []).some((x) => x.type === m));
   const marcas = nos.map(marcasDe);
@@ -79,7 +96,7 @@ function serializarInline(content: NoTexto[] | undefined, emTitulo = false): str
       saida += DELIM[m];
       abertas.push(m);
     }
-    saida += escaparTexto(n.text, saida.length === 0, emTitulo);
+    saida += escaparTexto(n.text, saida.length === 0, lugar);
   });
   for (let k = abertas.length - 1; k >= 0; k--) saida += DELIM[abertas[k]];
   return saida;
@@ -104,18 +121,31 @@ function serializarItem(item: ItemLista, marcador: string): string[] {
   return [primeira === "" ? marcador : `${marcador} ${primeira}`, ...indentar(resto, recuo)];
 }
 
+function serializarLinhaDaTabela(l: LinhaTabela): string {
+  const celulas = l.content.map((c) => serializarInline(c.content[0]?.content, "celula"));
+  if (l.attrs?.total) celulas[0] = celulas[0] ? `${MARCA_TOTAL} ${celulas[0]}` : MARCA_TOTAL;
+  return `| ${celulas.join(" | ")} |`;
+}
+
+function serializarTabela(t: Tabela): string[] {
+  const [cabecalho, ...corpo] = t.content;
+  return [serializarLinhaDaTabela(cabecalho), `| ${cabecalho.content.map(() => "---").join(" | ")} |`, ...corpo.map(serializarLinhaDaTabela)];
+}
+
 function serializarBloco(b: Bloco): string[] {
   switch (b.type) {
     case "paragraph":
       return [serializarInline(b.content)];
     case "heading":
-      return [`${"#".repeat(b.attrs.level)} ${serializarInline(b.content, true)}`];
+      return [`${"#".repeat(b.attrs.level)} ${serializarInline(b.content, "titulo")}`];
     case "horizontalRule":
       return ["---"];
     case "blocoDados":
       return [marcadorDe(b.attrs.tipo)];
     case "semBlocos":
       return [marcadorDe("nenhum")];
+    case "table":
+      return serializarTabela(b);
     case "bulletList":
       return b.content.flatMap((it) => serializarItem(it, "-"));
     case "orderedList":
@@ -180,8 +210,61 @@ function paragrafosLiterais(cru: string): Bloco[] {
     .map((l) => ({ type: "paragraph", content: [{ type: "text", text: l }] }));
 }
 
-/** `topo`: nível de cima do documento, o único lugar onde um marcador vira bloco móvel. */
-function blocos(tokens: Token[] | undefined, topo = false): Bloco[] {
+/**
+ * Células da linha crua, como o GFM divide: `|` com número ímpar de barras antes não divide, e
+ * `\\|` vira `|`. O `marked` corta o que passa da largura do cabeçalho, e isso seria perder texto.
+ */
+function dividirCelulas(linha: string): string[] {
+  const celulas: string[] = [];
+  let atual = "";
+  let barras = 0;
+  for (const c of linha.trim()) {
+    if (c === "|" && barras % 2 === 0) {
+      celulas.push(atual);
+      atual = "";
+    } else {
+      atual = c === "|" ? `${atual.slice(0, -1)}|` : atual + c;
+    }
+    barras = c === "\\" ? barras + 1 : 0;
+  }
+  celulas.push(atual);
+  if (celulas.length > 1 && !celulas[0].trim()) celulas.shift();
+  if (celulas.length > 1 && !celulas[celulas.length - 1].trim()) celulas.pop();
+  return celulas.map((c) => c.trim());
+}
+
+/** Quebra de linha em célula só existe como `<br>`: vira espaço (`\<br>`, texto literal, fica). */
+const BR_NA_CELULA = /(?<!\\)<br\s*\/?>/gi;
+
+function celulaDoMarkdown(cru: string): { type: "tableCell"; content: [{ type: "paragraph"; content: NoTexto[] }] } {
+  const tokens = Lexer.lexInline(cru.replace(BR_NA_CELULA, " ").trim(), { gfm: true, breaks: false });
+  return { type: "tableCell", content: [{ type: "paragraph", content: inline(tokens) }] };
+}
+
+/** Do token do `marked`, pelas linhas cruas (as células que ele cortaria continuam aqui). */
+function tabelaDoToken(tk: Tokens.Table): Tabela | null {
+  const [cabecalho, , ...corpo] = tk.raw.split("\n").filter((l) => l.trim());
+  const linhas = [cabecalho, ...corpo].map((linha, i): LinhaTabela => {
+    const cruas = dividirCelulas(linha);
+    const total = i > 0 && MARCA_TOTAL_NA_CELULA.test(cruas[0]);
+    if (total) cruas[0] = cruas[0].replace(MARCA_TOTAL_NA_CELULA, "");
+    const content = cruas.map(celulaDoMarkdown);
+    return total ? { type: "tableRow", attrs: { total: true }, content } : { type: "tableRow", content };
+  });
+  return normalizarTabela({ type: "table", content: linhas });
+}
+
+type LeituraMarkdown = {
+  /** Nível de cima do documento, o único lugar onde um marcador vira bloco móvel. */
+  topo?: boolean;
+  /** Onde a tabela vira nó: o nível de cima e a citação solta nele. Em lista, vira parágrafos. */
+  tabela?: boolean;
+  /** Motivos das tabelas que passaram dos limites e entraram como parágrafos. */
+  foraDoLimite?: string[];
+};
+
+function blocos(tokens: Token[] | undefined, leitura: LeituraMarkdown = {}): Bloco[] {
+  const { topo = false, tabela = false, foraDoLimite } = leitura;
   const saida: Bloco[] = [];
   for (const tk of tokens ?? []) {
     switch (tk.type) {
@@ -205,24 +288,21 @@ function blocos(tokens: Token[] | undefined, topo = false): Bloco[] {
         break;
       case "list": {
         const l = tk as Tokens.List;
-        const content: ItemLista[] = l.items.map((it) => ({ type: "listItem", content: blocos(it.tokens) }));
+        const content: ItemLista[] = l.items.map((it) => ({ type: "listItem", content: blocos(it.tokens, { foraDoLimite }) }));
         const inicio = typeof l.start === "number" ? l.start : 1;
         saida.push(l.ordered ? { type: "orderedList", attrs: { start: inicio }, content } : { type: "bulletList", content });
         break;
       }
       case "blockquote":
-        saida.push(...blocos((tk as Tokens.Blockquote).tokens));
+        saida.push(...blocos((tk as Tokens.Blockquote).tokens, { tabela, foraDoLimite }));
         break;
       case "table": {
-        const tb = tk as Tokens.Table;
-        for (const linha of [tb.header, ...tb.rows]) {
-          const content: NoTexto[] = [];
-          linha.forEach((cel, i) => {
-            if (i > 0) content.push({ type: "text", text: " | " });
-            content.push(...inline(cel.tokens));
-          });
-          saida.push({ type: "paragraph", content });
-        }
+        const t = tabelaDoToken(tk as Tokens.Table);
+        if (!t) break;
+        const motivo = motivoForaDoLimite(medirTabela(t));
+        if (motivo) foraDoLimite?.push(motivo);
+        if (tabela && !motivo) saida.push(t);
+        else saida.push(...tabelaComoParagrafos(t));
         break;
       }
       case "code":
@@ -245,7 +325,17 @@ function blocos(tokens: Token[] | undefined, topo = false): Bloco[] {
 
 export function markdownParaDocumento(md: string): Documento {
   const tokens = new Lexer({ gfm: true, breaks: false }).lex(md);
-  return normalizarDocumento({ type: "doc", content: blocos(tokens, true) });
+  return normalizarDocumento({ type: "doc", content: blocos(tokens, { topo: true, tabela: true }) });
+}
+
+/**
+ * Por que alguma tabela deste Markdown não caberia (null = nenhuma). Quem escreve pelo MCP recebe o
+ * erro em vez de ver a tabela virar parágrafos; a canonização em si nunca falha (o OCR passa por ela).
+ */
+export function motivoTabelaForaDoLimite(md: string): string | null {
+  const foraDoLimite: string[] = [];
+  blocos(new Lexer({ gfm: true, breaks: false }).lex(md), { topo: true, tabela: true, foraDoLimite });
+  return foraDoLimite[0] ?? null;
 }
 
 /** Markdown qualquer (ex.: vindo do MCP) → Markdown canônico do subconjunto. */

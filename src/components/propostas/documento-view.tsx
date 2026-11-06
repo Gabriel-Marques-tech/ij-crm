@@ -1,9 +1,10 @@
-import { Fragment, type ReactNode } from "react";
+import { Fragment, type CSSProperties, type ReactNode } from "react";
 import { cn } from "cn";
 import { segmentosDeDestaque, textoPlano, type Destaque } from "@/lib/propostas/ancora";
 import { TITULO_BLOCO_DADOS } from "@/lib/propostas/blocos-dados";
-import { documentoComBlocos, type Bloco, type BlocoDados, type Documento, type ItemLista, type NoTexto, type TipoBlocoDados } from "@/lib/propostas/documento";
+import { documentoComBlocos, type Bloco, type BlocoDados, type CelulaTabela, type Documento, type ItemLista, type NoTexto, type Tabela, type TipoBlocoDados } from "@/lib/propostas/documento";
 import type { Estruturado } from "@/lib/propostas/estruturado";
+import { largurasDaTabela } from "@/lib/propostas/tabela";
 import { BlocoDadosView } from "./bloco-dados-view";
 
 /**
@@ -76,6 +77,52 @@ function TituloDoBloco({ bloco, anot }: { bloco: BlocoDados; anot: Anotacao | nu
   );
 }
 
+function TextoDaCelula({ celula, anot }: { celula: CelulaTabela; anot: Anotacao | null }) {
+  const paragrafo = celula.content[0];
+  return (
+    <p>
+      <Inline nos={paragrafo?.content} bloco={paragrafo} anot={anot} />
+    </p>
+  );
+}
+
+/** A mesma tabela do editor (`tabela-node.ts`) e as mesmas colunas do PDF. A rolagem é da tabela, nunca da página. */
+function TabelaLivre({ tabela, anot }: { tabela: Tabela; anot: Anotacao | null }) {
+  const [cabecalho, ...corpo] = tabela.content;
+  const larguras = largurasDaTabela(tabela);
+  return (
+    <div className="tabela-rolagem">
+      <table className="tabela-livre" style={{ "--colunas": larguras.length } as CSSProperties}>
+        <colgroup>
+          {larguras.map((l, j) => (
+            <col key={j} style={{ width: `${l * 100}%` }} />
+          ))}
+        </colgroup>
+        <thead>
+          <tr>
+            {cabecalho.content.map((c, j) => (
+              <th key={j} scope="col">
+                <TextoDaCelula celula={c} anot={anot} />
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {corpo.map((l, i) => (
+            <tr key={i} className={l.attrs?.total ? "total" : undefined}>
+              {l.content.map((c, j) => (
+                <td key={j}>
+                  <TextoDaCelula celula={c} anot={anot} />
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function Itens({ itens, anot, folha }: { itens: ItemLista[]; anot: Anotacao | null; folha?: Folha }) {
   return (
     <>
@@ -121,6 +168,8 @@ function Blocos({ blocos, anot, folha }: { blocos: Bloco[]; anot: Anotacao | nul
             ) : null;
           case "semBlocos":
             return null;
+          case "table":
+            return <TabelaLivre key={i} tabela={b} anot={anot} />;
           case "bulletList":
             return (
               <ul key={i}>

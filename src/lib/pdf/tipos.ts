@@ -10,6 +10,9 @@
 /** Trecho de texto com a formatação que o editor da proposta permite. */
 export type Trecho = { texto: string; negrito?: boolean; italico?: boolean };
 
+/** Célula de tabela: texto simples ou trechos com negrito e itálico. */
+export type CelulaPdf = string | Trecho[];
+
 export type BlocoPdf =
   | { tipo: "titulo"; nivel: 1 | 2 | 3; trechos: Trecho[] }
   /** `semRecuo`: sem o recuo de primeira linha do template (linhas de dados). */
@@ -19,8 +22,12 @@ export type BlocoPdf =
   | { tipo: "linha" }
   /** Pares rótulo → valor (ex.: Valor total, Prazo). */
   | { tipo: "campos"; linhas: { rotulo: string; valor: string }[] }
-  /** Tabela simples: `largura` em frações (somam 1); cabeçalho repetido se a tabela quebra de página; `total` = última linha em destaque. */
-  | { tipo: "tabela"; colunas: { titulo: string; largura: number; alinhar?: "esquerda" | "centro" | "direita" }[]; linhas: string[][]; total?: string[] };
+  /**
+   * Tabela: `largura` em frações (somam 1); cabeçalho repetido se a tabela quebra de página, sem partir
+   * linha (só a que não cabe numa página inteira). `total` = última linha em destaque; `totais` = índices
+   * de `linhas` em destaque, marcados por quem escreve.
+   */
+  | { tipo: "tabela"; colunas: { titulo: CelulaPdf; largura: number; alinhar?: "esquerda" | "centro" | "direita" }[]; linhas: CelulaPdf[][]; total?: CelulaPdf[]; totais?: number[] };
 
 /** Capa: página inteira do template, antes do conteúdo. */
 export type CapaPdf = { titulo: string; empresa: string; data: string; endereco: string };

@@ -488,6 +488,37 @@ describe("blocos móveis e duração via MCP (GAB-100)", () => {
   });
 });
 
+describe("tabela via MCP (GAB-102)", () => {
+  it("escreve, lê, comenta em célula, salva versão e compara: o mesmo Markdown da tela", async () => {
+    const s = await semear();
+    const card = await criarCard({ pipelineId: s.vendas.id, faseId: fase(s.vendas, "primeiro_contato").id, titulo: "Site da Padaria" }, s.vendedora);
+    if (!card.ok) throw new Error("seed");
+    const id = card.id;
+    const vendedora = s.vendedora;
+    await executarFerramenta("criar_proposta", { projeto_id: id }, vendedora);
+    const lida = dados(await executarFerramenta("ler_proposta", { projeto_id: id }, vendedora));
+    expect(lida.formatacao).toContain("tabela");
+    expect(lida.formatacao).toContain("<!-- total -->");
+
+    const ed = dados(await executarFerramenta("editar_proposta", { projeto_id: id, revisao: 0, markdown: "Antes.\n\n|Item|Valor|\n|:--|--:|\n|**Site** a\\|b|10<br>mil|extra|\n|<!-- total --> Total|10|\n<!-- bloco:cronograma -->" }, vendedora));
+    const canonico = "Antes.\n\n| Item | Valor |  |\n| --- | --- | --- |\n| **Site** a\\|b | 10 mil | extra |\n| <!-- total --> Total | 10 |  |\n\n<!-- bloco:cronograma -->";
+    expect(ed.markdownGravado).toBe(canonico);
+    expect(dados(await executarFerramenta("ler_proposta", { projeto_id: id }, vendedora)).markdown).toBe(canonico);
+    // O que o MCP leu, reenviado igual, não muda nada.
+    expect(dados(await executarFerramenta("editar_proposta", { projeto_id: id, revisao: 1, markdown: canonico }, vendedora)).mudou).toBe(false);
+
+    // Comentar: o trecho é o texto da célula, com o pipe de verdade.
+    expect(dados(await executarFerramenta("comentar_proposta", { projeto_id: id, texto: "Confere?", trecho: "a|b" }, vendedora))).toBeTruthy();
+    const comentarios = dados(await executarFerramenta("listar_comentarios_proposta", { projeto_id: id }, vendedora));
+    expect(JSON.stringify(comentarios)).toContain("a|b");
+    expect(JSON.stringify(comentarios)).not.toContain("trecho alterado");
+
+    // Além do limite, o MCP recebe o erro, em vez de a tabela virar parágrafos sem aviso.
+    const grande = ["| a |", "| --- |", ...Array.from({ length: 100 }, () => "| b |")].join("\n");
+    expect(texto(await executarFerramenta("editar_proposta", { projeto_id: id, revisao: 1, markdown: grande }, vendedora))).toMatch(/até 100 linhas/);
+  });
+});
+
 describe("caneta via MCP (GAB-87): mesmas regras e permissões da tela", () => {
   async function comProposta() {
     const s = await semear();

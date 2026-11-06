@@ -54,7 +54,7 @@ import { diffEstruturado, diffMarkdown, type LinhaDiff, type MudancaCampo } from
 import { lerDocumento, MARKDOWN_MAX } from "./documento";
 import { PEDIDO_REVISAO_MAX, recusaDoEnvio, RESPOSTAS_CLIENTE, versaoDoPdf, type AcaoEnvio, type RespostaCliente } from "./envio";
 import { interpretarEstruturado, lerEstruturadoGravado, mesmoEstruturado, type Estruturado } from "./estruturado";
-import { documentoParaMarkdown, markdownParaDocumento } from "./markdown";
+import { documentoParaMarkdown, markdownParaDocumento, motivoTabelaForaDoLimite } from "./markdown";
 import { documentoPdfDaProposta, nomeArquivoPdf } from "./pdf";
 import { MENSAGEM_ERRO_PROPOSTA, mensagemConflito, NOTA_VERSAO_MAX, podeCriarProposta, type ErroProposta } from "./regras";
 
@@ -187,6 +187,7 @@ function conteudoParaMarkdown(c: ConteudoEntrada): string {
   if ("markdown" in c) {
     if (typeof c.markdown !== "string") falhar("CONTEUDO_INVALIDO");
     if (c.markdown.length > MARKDOWN_MAX) falhar("CONTEUDO_LONGO");
+    if (motivoTabelaForaDoLimite(c.markdown)) falhar("TABELA_GRANDE");
     return documentoParaMarkdown(markdownParaDocumento(c.markdown));
   }
   const doc = lerDocumento(c.documento);
