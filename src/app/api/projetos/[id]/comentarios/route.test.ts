@@ -64,4 +64,10 @@ describe("GET /api/projetos/[id]/comentarios (polling)", () => {
     expect(r.status).toBe(403);
     expect(m.listarComentarios).not.toHaveBeenCalled();
   });
+
+  it("o polling é por leitor: os pendentes de cada um só entram no carimbo e na lista dele (GAB-101)", async () => {
+    await GET(req("?v=velha"), ctx());
+    expect(m.versaoDosComentarios).toHaveBeenCalledWith("p1", expect.objectContaining({ id: "u1" }));
+    expect(m.listarComentarios).toHaveBeenCalledWith("p1", expect.objectContaining({ id: "u1" }));
+  });
 });

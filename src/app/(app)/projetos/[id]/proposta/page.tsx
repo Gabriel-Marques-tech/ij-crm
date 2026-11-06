@@ -85,7 +85,7 @@ export default async function PropostaPage({ params }: { params: Promise<{ id: s
   // GAB-90: anexos para "Usar arquivo como base" (só quem está com a caneta edita e usa).
   const anexos = edita ? await listarAnexos(projeto.id) : [];
   // GAB-91: comentários (carga inicial; depois o polling do provider). JSON: datas como texto, como na API.
-  const comentarios = proposta ? await listarComentarios(projeto.id) : null;
+  const comentarios = proposta ? await listarComentarios(projeto.id, eu) : null;
   const comentariosIniciais = JSON.parse(JSON.stringify(comentarios ?? { versao: "", threads: [] })) as { versao: string; threads: ThreadJson[] };
 
   const capa: DadosCapa | undefined = proposta
