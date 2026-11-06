@@ -173,6 +173,10 @@ describe("permissão por ferramenta: o MCP não faz nada que a tela não deixa",
       ["responder_comentario_proposta", { comentario_id: coment.comentario.id, texto: "De acordo" }],
       ["resolver_comentario_proposta", { comentario_id: coment.comentario.id }],
       ["reabrir_comentario_proposta", { comentario_id: coment.comentario.id }],
+      ["sugerir_texto_proposta", { projeto_id: card.id, trecho: "x", texto_novo: "y" }],
+      ["adicionar_a_revisao_proposta", { projeto_id: card.id, texto: "Vi aqui" }],
+      ["enviar_revisao_proposta", { projeto_id: card.id }],
+      ["descartar_da_revisao_proposta", { comentario_id: coment.comentario.id }],
     ] as const;
     // Um caso por ferramenta de leitura: ferramenta nova sem caso aqui quebra o teste.
     expect(leituras.map(([n]) => n).sort()).toEqual(FERRAMENTAS.filter((f) => !f.escrita).map((f) => f.nome).sort());
@@ -925,5 +929,44 @@ describe("comentários via MCP (GAB-91): mesma camada e permissões da tela", ()
     expect(gravam).toHaveLength(4);
     for (const f of gravam) expect(f.muda, f.nome).toBe(true);
     expect(FERRAMENTAS.find((f) => f.nome === "listar_comentarios_proposta")?.muda).toBeFalsy();
+  });
+
+  it("GAB-101: sugerir, adicionar à revisão e enviar pelo MCP, com o mesmo serviço; pendente só para o autor", async () => {
+    const { vendas, vendedora, projetos } = await semear();
+    const card = await criarCard({ pipelineId: vendas.id, faseId: fase(vendas, "primeiro_contato").id, titulo: "Padaria" }, vendedora);
+    if (!card.ok) throw new Error("seed");
+    await criarProposta(card.id, vendedora);
+    await executarFerramenta("editar_proposta", { projeto_id: card.id, revisao: 0, markdown: "## Prazo\n\nEntrega em 30 dias." }, vendedora);
+    await db.proposta.update({ where: { projetoId: card.id }, data: { periodosCaneta: { create: { usuarioId: projetos.id, lado: "PROJETOS", inicio: new Date() } } } });
+
+    const pub = dados(await executarFerramenta("sugerir_texto_proposta", { projeto_id: card.id, trecho: "30 dias", texto_novo: "45 dias", texto: "Mais folga" }, projetos));
+    expect(pub.pendente).toBe(false);
+    const naoCabe = await executarFerramenta("sugerir_texto_proposta", { projeto_id: card.id, trecho: "Cronograma", texto_novo: "x" }, projetos);
+    expect(naoCabe.isError).toBe(true);
+    expect(texto(naoCabe)).toMatch(/mesmo bloco/);
+
+    await executarFerramenta("sugerir_texto_proposta", { projeto_id: card.id, trecho: "Prazo", texto_novo: "Prazos", em_revisao: true }, projetos);
+    const noCampo = dados(await executarFerramenta("adicionar_a_revisao_proposta", { projeto_id: card.id, texto: "Caro", campo: "valor" }, projetos));
+    expect(noCampo.pendente).toBe(true);
+    const fora = dados(await executarFerramenta("adicionar_a_revisao_proposta", { projeto_id: card.id, texto: "Vou tirar" }, projetos));
+    expect(dados(await executarFerramenta("descartar_da_revisao_proposta", { comentario_id: fora.id }, projetos)).descartado).toBe(true);
+
+    const meus = dados(await executarFerramenta("listar_comentarios_proposta", { projeto_id: card.id }, projetos));
+    expect(meus).toMatchObject({ total: 1, abertos: 1, pendentes_da_sua_revisao: 2 });
+    expect(meus.comentarios[0].sugestao).toEqual({ texto: "45 dias", desatualizada: false, aplicada: null });
+    expect(meus.comentarios.find((c: { campo?: string }) => c.campo === "valor").pendente).toBe(true);
+
+    const outros = dados(await executarFerramenta("listar_comentarios_proposta", { projeto_id: card.id }, vendedora));
+    expect(outros).toMatchObject({ total: 1, abertos: 1, pendentes_da_sua_revisao: 0 });
+    expect(outros.comentarios).toHaveLength(1);
+    expect((await executarFerramenta("responder_comentario_proposta", { comentario_id: noCampo.id, texto: "x" }, vendedora)).isError).toBe(true);
+
+    const antes = await db.aviso.count();
+    expect(dados(await executarFerramenta("enviar_revisao_proposta", { projeto_id: card.id }, projetos)).publicados).toBe(2);
+    expect(await db.aviso.count()).toBe(antes + 1);
+    expect(dados(await executarFerramenta("listar_comentarios_proposta", { projeto_id: card.id }, vendedora)).abertos).toBe(3);
+    const nada = await executarFerramenta("enviar_revisao_proposta", { projeto_id: card.id }, projetos);
+    expect(nada.isError).toBe(true);
+    for (const n of ["sugerir_texto_proposta", "adicionar_a_revisao_proposta", "enviar_revisao_proposta", "descartar_da_revisao_proposta"]) expect(FERRAMENTAS.find((f) => f.nome === n)?.muda, n).toBe(true);
   });
 });

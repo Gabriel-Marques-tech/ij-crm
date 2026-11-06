@@ -175,7 +175,7 @@ function semBlocos(t: string): { texto: string; mapa: number[] } {
     texto += t[i];
     mapa.push(i);
   }
-  return { texto: texto.replace(/\n+$/, ""), mapa };
+  return { texto, mapa };
 }
 
 /**
@@ -187,7 +187,8 @@ export function localizarAncora(texto: string, a: Ancora): Faixa | null {
   if (!a.trecho) return null;
   const exato = buscar(texto, a);
   if (exato) return exato;
-  const trecho = semBlocos(a.trecho).texto;
+  // Só o trecho é aparado: o `\n` final do contexto "antes" é o que separa duas ocorrências iguais.
+  const trecho = semBlocos(a.trecho).texto.replace(/\n+$/, "");
   if (!trecho) return null;
   const plano = semBlocos(texto);
   const f = buscar(plano.texto, { trecho, antes: semBlocos(a.antes).texto, depois: semBlocos(a.depois).texto });

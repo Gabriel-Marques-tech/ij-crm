@@ -209,6 +209,7 @@ model Usuario {
   checkins          ProjetoCheckin[]
   comentariosProposta   PropostaComentario[] @relation("comentarioAutor")
   comentariosResolvidos PropostaComentario[] @relation("comentarioResolvidoPor")
+  sugestoesAplicadas    PropostaComentario[] @relation("comentarioSugestaoAplicadaPor")
 
   @@map("usuario")
 }
@@ -1063,6 +1064,15 @@ model PropostaComentario {
   trecho         String?
   trechoAntes    String?   @map("trecho_antes")
   trechoDepois   String?   @map("trecho_depois")
+  /// GAB-101: comentário preso a um campo dos dados estruturados (só na raiz; sem trecho).
+  campo          String?
+  /// GAB-101: texto novo proposto para o trecho ("" = apagar). Só na raiz e com trecho.
+  sugestao       String?
+  /// GAB-101: quem aplicou a sugestão no rascunho. Reabrir a conversa não apaga.
+  sugestaoAplicadaEm    DateTime? @map("sugestao_aplicada_em")
+  sugestaoAplicadaPorId String?   @map("sugestao_aplicada_por_id")
+  /// GAB-101: revisão em lote. Só o autor vê até "Enviar revisão"; não conta como aberto.
+  pendente       Boolean   @default(false)
   viaMcp         Boolean   @default(false) @map("via_mcp")
   /// Só na raiz: resolvido (null = aberto). Reabrir zera; o histórico fica na Timeline.
   resolvidoEm    DateTime? @map("resolvido_em")
@@ -1076,6 +1086,7 @@ model PropostaComentario {
   respostas    PropostaComentario[] @relation("respostas")
   autor        Usuario              @relation("comentarioAutor", fields: [autorId], references: [id])
   resolvidoPor Usuario?             @relation("comentarioResolvidoPor", fields: [resolvidoPorId], references: [id], onDelete: SetNull)
+  sugestaoAplicadaPor Usuario?      @relation("comentarioSugestaoAplicadaPor", fields: [sugestaoAplicadaPorId], references: [id], onDelete: SetNull)
 
   @@index([propostaId, criadoEm])
   @@index([paiId])

@@ -377,7 +377,13 @@ export async function criarProposta(projetoId: string, ator: Ator): Promise<Resu
   });
 }
 
-type MudancaRascunho = { revisao: number; conteudo?: ConteudoEntrada; estruturado?: unknown };
+type MudancaRascunho = {
+  revisao: number;
+  conteudo?: ConteudoEntrada;
+  estruturado?: unknown;
+  /** GAB-101: muda o texto já validado, depois das conferências de caneta e revisão. */
+  transformar?: (tx: Tx, md: string) => Promise<string>;
+};
 
 /**
  * Núcleo do rascunho, dentro da transação: valida, compara com o atual e grava
@@ -393,12 +399,16 @@ async function aplicarRascunho(tx: Tx, projetoId: string, m: MudancaRascunho, at
   // Caneta: só o dono grava (tela e MCP), conferido aqui — o caminho de toda escrita do rascunho.
   const recusa = recusaDeEdicao(pessoa, estado);
   if (recusa) falhar(recusa);
-  const md = m.conteudo ? conteudoParaMarkdown(m.conteudo) : atual.conteudoMd;
+  let md = m.conteudo ? conteudoParaMarkdown(m.conteudo) : atual.conteudoMd;
   const estAtual = lerEstruturadoGravado(atual.estruturado);
   const est = m.estruturado !== undefined ? lerEstruturado(m.estruturado) : estAtual;
   if (m.revisao !== atual.revisao) {
     const p = await tx.proposta.findUniqueOrThrow({ where: { id: atual.id }, select: SELECAO_CONFLITO });
     throw new ErroDeProposta({ ok: false, erro: "CONFLITO", conflito: paraConflito(p) });
+  }
+  if (m.transformar) {
+    md = await m.transformar(tx, md);
+    if (md.length > MARKDOWN_MAX) falhar("CONTEUDO_LONGO");
   }
   if (md === atual.conteudoMd && mesmoEstruturado(est, estAtual)) {
     return { id: atual.id, revisao: atual.revisao, mudou: false, markdown: md, estruturado: est };
@@ -433,6 +443,25 @@ export async function salvarRascunho(
     await travarProposta(tx, projetoId);
     const r = await aplicarRascunho(tx, projetoId, m, ator);
     return { ok: true as const, revisao: r.revisao, mudou: r.mudou, markdown: r.markdown, estruturado: r.estruturado };
+  });
+}
+
+/**
+ * GAB-101: grava no rascunho o texto que `transformar` devolve, pelo mesmo núcleo do autosave (lock,
+ * caneta, revisão, conflito), e roda `depois` na mesma transação. `transformar` e `depois` podem
+ * lançar para desfazer tudo (quem chama trata o próprio erro).
+ */
+export async function alterarRascunho(
+  projetoId: string,
+  m: { revisao: number; conteudo?: ConteudoEntrada; transformar: (tx: Tx, md: string) => Promise<string> },
+  ator: Ator,
+  depois: (tx: Tx) => Promise<void>,
+): Promise<Resultado<{ revisao: number }>> {
+  return emTransacao(async (tx) => {
+    await travarProposta(tx, projetoId);
+    const r = await aplicarRascunho(tx, projetoId, m, ator);
+    await depois(tx);
+    return { ok: true as const, revisao: r.revisao };
   });
 }
 

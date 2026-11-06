@@ -164,4 +164,13 @@ describe("âncora e blocos móveis (GAB-100)", () => {
     const depois = textoPlano({ type: "doc", content: [p("Trecho comentado."), b("cronograma"), p("Outro.")] }).texto;
     expect(localizarAncora(depois, a)).not.toBeNull();
   });
+
+  it("segunda busca (trecho atravessa bloco que saiu): o `\\n` final de `antes` conta, e o destaque fica na segunda ocorrência", () => {
+    const original = "x\nB\n\uE001\nC\ny\nB\n\uE002\nC";
+    const inicio = original.lastIndexOf("B");
+    const a = criarAncora(original, inicio, original.length)!;
+    expect(a.antes.endsWith("y\n")).toBe(true);
+    const semOsBlocos = "x\nB\nC\ny\nB\nC";
+    expect(localizarAncora(semOsBlocos, a)).toEqual({ inicio: semOsBlocos.lastIndexOf("B"), fim: semOsBlocos.length });
+  });
 });
