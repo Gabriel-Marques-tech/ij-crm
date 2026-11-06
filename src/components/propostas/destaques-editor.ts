@@ -13,10 +13,11 @@
  */
 import { Extension } from "@tiptap/core";
 import type { Node as NoPM } from "@tiptap/pm/model";
-import { Plugin, PluginKey, type EditorState } from "@tiptap/pm/state";
-import { Decoration, DecorationSet } from "@tiptap/pm/view";
+import { Plugin, PluginKey, type EditorState, type Transaction } from "@tiptap/pm/state";
+import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
 import { criarAncora, localizarAncora, normalizarBloco, TOKEN_BLOCO, type Ancora } from "@/lib/propostas/ancora";
 import type { TipoBlocoDados } from "@/lib/propostas/documento";
+import { ancoraDaLinha, localizarSugestao } from "@/lib/propostas/sugestao-trecho";
 
 export type DestaqueEditor = { id: string; ancora: Ancora };
 export type EntradaDestaques = { destaques: DestaqueEditor[]; ativo: string | null };
@@ -76,6 +77,62 @@ export function ancoraDaSelecao(state: EditorState): Ancora | null {
   if (empty) return null;
   const { texto, segmentos } = planoDoEditor(state.doc);
   return criarAncora(texto, planoDaPos(segmentos, from, false), planoDaPos(segmentos, to, true));
+}
+
+/**
+ * GAB-101: o "+" da linha. `el` é o elemento do bloco na folha: a âncora é o bloco de texto inteiro
+ * (ou o bloco móvel, pelo `data-bloco`). null = bloco vazio ou fora do documento.
+ */
+export function ancoraDoElemento(view: EditorView, el: Element): Ancora | null {
+  const { texto, segmentos } = planoDoEditor(view.state.doc);
+  const tipo = el.getAttribute("data-bloco") as TipoBlocoDados | null;
+  if (tipo) {
+    const s = segmentos.find((x) => x.atomo && texto[x.plano] === TOKEN_BLOCO[tipo]);
+    return s ? criarAncora(texto, s.plano, s.plano + s.tamanho) : null;
+  }
+  let pos: number;
+  try {
+    pos = view.posAtDOM(el, 0);
+  } catch {
+    return null;
+  }
+  const $p = view.state.doc.resolve(pos);
+  const s = segmentos.find((x) => !x.atomo && x.posicoes[0] >= $p.start() && x.posicoes[0] <= $p.end());
+  return s ? ancoraDaLinha(texto, s.plano, s.tamanho) : null;
+}
+
+/** GAB-101: altura na tela (`clientY`) de cada âncora achada: a linha fina de uma conversa resolvida, que não tem destaque. */
+export function toposNoEditor(view: EditorView, itens: readonly DestaqueEditor[]): Record<string, number> {
+  if (itens.length === 0) return {};
+  const { texto, segmentos } = planoDoEditor(view.state.doc);
+  const topos: Record<string, number> = {};
+  for (const i of itens) {
+    const f = localizarAncora(texto, i.ancora);
+    const s = f && segmentos.find((x) => f.inicio >= x.plano && f.inicio < x.plano + x.tamanho);
+    if (!f || !s) continue;
+    const pos = s.atomo ? s.posicoes[0] : s.posicoes[f.inicio - s.plano];
+    try {
+      topos[i.id] = view.coordsAtPos(pos, 1).top;
+    } catch {
+      // Posição fora da tela do editor: fica no topo da margem.
+    }
+  }
+  return topos;
+}
+
+/**
+ * GAB-101: a mesma troca de `aplicarNoDocumento`, no editor ao vivo: entra no histórico (desfazer
+ * funciona), e o texto novo herda a formatação do começo do trecho. null = sugestão desatualizada.
+ */
+export function transacaoDeSugestao(state: EditorState, a: Ancora, novo: string): Transaction | null {
+  const { texto, segmentos } = planoDoEditor(state.doc);
+  const f = localizarSugestao(texto, a);
+  const s = f && segmentos.find((x) => !x.atomo && f.inicio >= x.plano && f.fim <= x.plano + x.tamanho);
+  if (!f || !s) return null;
+  const de = s.posicoes[f.inicio - s.plano];
+  const ate = s.posicoes[f.fim - 1 - s.plano] + 1;
+  if (!novo) return state.tr.delete(de, ate);
+  return state.tr.replaceWith(de, ate, state.schema.text(novo, state.doc.resolve(de).nodeAfter?.marks ?? []));
 }
 
 function decorar(doc: NoPM, e: EntradaDestaques): DecorationSet {

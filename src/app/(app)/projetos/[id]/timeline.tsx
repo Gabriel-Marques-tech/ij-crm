@@ -308,6 +308,10 @@ function Descricao({
           return <>resolveu um comentário da proposta</>;
         case "comentario_reaberto":
           return <>reabriu um comentário da proposta</>;
+        case "sugestao_aplicada":
+          return <>aplicou uma sugestão de texto na proposta</>;
+        case "revisao_enviada":
+          return <>enviou uma revisão da proposta</>;
         case "caneta_passada":
           return <>passou a caneta da proposta para {quem(p.paraNome)}</>;
         case "caneta_pega":

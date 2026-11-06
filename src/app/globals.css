@@ -304,6 +304,10 @@
   }
   .folha .proposta-texto .comentario-destaque-ativo { background: color-mix(in oklab, var(--warn) 50%, transparent); }
 
+  /* GAB-101: o "+" da linha fica na margem da folha; sem mouse, comenta-se pela seleção. */
+  .botao-linha { display: inline-flex; }
+  @media (hover: none) { .botao-linha { display: none; } }
+
   .bloco-dados { position: relative; text-align: left; }
   /* Comentário no bloco inteiro (decoração no nó, no editor): contorno, e não fundo por cima da tabela. */
   .folha .proposta-texto .node-blocoDados.comentario-destaque { background: none; border-bottom: 0; border-radius: 2px; outline: 2px solid color-mix(in oklab, var(--warn) 60%, transparent); outline-offset: 4px; }
