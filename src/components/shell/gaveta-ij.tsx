@@ -11,13 +11,16 @@ import { SimboloIJ } from "@/components/marca/marca";
 import { AREAS, ladoDe, ROTULO_AREA } from "@/lib/auth/areas";
 import { destinoDaArea } from "@/lib/auth/visibilidade";
 import { useNavegacaoArea } from "./area-atual";
-import { isActive, itensDaGaveta } from "./nav-config";
+import { ehRotaGG, HREF_GG, isActive, itensDaGaveta } from "./nav-config";
 
 /** Cor de cada área, para o indicador e a gaveta. Vendas no coral da marca; Projetos no azul da paleta. */
 const COR_DA_AREA: Record<Area, { ponto: string; texto: string; borda: string }> = {
   VENDAS: { ponto: "bg-primary", texto: "text-primary", borda: "border-primary/40" },
   PROJETOS: { ponto: "bg-chart-4", texto: "text-chart-4", borda: "border-chart-4/40" },
 };
+
+/** Gente & Gestão: área do hub sem lado no CRM (ver `ITENS_GG`). */
+const COR_GG = { ponto: "bg-chart-5", texto: "text-chart-5", borda: "border-chart-5/40" };
 
 /** O ícone da IJ: abre a gaveta, não navega (§4.1). */
 export function BotaoGaveta({ tamanho, className }: { tamanho: number; className?: string }) {
@@ -40,14 +43,15 @@ export function BotaoGaveta({ tamanho, className }: { tamanho: number; className
 /** Em que área a pessoa está: no rail, abaixo do ícone; no mobile, na topbar. */
 export function IndicadorArea({ className }: { className?: string }) {
   const { area } = useNavegacaoArea();
-  const cor = COR_DA_AREA[area];
+  const gg = ehRotaGG(usePathname());
+  const cor = gg ? COR_GG : COR_DA_AREA[area];
   return (
     <p
       className={cn("flex items-center justify-center gap-1.5 rounded-md border px-1.5 py-1 text-[10px] font-medium uppercase tracking-eyebrow", cor.borda, cor.texto, className)}
     >
       <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", cor.ponto)} />
       <span className="sr-only">Área atual: </span>
-      {ROTULO_AREA[area]}
+      {gg ? "G&G" : ROTULO_AREA[area]}
     </p>
   );
 }
@@ -90,14 +94,23 @@ export function GavetaIJ() {
                 ref={i === 0 ? primeiraArea : undefined}
                 href={destinoDaArea(pessoa, a, inicio)}
                 onClick={() => escolherArea(a)}
-                aria-current={a === area ? "true" : undefined}
-                className={cn(CLASSE_LINHA, a === area ? CLASSE_LINHA_ATIVA : CLASSE_LINHA_NORMAL)}
+                aria-current={a === area && !ehRotaGG(pathname) ? "true" : undefined}
+                className={cn(CLASSE_LINHA, a === area && !ehRotaGG(pathname) ? CLASSE_LINHA_ATIVA : CLASSE_LINHA_NORMAL)}
               >
                 <span aria-hidden className={cn("size-2 shrink-0 rounded-full", COR_DA_AREA[a].ponto)} />
                 <span className="flex-1">{ROTULO_AREA[a]}</span>
                 {a === lado ? <span className="rounded border border-border-strong px-1.5 py-0.5 text-[10px] text-fg-soft">sua área</span> : null}
               </Link>
             ))}
+            <Link
+              href={HREF_GG}
+              onClick={fecharGaveta}
+              aria-current={ehRotaGG(pathname) ? "true" : undefined}
+              className={cn(CLASSE_LINHA, ehRotaGG(pathname) ? CLASSE_LINHA_ATIVA : CLASSE_LINHA_NORMAL)}
+            >
+              <span aria-hidden className={cn("size-2 shrink-0 rounded-full", COR_GG.ponto)} />
+              <span className="flex-1">Gente &amp; Gestão</span>
+            </Link>
           </nav>
 
           <nav aria-label="Geral" className="space-y-1">

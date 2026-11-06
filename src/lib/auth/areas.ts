@@ -94,3 +94,46 @@ export function descreverLado(u: PessoaComLado): string {
   const cargos = CARGOS.filter((c) => temCargo(u, c));
   return cargos.length ? `${cargos.map((c) => ROTULO_CARGO[c]).join(", ")} de ${ROTULO_AREA[lado].toLowerCase()}` : ROTULO_AREA[lado];
 }
+
+/**
+ * Kanban interno do projeto (tarefas do time): pessoa da área de Projetos, diretoria
+ * (gestor de Projetos ou sem área, que conta nas duas áreas, como no hub §4.7) ou admin.
+ * Vendedor, gestor de vendas e visualizador: nada. É o portão geral; por projeto vale
+ * `podeVerTarefasDoProjeto`.
+ */
+export function podeVerTarefas(u: PessoaComLado): boolean {
+  return u.papel === "ADMIN" || ladoDe(u) === "PROJETOS" || (u.papel === "GESTOR" && ladoDe(u) === null);
+}
+
+/** Quem está escalado num projeto: equipe aberta, responsável do card e GP do handoff. */
+export type EscalaProjeto = { equipe: readonly string[]; responsavelId: string; gpId: string | null };
+
+const escalado = (id: string, e: EscalaProjeto) => e.equipe.includes(id) || e.responsavelId === id || e.gpId === id;
+
+/** Diretoria (gestor que vê tarefas) e admin: veem e editam a equipe de qualquer projeto. */
+function ehDiretoriaDeProjetos(u: PessoaComLado): boolean {
+  return u.papel === "ADMIN" || (u.papel === "GESTOR" && podeVerTarefas(u));
+}
+
+/**
+ * Tarefas de UM projeto: diretoria e admin sempre; do time de Projetos, quem está
+ * escalado. Projeto ainda sem equipe fica aberto ao time inteiro (como era antes da escala).
+ */
+export function podeVerTarefasDoProjeto(u: PessoaComLado & { id: string }, e: EscalaProjeto): boolean {
+  if (!podeVerTarefas(u)) return false;
+  return ehDiretoriaDeProjetos(u) || e.equipe.length === 0 || escalado(u.id, e);
+}
+
+/** Pode receber tarefa do projeto: passa no portão e, havendo equipe, está escalado. */
+export function podeSerResponsavelNoProjeto(u: PessoaComLado & { id: string }, e: EscalaProjeto): boolean {
+  return podeVerTarefas(u) && (e.equipe.length === 0 || escalado(u.id, e));
+}
+
+/**
+ * Monta a equipe: diretoria, admin, o GP do projeto e o responsável do card, sempre do
+ * time de projetos (mesmo portão da aba): o vendedor que ainda é responsável no handoff
+ * ou o ex-GP que mudou de lado não decidem quem vê as tarefas.
+ */
+export function podeEditarEquipe(u: PessoaComLado & { id: string }, e: EscalaProjeto): boolean {
+  return podeEscrever(u.papel) && podeVerTarefas(u) && (ehDiretoriaDeProjetos(u) || e.gpId === u.id || e.responsavelId === u.id);
+}

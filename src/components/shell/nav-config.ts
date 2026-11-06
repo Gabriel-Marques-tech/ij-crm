@@ -1,6 +1,13 @@
 import type { Area } from "@prisma/client";
 import {
+  BadgeCheck,
   Building2,
+  CalendarRange,
+  ClipboardList,
+  Network,
+  Target,
+  Upload,
+  Users,
   CalendarCheck,
   CalendarDays,
   ChartColumn,
@@ -60,6 +67,24 @@ const ITENS_GERAIS: Record<ItemGeral, NavItem> = {
 export function itensDoMenu(p: PessoaComLado, area: Area): NavItem[] {
   return itensDaArea(p, area).map((item) => (item === "kanban" ? KANBAN[area] : ITENS[item]));
 }
+
+/**
+ * Área Gente & Gestão (fatia A + fase B). Não é um `Area` do CRM (lado de vendas/projetos,
+ * que decide caneta e cards): é uma área do hub com menu próprio nas rotas `/gg`.
+ * Todo usuário ativo lê; quem edita é decidido pelo organograma (`lib/gg/organizacao`).
+ */
+export const HREF_GG = "/gg/membros";
+export const ITENS_GG: NavItem[] = [
+  { href: "/gg/membros", label: "Membros", icon: Users },
+  { href: "/gg/organograma", label: "Organograma", icon: Network },
+  { href: "/gg/estrutura", label: "Áreas e cargos", icon: BadgeCheck },
+  { href: "/gg/demandas", label: "Demandas", icon: ClipboardList },
+  { href: "/gg/agenda", label: "Agenda", icon: CalendarRange },
+  { href: "/gg/metas", label: "Metas", icon: Target },
+  { href: "/gg/processos", label: "Papéis e processos", icon: Settings2 },
+  { href: "/gg/importar", label: "Importar", icon: Upload },
+];
+export const ehRotaGG = (pathname: string) => isActive(pathname, "/gg");
 
 /** Bloco Geral da gaveta. */
 export function itensDaGaveta(p: Pick<PessoaComLado, "papel">): NavItem[] {

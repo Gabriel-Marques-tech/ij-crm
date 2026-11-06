@@ -11,6 +11,7 @@
  * vira o padrão (por quadro, quando dá: um quadro corrompido não apaga os outros).
  */
 import { z } from "zod";
+import { exibicaoSchema, type Exibicao } from "@/lib/tarefas/exibicao";
 
 const chave = z.string().min(1).max(64);
 
@@ -36,6 +37,8 @@ const preferenciasSchema = z.object({
   kanban: z.record(chave, visualizacaoKanbanSchema.catch(() => ({ ...VISUALIZACAO_PADRAO, abertas: [] }))).catch(() => ({})),
   inicio: inicioGravadoSchema.optional().catch(undefined),
   avisos: z.object({ whatsapp: z.boolean() }).optional().catch(undefined),
+  /** Exibição do kanban interno de tarefas (quadro/lista, agrupar, ordenar…), igual em todos os projetos. */
+  tarefas: exibicaoSchema.optional().catch(undefined),
 });
 
 export type Preferencias = z.infer<typeof preferenciasSchema>;
@@ -74,4 +77,8 @@ export function comWhatsappAvisos(p: Preferencias, whatsapp: boolean): Preferenc
 
 export function comVisualizacaoKanban(p: Preferencias, pipelineChave: string, v: VisualizacaoKanban): Preferencias {
   return { ...p, kanban: { ...p.kanban, [pipelineChave]: v } };
+}
+
+export function comExibicaoTarefas(p: Preferencias, e: Exibicao): Preferencias {
+  return { ...p, tarefas: e };
 }

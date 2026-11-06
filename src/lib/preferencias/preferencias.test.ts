@@ -20,6 +20,12 @@ describe("lerPreferencias", () => {
     expect(lerPreferencias(bruto)).toEqual(PREFERENCIAS_PADRAO);
   });
 
+  it("bloco `tarefas` inválido vira ausente sem derrubar o resto", () => {
+    const p = lerPreferencias({ v: 1, kanban: {}, tarefas: { vista: "lista" } });
+    expect(p.tarefas).toBeUndefined();
+    expect(p.kanban).toEqual({});
+  });
+
   it("chaves desconhecidas são descartadas", () => {
     const p = lerPreferencias({ v: 1, tema: "claro", kanban: { vendas: { mostrarVazias: false, abertas: [], cor: "azul" } } });
     expect(p).toEqual({ v: 1, kanban: { vendas: { mostrarVazias: false, abertas: [] } } });

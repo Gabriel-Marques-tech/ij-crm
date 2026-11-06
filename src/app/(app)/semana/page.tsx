@@ -23,6 +23,7 @@ import { Destaque, Grupo } from "../_semana/itens";
 import { ProximaSemana } from "../_semana/proxima-semana";
 import { SemanaEmColunas } from "../_semana/semana-colunas";
 import { SeletorVendedor } from "../_semana/seletor-vendedor";
+import { SemanaGG } from "@/components/gg/semana-gg";
 
 export const metadata = { title: "Minha Semana" };
 
@@ -128,6 +129,8 @@ export default async function MinhaSemanaPage({ searchParams }: { searchParams: 
         </div>
         <aside className="lg:sticky lg:top-6">
           {ranking === null ? null : ehInesperado(ranking) ? <ErroCarregamento codigo={ranking.ref} /> : <Top3Semana dados={ranking} euId={ator.id} />}
+          {/* Ponte G&G: RG, reuniões da área e saldo de demandas de quem está vendo a semana. */}
+          <SemanaGG usuarioId={escolha.alvo.id} segunda={semana.segunda} domingo={semana.domingo} hoje={hoje} />
         </aside>
       </div>
 

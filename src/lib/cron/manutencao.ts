@@ -14,6 +14,7 @@ import { apagarSessoesExpiradas } from "@/lib/auth/sessao";
 import { lembrarCheckinsAtrasados } from "@/lib/avisos/checkin";
 import { aplicarRetencaoResumos, gerarResumosPendentes } from "@/lib/contexto/resumo";
 import { registrarErro } from "@/lib/erros/registrar";
+import { lembrarEventosGG, medirIndicadoresDoCrm } from "@/lib/gg/rotina";
 import { purgarVencidas } from "@/lib/importacao/pipefy/servico";
 import { PRAZO_EXECUCAO_MS, retomarPendentes, type ContagemRetomada } from "@/lib/whatsapp/reprocessar";
 import { apagarJsonLlmVencido, apagarSemTagNaoConfirmadas } from "@/lib/whatsapp/retencao";
@@ -42,6 +43,10 @@ export type Manutencao = {
   sessoesExpiradas: number | null;
   /** GAB-95: lembretes de check-in dados nesta rodada. */
   lembretesCheckin: number | null;
+  /** G&G: lembretes de RG/reunião dados nesta rodada. */
+  lembretesGG: number | null;
+  /** G&G: KPIs e KRs medidos pelo CRM nesta rodada. */
+  indicadoresGG: number | null;
   /** Refs dos passos que falharam (causa no log do servidor com a mesma ref). */
   erros: string[];
 };
@@ -68,6 +73,9 @@ async function executar(): Promise<Manutencao> {
   const resumosApagados = await passo("resumosRetencao", erros, () => aplicarRetencaoResumos());
   const checkins = await passo("lembretesCheckin", erros, () => lembrarCheckinsAtrasados());
   if (checkins) erros.push(...checkins.refs);
+  const lembretesGG = await passo("lembretesGG", erros, () => lembrarEventosGG());
+  if (lembretesGG) erros.push(...lembretesGG.refs);
+  const indicadoresGG = await passo("indicadoresGG", erros, () => medirIndicadoresDoCrm());
   // GAB-49: resumo das janelas de 12 h fechadas, antes do reprocessamento (o
   // contexto das mensagens reprocessadas já encontra o resumo da janela anterior).
   const resumos = await passo("resumos", erros, () => gerarResumosPendentes(new Date(), { prazoMs: PRAZO_RESUMOS_MS }));
@@ -78,7 +86,7 @@ async function executar(): Promise<Manutencao> {
     erros.push(...refs);
     reprocessamento = contagem;
   }
-  return { ok: true, reprocessamento, retencao, semTagApagadas, resumos, resumosApagados, previasPurgadas, sessoesExpiradas, lembretesCheckin: checkins?.lembretes ?? null, erros };
+  return { ok: true, reprocessamento, retencao, semTagApagadas, resumos, resumosApagados, previasPurgadas, sessoesExpiradas, lembretesCheckin: checkins?.lembretes ?? null, lembretesGG: lembretesGG?.lembretes ?? null, indicadoresGG: indicadoresGG?.medidos ?? null, erros };
 }
 
 export async function rodarManutencao(): Promise<ResultadoManutencao> {

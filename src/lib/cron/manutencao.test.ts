@@ -12,6 +12,8 @@ const m = vi.hoisted(() => ({
   gerarResumosPendentes: vi.fn(),
   aplicarRetencaoResumos: vi.fn(),
   lembrarCheckinsAtrasados: vi.fn(),
+  lembrarEventosGG: vi.fn(),
+  medirIndicadoresDoCrm: vi.fn(),
 }));
 
 vi.mock("./trava", () => ({ pegarTrava: m.pegarTrava, soltarTrava: m.soltarTrava }));
@@ -21,6 +23,7 @@ vi.mock("@/lib/importacao/pipefy/servico", () => ({ purgarVencidas: m.purgarVenc
 vi.mock("@/lib/auth/sessao", () => ({ apagarSessoesExpiradas: m.apagarSessoesExpiradas }));
 vi.mock("@/lib/db", () => ({ db: {} }));
 vi.mock("@/lib/avisos/checkin", () => ({ lembrarCheckinsAtrasados: m.lembrarCheckinsAtrasados }));
+vi.mock("@/lib/gg/rotina", () => ({ lembrarEventosGG: m.lembrarEventosGG, medirIndicadoresDoCrm: m.medirIndicadoresDoCrm }));
 vi.mock("@/lib/contexto/resumo", () => ({ gerarResumosPendentes: m.gerarResumosPendentes, aplicarRetencaoResumos: m.aplicarRetencaoResumos }));
 
 const { rodarManutencao, DURACAO_TRAVA_MS, PRAZO_RESUMOS_MS } = await import("./manutencao");
@@ -39,6 +42,8 @@ beforeEach(() => {
   m.gerarResumosPendentes.mockResolvedValue({ gerados: 2, interrompido: false });
   m.aplicarRetencaoResumos.mockResolvedValue(5);
   m.lembrarCheckinsAtrasados.mockResolvedValue({ lembretes: 1, refs: [] });
+  m.lembrarEventosGG.mockResolvedValue({ lembretes: 0, refs: [] });
+  m.medirIndicadoresDoCrm.mockResolvedValue({ medidos: 0 });
 });
 
 describe("rodarManutencao", () => {

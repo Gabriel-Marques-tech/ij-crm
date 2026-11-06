@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { cn } from "cn";
 import { useNavegacaoArea } from "./area-atual";
 import { BotaoGaveta, GavetaIJ, IndicadorArea } from "./gaveta-ij";
-import { itemAtivo, itensDoMenu } from "./nav-config";
+import { ehRotaGG, itemAtivo, itensDoMenu, ITENS_GG } from "./nav-config";
 
 /**
  * Rail lateral (desktop) + barra inferior (mobile), com os itens da área atual.
@@ -15,7 +15,7 @@ import { itemAtivo, itensDoMenu } from "./nav-config";
 export function Rail() {
   const pathname = usePathname();
   const { pessoa, area, quadro } = useNavegacaoArea();
-  const itens = itensDoMenu(pessoa, area);
+  const itens = ehRotaGG(pathname) ? ITENS_GG : itensDoMenu(pessoa, area);
 
   return (
     <>

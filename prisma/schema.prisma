@@ -152,6 +152,25 @@ enum StatusMensagem {
 
 // ---------------------------------------------------------------- usuários
 
+// Kanban interno do projeto (tasks do time de projetos). Seis status fixos, como os
+// padrões do Linear; Backlog e Cancelada ficam recolhidas no quadro.
+enum StatusTarefa {
+  BACKLOG
+  A_FAZER
+  EM_ANDAMENTO
+  EM_REVISAO
+  FEITA
+  CANCELADA
+}
+
+enum PrioridadeTarefa {
+  SEM_PRIORIDADE
+  URGENTE
+  ALTA
+  MEDIA
+  BAIXA
+}
+
 model Usuario {
   id                String    @id @default(cuid())
   nome              String
@@ -209,6 +228,14 @@ model Usuario {
   checkins          ProjetoCheckin[]
   comentariosProposta   PropostaComentario[] @relation("comentarioAutor")
   comentariosResolvidos PropostaComentario[] @relation("comentarioResolvidoPor")
+  tarefasResponsavel    Tarefa[]             @relation("tarefaResponsavel")
+  tarefasCriadas        Tarefa[]             @relation("tarefaCriadaPor")
+  membro                Membro?              @relation("membroConta")
+  equipes               ProjetoMembro[]      @relation("equipeUsuario")
+  historicoOrg          HistoricoOrg[]
+  demandasRegistradas   Demanda[]
+  eventosCriados        EventoAgenda[]
+  ausenciasRegistradas  Ausencia[]
 
   @@map("usuario")
 }
@@ -492,6 +519,8 @@ model Projeto {
   entregas              ProjetoEntrega[]
   checkins              ProjetoCheckin[]
   lembretesCheckin      LembreteCheckin[]
+  tarefas               Tarefa[]
+  equipe                ProjetoMembro[]
 
   @@index([pipelineId, faseId])
   @@index([responsavelId])
@@ -788,6 +817,41 @@ model Prazo {
   @@index([data]) // semana do time
   @@index([projetoId])
   @@map("prazo")
+}
+
+/// Tarefa do kanban interno do projeto: só o time de projetos vê (`podeVerTarefas`).
+/// NUNCA gera Timeline do card (a Timeline aparece para Vendas). `numero` é
+/// sequencial por projeto (#12), gerado na transação e nunca reaproveitado.
+model Tarefa {
+  id            String           @id @default(cuid())
+  projetoId     String           @map("oportunidade_id")
+  numero        Int
+  paiId         String?          @map("pai_id") // subtarefa: um nível só
+  titulo        String
+  descricao     String?
+  status        StatusTarefa     @default(A_FAZER)
+  prioridade    PrioridadeTarefa @default(SEM_PRIORIDADE)
+  posicao       Float // ordem dentro da coluna
+  responsavelId String?          @map("responsavel_id") // pode ficar sem responsável
+  prazo         DateTime?        @db.Date
+  etiquetas     String[]         @default([])
+  concluidaEm   DateTime?        @map("concluida_em")
+  criadoPorId   String           @map("criado_por_id")
+  deletadoEm    DateTime?        @map("deletado_em")
+  criadoEm      DateTime         @default(now()) @map("criado_em")
+  atualizadoEm  DateTime         @updatedAt @map("atualizado_em")
+
+  projeto     Projeto  @relation(fields: [projetoId], references: [id], onDelete: Cascade)
+  responsavel Usuario? @relation("tarefaResponsavel", fields: [responsavelId], references: [id], onDelete: SetNull)
+  criadoPor   Usuario  @relation("tarefaCriadaPor", fields: [criadoPorId], references: [id])
+  pai         Tarefa?  @relation("subtarefas", fields: [paiId], references: [id], onDelete: Cascade)
+  subtarefas  Tarefa[] @relation("subtarefas")
+
+  @@unique([projetoId, numero])
+  @@index([projetoId, status, posicao])
+  @@index([responsavelId])
+  @@index([paiId])
+  @@map("tarefa")
 }
 
 // GAB-84: arquivo de base anexado ao Projeto (spec fase 2 §4.7). Os BYTES ficam
@@ -1096,6 +1160,9 @@ enum TipoAviso {
   HANDOFF         // handoff do projeto
   CHECKIN_ATRASADO // GAB-95: a semana passou sem check-in (só no app)
   GP_TROCADO       // GAB-95: você deixou de ser o GP do projeto (só no app)
+  TAREFA_ATRIBUIDA // alguém te atribuiu uma tarefa do kanban interno do projeto
+  EQUIPE_PROJETO   // você entrou na equipe de um projeto
+  LEMBRETE_GG      // lembrete de evento da agenda de G&G (RG, reunião)
 }
 
 /// O que aconteceu com o WhatsApp privado de um aviso (null no aviso = tipo só do app).
@@ -1129,4 +1196,394 @@ model Aviso {
   @@index([usuarioId, criadoEm])
   @@index([projetoId])
   @@map("aviso")
+}
+
+// ================================================================ Equipe do projeto
+// Quem trabalha em cada projeto (a "escala" que as specs do hub e do kanban esperavam).
+// Período [inicio, fim): sair da equipe encerra, não apaga. Uma vaga aberta por pessoa e projeto
+// (índice parcial na migration). A função é do projeto, não do organograma: Scrum Master na IJ
+// pode ser só dev num projeto.
+
+enum FuncaoProjeto {
+  PM
+  PO
+  SCRUM_MASTER
+  MEMBRO
+}
+
+model ProjetoMembro {
+  id         String        @id @default(cuid())
+  projetoId  String        @map("oportunidade_id")
+  usuarioId  String        @map("usuario_id")
+  funcao     FuncaoProjeto @default(MEMBRO)
+  inicio     DateTime      @db.Date
+  fim        DateTime?     @db.Date
+  criadoEm   DateTime      @default(now()) @map("criado_em")
+
+  projeto Projeto @relation(fields: [projetoId], references: [id], onDelete: Cascade)
+  usuario Usuario @relation("equipeUsuario", fields: [usuarioId], references: [id])
+
+  @@index([projetoId])
+  @@index([usuarioId])
+  @@map("projeto_membro")
+}
+
+// ================================================================ G&G · fatia A (estrutura)
+// Vindo do automacao-GG (supabase/migrations 001, 005, 007). Nomes "Org" porque Area e Cargo
+// já são enums do CRM (lado do usuário e GP).
+
+enum StatusMembro {
+  NAO_INFORMADO
+  ATIVO
+  AFASTADO
+  INATIVO
+}
+
+enum TipoAreaOrg {
+  AREA
+  FRENTE
+  INSTITUCIONAL
+}
+
+/// Diretoria (diretor, presidente, VP), liderança dentro da diretoria (PM, PO, Scrum Master,
+/// gerências) ou membro. Novo em relação ao G&G.
+enum CategoriaCargo {
+  DIRETORIA
+  LIDERANCA
+  MEMBRO
+}
+
+/// Pessoa da IJ, com ou sem conta no CRM. Conta (`usuario`) é outra coisa: liga por `usuarioId`.
+model Membro {
+  id                 String       @id @default(cuid())
+  nome               String
+  email              String?
+  status             StatusMembro @default(NAO_INFORMADO)
+  interesseLideranca Boolean?     @map("interesse_lideranca")
+  usuarioId          String?      @unique @map("usuario_id")
+  criadoEm           DateTime     @default(now()) @map("criado_em")
+  atualizadoEm       DateTime     @updatedAt @map("atualizado_em")
+
+  usuario    Usuario?       @relation("membroConta", fields: [usuarioId], references: [id], onDelete: SetNull)
+  ocupacoes  Ocupacao[]
+  vinculos   VinculoIj[]
+  demandas   Demanda[]
+  ausencias  Ausencia[]
+  objetivos  Objetivo[]
+  iniciativas Iniciativa[]
+
+  @@index([nome])
+  @@map("membro")
+}
+
+model AreaOrg {
+  id         String      @id @default(cuid())
+  nome       String
+  tipo       TipoAreaOrg @default(AREA)
+  superiorId String?     @map("superior_id")
+  /// Lado do CRM que esta área dá a quem está nela (Projetos → PROJETOS, Vendas → VENDAS).
+  ladoCrm    Area?       @map("lado_crm")
+  /// Área de Gente & Gestão: quem está nela (ou nas frentes) edita a área G&G do CRM.
+  ehGG       Boolean     @default(false) @map("eh_gg")
+  ativo      Boolean     @default(true)
+
+  superior  AreaOrg?       @relation("areaSuperior", fields: [superiorId], references: [id])
+  filhas    AreaOrg[]      @relation("areaSuperior")
+  posicoes  Posicao[]
+  eventos   EventoAgenda[]
+
+  @@map("area_org")
+}
+
+model CargoOrg {
+  id        String         @id @default(cuid())
+  nome      String
+  categoria CategoriaCargo @default(MEMBRO)
+  /// Quem ocupa este cargo é GP do lado no CRM (proposta: PM).
+  ehGp      Boolean        @default(false) @map("eh_gp")
+  ativo     Boolean        @default(true)
+
+  posicoes Posicao[]
+  raci     Raci[]
+
+  @@map("cargo_org")
+}
+
+/// Cargo + área + liderança: é o cartão do organograma.
+model Posicao {
+  id           String  @id @default(cuid())
+  nome         String
+  areaId       String  @map("area_id")
+  cargoId      String  @map("cargo_id")
+  liderancaId  String? @map("lideranca_id")
+  ativo        Boolean @default(true)
+
+  area      AreaOrg    @relation(fields: [areaId], references: [id])
+  cargo     CargoOrg   @relation(fields: [cargoId], references: [id])
+  lideranca Posicao?   @relation("lideranca", fields: [liderancaId], references: [id])
+  liderados Posicao[]  @relation("lideranca")
+  ocupacoes Ocupacao[]
+
+  @@index([liderancaId])
+  @@map("posicao")
+}
+
+/// Pessoa numa posição em [inicio, fim). Invalidada = "retirada por erro": fora do organograma
+/// e da trajetória, mas guardada.
+model Ocupacao {
+  id                String    @id @default(cuid())
+  membroId          String    @map("membro_id")
+  posicaoId         String    @map("posicao_id")
+  inicio            DateTime? @db.Date
+  fim               DateTime? @db.Date
+  principal         Boolean   @default(false)
+  invalidadoEm      DateTime? @map("invalidado_em")
+  motivoInvalidacao String?   @map("motivo_invalidacao")
+  criadoEm          DateTime  @default(now()) @map("criado_em")
+
+  membro  Membro  @relation(fields: [membroId], references: [id])
+  posicao Posicao @relation(fields: [posicaoId], references: [id])
+
+  @@index([membroId])
+  @@index([posicaoId])
+  @@map("ocupacao")
+}
+
+/// Períodos na IJ (entradas e saídas, com reingresso).
+model VinculoIj {
+  id       String    @id @default(cuid())
+  membroId String    @map("membro_id")
+  entrada  DateTime? @db.Date
+  saida    DateTime? @db.Date
+
+  membro Membro @relation(fields: [membroId], references: [id])
+
+  @@index([membroId])
+  @@map("vinculo_ij")
+}
+
+/// Histórico organizacional, escrito pelo serviço na mesma transação da mudança.
+model HistoricoOrg {
+  id         String   @id @default(cuid())
+  membroId   String?  @map("membro_id")
+  evento     String
+  dados      Json     @default("{}")
+  autorId    String?  @map("autor_id")
+  criadoEm   DateTime @default(now()) @map("criado_em")
+
+  autor Usuario? @relation(fields: [autorId], references: [id], onDelete: SetNull)
+
+  @@index([membroId, criadoEm])
+  @@map("historico_org")
+}
+
+/// Chave idempotente da importação de membros: repetir o lote devolve a contagem anterior.
+model ImportacaoMembros {
+  id         String   @id
+  autorId    String   @map("autor_id")
+  quantidade Int
+  criadoEm   DateTime @default(now()) @map("criado_em")
+
+  @@map("importacao_membros")
+}
+
+// ================================================================ G&G · fase B (rotina)
+
+enum TipoDemanda {
+  ROSA
+  AZUL
+}
+
+/// Registro simples Rosa/Azul (o fluxo antigo P0–P3 do G&G não migra). Limite por membro e semestre:
+/// 2 rosas e 3 azuis, contando as não canceladas (serviço com trava por transação).
+model Demanda {
+  id              String      @id @default(cuid())
+  membroId        String      @map("membro_id")
+  tipo            TipoDemanda
+  semestre        String
+  justificativa   String
+  autorId         String      @map("autor_id")
+  registranteNome String      @map("registrante_nome")
+  canceladaEm     DateTime?   @map("cancelada_em")
+  criadoEm        DateTime    @default(now()) @map("criado_em")
+
+  membro Membro  @relation(fields: [membroId], references: [id])
+  autor  Usuario @relation(fields: [autorId], references: [id])
+
+  @@index([membroId, semestre])
+  @@map("demanda")
+}
+
+enum CategoriaEvento {
+  RG
+  REUNIAO
+  EVENTO
+}
+
+/// Agenda de G&G. Área vazia = IJ inteira. Só ausências são registradas (ninguém é marcado presente).
+model EventoAgenda {
+  id          String          @id @default(cuid())
+  titulo      String
+  data        DateTime        @db.Date
+  horario     String?
+  categoria   CategoriaEvento @default(EVENTO)
+  areaId      String?         @map("area_id")
+  criadoPorId String          @map("criado_por_id")
+  deletadoEm  DateTime?       @map("deletado_em")
+  criadoEm    DateTime        @default(now()) @map("criado_em")
+
+  area      AreaOrg?   @relation(fields: [areaId], references: [id])
+  criadoPor Usuario    @relation(fields: [criadoPorId], references: [id])
+  ausencias Ausencia[]
+  lembretes LembreteEvento[]
+
+  @@index([data])
+  @@map("evento_agenda")
+}
+
+model Ausencia {
+  id              String   @id @default(cuid())
+  eventoId        String   @map("evento_id")
+  membroId        String   @map("membro_id")
+  justificada     Boolean
+  observacao      String?
+  registradoPorId String   @map("registrado_por_id")
+  criadoEm        DateTime @default(now()) @map("criado_em")
+
+  evento        EventoAgenda @relation(fields: [eventoId], references: [id], onDelete: Cascade)
+  membro        Membro       @relation(fields: [membroId], references: [id])
+  registradoPor Usuario      @relation(fields: [registradoPorId], references: [id])
+
+  @@unique([eventoId, membroId])
+  @@map("ausencia")
+}
+
+/// Marca "lembrete deste evento já dado a esta pessoa" (o cron não repete).
+model LembreteEvento {
+  eventoId  String   @map("evento_id")
+  usuarioId String   @map("usuario_id")
+  em        DateTime @default(now())
+
+  evento EventoAgenda @relation(fields: [eventoId], references: [id], onDelete: Cascade)
+
+  @@id([eventoId, usuarioId])
+  @@map("lembrete_evento")
+}
+
+model Ciclo {
+  id     String   @id @default(cuid())
+  nome   String
+  inicio DateTime @db.Date
+  fim    DateTime @db.Date
+
+  objetivos Objetivo[]
+
+  @@map("ciclo")
+}
+
+model Objetivo {
+  id            String @id @default(cuid())
+  titulo        String
+  cicloId       String @map("ciclo_id")
+  responsavelId String @map("responsavel_id")
+
+  ciclo       Ciclo            @relation(fields: [cicloId], references: [id])
+  responsavel Membro           @relation(fields: [responsavelId], references: [id])
+  resultados  ResultadoChave[]
+  iniciativas Iniciativa[]
+
+  @@map("objetivo")
+}
+
+/// `fonte` preenchida = o CRM mede sozinho (ver lib/gg/fontes-crm.ts); senão, valor atual manual.
+model ResultadoChave {
+  id         String  @id @default(cuid())
+  objetivoId String  @map("objetivo_id")
+  titulo     String
+  unidade    String  @default("")
+  inicial    Decimal @db.Decimal(14, 2)
+  meta       Decimal @db.Decimal(14, 2)
+  atual      Decimal @db.Decimal(14, 2)
+  fonte      String?
+
+  objetivo Objetivo @relation(fields: [objetivoId], references: [id], onDelete: Cascade)
+
+  @@map("resultado_chave")
+}
+
+enum DirecaoKpi {
+  MAIOR
+  MENOR
+}
+
+model Kpi {
+  id      String     @id @default(cuid())
+  titulo  String
+  unidade String
+  meta    Decimal    @db.Decimal(14, 2)
+  direcao DirecaoKpi @default(MAIOR)
+  fonte   String?
+
+  medicoes    MedicaoKpi[]
+  iniciativas Iniciativa[]
+
+  @@map("kpi")
+}
+
+model MedicaoKpi {
+  id    String   @id @default(cuid())
+  kpiId String   @map("kpi_id")
+  data  DateTime @db.Date
+  valor Decimal  @db.Decimal(14, 2)
+
+  kpi Kpi @relation(fields: [kpiId], references: [id], onDelete: Cascade)
+
+  @@unique([kpiId, data])
+  @@map("medicao_kpi")
+}
+
+model Iniciativa {
+  id            String    @id @default(cuid())
+  titulo        String
+  objetivoId    String?   @map("objetivo_id")
+  kpiId         String?   @map("kpi_id")
+  responsavelId String    @map("responsavel_id")
+  prazo         DateTime? @db.Date
+  concluidaEm   DateTime? @map("concluida_em")
+
+  objetivo    Objetivo? @relation(fields: [objetivoId], references: [id], onDelete: SetNull)
+  kpi         Kpi?      @relation(fields: [kpiId], references: [id], onDelete: SetNull)
+  responsavel Membro    @relation(fields: [responsavelId], references: [id])
+
+  @@map("iniciativa")
+}
+
+model Processo {
+  id    String  @id @default(cuid())
+  nome  String
+  ativo Boolean @default(true)
+
+  raci Raci[]
+
+  @@map("processo")
+}
+
+enum PapelRaci {
+  R
+  A
+  C
+  I
+}
+
+/// Um A por processo (índice parcial na migration).
+model Raci {
+  processoId String    @map("processo_id")
+  cargoId    String    @map("cargo_id")
+  papel      PapelRaci
+
+  processo Processo @relation(fields: [processoId], references: [id], onDelete: Cascade)
+  cargo    CargoOrg @relation(fields: [cargoId], references: [id])
+
+  @@id([processoId, cargoId])
+  @@map("raci")
 }

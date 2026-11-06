@@ -2,7 +2,8 @@
 import { cache } from "react";
 import { db } from "@/lib/db";
 import { listarPipelines } from "@/lib/fases/fases";
-import { comInicio, comVisualizacaoKanban, comWhatsappAvisos, inicioSchema, lerPreferencias, visualizacaoKanbanSchema, type Preferencias } from "./preferencias";
+import { exibicaoSchema } from "@/lib/tarefas/exibicao";
+import { comExibicaoTarefas, comInicio, comVisualizacaoKanban, comWhatsappAvisos, inicioSchema, lerPreferencias, visualizacaoKanbanSchema, type Preferencias } from "./preferencias";
 
 export type ErroPreferencias = "DADOS_INVALIDOS" | "QUADRO_INEXISTENTE";
 
@@ -45,6 +46,14 @@ export async function salvarPaginaInicial(usuarioId: string, entrada: unknown): 
 export async function salvarWhatsappAvisos(usuarioId: string, entrada: unknown): Promise<{ ok: true } | { ok: false; erro: ErroPreferencias }> {
   if (typeof entrada !== "boolean") return { ok: false, erro: "DADOS_INVALIDOS" };
   await mesclar(usuarioId, (p) => comWhatsappAvisos(p, entrada));
+  return { ok: true };
+}
+
+/** Grava a exibição do kanban interno de tarefas (bloco inteiro, validado). */
+export async function salvarExibicaoTarefas(usuarioId: string, entrada: unknown): Promise<{ ok: true } | { ok: false; erro: ErroPreferencias }> {
+  const v = exibicaoSchema.safeParse(entrada);
+  if (!v.success) return { ok: false, erro: "DADOS_INVALIDOS" };
+  await mesclar(usuarioId, (p) => comExibicaoTarefas(p, v.data));
   return { ok: true };
 }
 

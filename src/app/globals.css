@@ -375,3 +375,31 @@
     }
   }
 }
+
+/* G&G · organograma: árvore de cima para baixo com linhas em ângulo reto (desenho do
+   automacao-GG, globals.css .org-*), nos tokens do CRM. */
+@layer components {
+  .org-canvas {
+    background-image: radial-gradient(color-mix(in oklch, var(--fg-faint) 35%, transparent) 1px, transparent 1px);
+    background-size: 22px 22px;
+  }
+  .org-tree,
+  .org-tree ul {
+    display: flex;
+    justify-content: center;
+    gap: 20px;
+    min-width: max-content;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .org-tree { justify-content: flex-start; padding: 0 20px 24px; }
+  .org-tree li { position: relative; display: flex; flex-direction: column; align-items: center; }
+  .org-tree ul { position: relative; padding-top: 38px; }
+  .org-tree ul::before { content: ""; position: absolute; top: 0; left: 50%; height: 19px; border-left: 1px solid color-mix(in oklch, var(--primary) 45%, var(--border-strong)); }
+  .org-tree ul > li::before { content: ""; position: absolute; top: -19px; left: -10px; right: -10px; border-top: 1px solid color-mix(in oklch, var(--primary) 45%, var(--border-strong)); }
+  .org-tree ul > li::after { content: ""; position: absolute; top: -19px; left: 50%; height: 19px; border-left: 1px solid color-mix(in oklch, var(--primary) 45%, var(--border-strong)); }
+  .org-tree ul > li:first-child::before { left: 50%; }
+  .org-tree ul > li:last-child::before { right: 50%; }
+  .org-tree ul > li:only-child::before { display: none; }
+}

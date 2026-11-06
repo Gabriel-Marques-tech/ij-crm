@@ -19,6 +19,11 @@ describe("regras dos avisos", () => {
     expect(hrefAviso({ tipo: "HANDOFF", projetoId: "p1" })).toBe("/projetos/p1");
     expect(hrefAviso({ tipo: "CHECKIN_ATRASADO", projetoId: "p1" })).toBe("/projetos/p1");
     expect(hrefAviso({ tipo: "GP_TROCADO", projetoId: "p1" })).toBe("/projetos/p1");
+    expect(hrefAviso({ tipo: "TAREFA_ATRIBUIDA", projetoId: "p1" })).toBe("/projetos/p1/tarefas");
+    expect(hrefAviso({ tipo: "EQUIPE_PROJETO", projetoId: "p1" })).toBe("/projetos/p1/equipe");
+    expect(hrefAviso({ tipo: "LEMBRETE_GG", projetoId: null })).toBe("/gg/agenda");
+    expect(vaiPorWhatsapp("TAREFA_ATRIBUIDA")).toBe(false);
+    expect(vaiPorWhatsapp("LEMBRETE_GG")).toBe(false);
     expect(hrefAviso({ tipo: "SUA_VEZ", projetoId: null })).toBeNull();
   });
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Area, Cargo, Papel } from "@prisma/client";
-import { descreverLado, ehGpDoLado, ladoDe, regraDeArea, resolverAreaCargos, temCargo } from "./areas";
+import { descreverLado, ehGpDoLado, ladoDe, podeEditarEquipe, podeSerResponsavelNoProjeto, podeVerTarefas, podeVerTarefasDoProjeto, regraDeArea, resolverAreaCargos, temCargo } from "./areas";
 
 const pessoa = (papel: Papel, area: Area | null = null, cargos: Cargo[] = []) => ({ papel, area, cargos });
 
@@ -83,5 +83,55 @@ describe("descreverLado", () => {
     expect(descreverLado(pessoa("VENDEDOR", "VENDAS", ["GP"]))).toBe("GP de vendas");
     expect(descreverLado(pessoa("PROJETOS", "PROJETOS"))).toBe("Projetos");
     expect(descreverLado(pessoa("GESTOR"))).toBe("—");
+  });
+});
+
+describe("podeVerTarefas (kanban interno do projeto)", () => {
+  it("passa: papel PROJETOS, gestor com área Projetos, diretoria sem área e admin", () => {
+    expect(podeVerTarefas(pessoa("GESTOR", null))).toBe(true); // diretoria (conta nas duas áreas, hub §4.7)
+    expect(podeVerTarefas(pessoa("PROJETOS", "PROJETOS"))).toBe(true);
+    expect(podeVerTarefas(pessoa("PROJETOS", null))).toBe(true); // o papel fixa o lado
+    expect(podeVerTarefas(pessoa("GESTOR", "PROJETOS"))).toBe(true);
+    expect(podeVerTarefas(pessoa("GESTOR", "PROJETOS", ["GP"]))).toBe(true);
+    expect(podeVerTarefas(pessoa("ADMIN"))).toBe(true);
+  });
+
+  it("recusa: vendedor, gestor de vendas e visualizador (mesmo com área gravada)", () => {
+    expect(podeVerTarefas(pessoa("VENDEDOR", "VENDAS"))).toBe(false);
+    expect(podeVerTarefas(pessoa("VENDEDOR", "PROJETOS"))).toBe(false); // coluna incoerente: o papel prevalece
+    expect(podeVerTarefas(pessoa("GESTOR", "VENDAS"))).toBe(false);
+    expect(podeVerTarefas(pessoa("VISUALIZADOR", "PROJETOS"))).toBe(false);
+  });
+});
+
+describe("escala do projeto (equipe)", () => {
+  const com = (papel: Parameters<typeof pessoa>[0], area: Parameters<typeof pessoa>[1], id: string) => ({ ...pessoa(papel, area), id });
+  const paula = com("PROJETOS", "PROJETOS", "paula");
+  const pedro = com("PROJETOS", "PROJETOS", "pedro");
+  const diretor = com("GESTOR", "PROJETOS", "guto");
+  const ana = com("VENDEDOR", "VENDAS", "ana");
+  const semEquipe = { equipe: [], responsavelId: "x", gpId: null };
+  const comEquipe = { equipe: ["paula"], responsavelId: "x", gpId: "gp" };
+
+  it("sem equipe, o time inteiro vê e recebe tarefa; com equipe, só quem está escalado", () => {
+    expect(podeVerTarefasDoProjeto(pedro, semEquipe)).toBe(true);
+    expect(podeVerTarefasDoProjeto(pedro, comEquipe)).toBe(false);
+    expect(podeVerTarefasDoProjeto(paula, comEquipe)).toBe(true);
+    expect(podeVerTarefasDoProjeto({ ...pedro, id: "gp" }, comEquipe)).toBe(true); // GP do handoff
+    expect(podeSerResponsavelNoProjeto(pedro, comEquipe)).toBe(false);
+    expect(podeSerResponsavelNoProjeto(pedro, semEquipe)).toBe(true);
+  });
+  it("diretoria e admin sempre veem e montam a equipe; vendas nunca", () => {
+    expect(podeVerTarefasDoProjeto(diretor, comEquipe)).toBe(true);
+    expect(podeEditarEquipe(diretor, comEquipe)).toBe(true);
+    expect(podeEditarEquipe(paula, comEquipe)).toBe(false);
+    expect(podeEditarEquipe({ ...pedro, id: "gp" }, comEquipe)).toBe(true);
+    expect(podeVerTarefasDoProjeto(ana, semEquipe)).toBe(false);
+  });
+  it("responsável ou GP fora do time de projetos (ex.: vendedor antes do GP no handoff) não monta a equipe", () => {
+    expect(podeEditarEquipe(ana, { ...comEquipe, responsavelId: "ana" })).toBe(false);
+    expect(podeEditarEquipe(ana, { ...comEquipe, gpId: "ana" })).toBe(false);
+    expect(podeEditarEquipe(com("GESTOR", "VENDAS", "gv"), { ...comEquipe, responsavelId: "gv" })).toBe(false);
+    expect(podeEditarEquipe({ ...pedro, id: "x" }, comEquipe)).toBe(true); // responsável do time de projetos segue
   });
 });
