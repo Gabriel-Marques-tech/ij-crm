@@ -432,6 +432,54 @@ describe("tabela no editor (GAB-102)", () => {
     cheia.destroy();
   });
 
+  it("tabela torta colada com mais colunas que o limite é recusada inteira (colspan vira 1; a conta é pelo máximo entre as linhas)", () => {
+    const e = editorCom({ type: "doc", content: [texto("a")] });
+    const avisos: string[] = [];
+    (e.storage as unknown as { tabelaGarantias: { aoRecusar: (m: string) => void } }).tabelaGarantias.aoRecusar = (m) => avisos.push(m);
+    const tabelas = () => e.state.doc.content.content.filter((b) => b.type.name === "table").length;
+    const n = TABELA_COLUNAS_MAX + 2;
+    const linha = `<tr>${Array.from({ length: n }, (_, i) => `<td>c${i}</td>`).join("")}</tr>`;
+    // Excel/Sheets: 1ª linha é um título mesclado sobre todas as colunas, as outras têm n células.
+    // jsdom não tem ClipboardEvent: o evento é só para o `handlePaste`.
+    const colar = (html: string) => e.view.pasteHTML(html, new Event("paste") as ClipboardEvent);
+    colar(`<table><tr><td colspan="${n}">Título</td></tr>${linha}${linha}</table>`);
+    expect(tabelas()).toBe(0);
+    expect(e.state.doc.childCount).toBe(1);
+    expect(avisos[0]).toContain(`${TABELA_COLUNAS_MAX} colunas`);
+    expect(lerDocumento(jsonDoEditor(e))).not.toBeNull();
+
+    // O mesmo por JSON: 1ª linha com 1 célula e a 2ª com 9.
+    const celula = (t: string) => ({ type: "tableCell", content: [{ type: "paragraph", content: [{ type: "text", text: t }] }] });
+    e.commands.insertContent({
+      type: "table",
+      content: [
+        { type: "tableRow", content: [celula("só uma")] },
+        { type: "tableRow", content: Array.from({ length: TABELA_COLUNAS_MAX + 1 }, (_, i) => celula(`d${i}`)) },
+      ],
+    });
+    expect(tabelas()).toBe(0);
+    expect(lerDocumento(jsonDoEditor(e))).not.toBeNull();
+
+    // 1ª linha no limite e outra uma a mais: idem.
+    e.commands.insertContent({
+      type: "table",
+      content: [
+        { type: "tableRow", content: Array.from({ length: TABELA_COLUNAS_MAX }, (_, i) => celula(`h${i}`)) },
+        { type: "tableRow", content: Array.from({ length: TABELA_COLUNAS_MAX + 1 }, (_, i) => celula(`d${i}`)) },
+      ],
+    });
+    expect(tabelas()).toBe(0);
+    expect(lerDocumento(jsonDoEditor(e))).not.toBeNull();
+
+    // Tabela torta dentro do limite entra, completada pelo `fixTables`, e o documento continua válido.
+    colar('<table><tr><td colspan="3">Título</td></tr><tr><td>1</td><td>2</td><td>3</td></tr></table>');
+    expect(tabelas()).toBe(1);
+    const d = lerDocumento(jsonDoEditor(e))!;
+    expect(d).not.toBeNull();
+    expect(d.content.find((b) => b.type === "table")).toMatchObject({ content: [{ content: [{}, {}, {}] }, { content: [{}, {}, {}] }] });
+    e.destroy();
+  });
+
   it("texto plano do editor bate com o do servidor, e a âncora em célula é a mesma; célula vazia não conta", () => {
     const d = markdownParaDocumento("Antes.\n\n| Item |  |\n| --- | --- |\n| a\\|b | fim |\n\nDepois.");
     const e = editorCom(documentoParaEditor(d));

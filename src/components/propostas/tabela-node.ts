@@ -103,11 +103,21 @@ const Linha = TableRow.extend({
   },
 });
 
-/** Medidas pelo nó, sem gerar JSON a cada tecla (a célula tem um parágrafo: 2 posições além do texto). */
+/**
+ * Medidas pelo nó, sem gerar JSON a cada tecla (a célula tem um parágrafo: 2 posições além do texto).
+ * Colunas pelo máximo entre as linhas, como `normalizarTabela` no servidor: a tabela colada torta
+ * (1ª linha com um título mesclado, as outras largas) tem de ser recusada pela linha larga, senão a
+ * transação de colagem passa e a que o `fixTables` anexa para completar a 1ª linha é a recusada,
+ * deixando no editor uma tabela que o servidor não aceita.
+ */
 function medidasDoNo(t: NoPM): MedidasTabela {
   let maiorCelula = 0;
-  t.forEach((l) => l.forEach((c) => (maiorCelula = Math.max(maiorCelula, c.content.size - 2))));
-  return { linhas: t.childCount, colunas: t.firstChild?.childCount ?? 0, maiorCelula };
+  let colunas = 0;
+  t.forEach((l) => {
+    colunas = Math.max(colunas, l.childCount);
+    l.forEach((c) => (maiorCelula = Math.max(maiorCelula, c.content.size - 2)));
+  });
+  return { linhas: t.childCount, colunas, maiorCelula };
 }
 
 export function motivoDoDocumentoForaDoLimite(doc: NoPM): string | null {
