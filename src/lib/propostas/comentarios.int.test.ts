@@ -7,10 +7,11 @@ import { invalidarCachePipelines } from "@/lib/fases/cache";
 import { EXTENSOES } from "@/components/propostas/editor-texto";
 import { ancoraDaSelecao, DestaquesComentarios } from "@/components/propostas/destaques-editor";
 import type { Documento } from "./documento";
-import { TOKEN_BLOCO, trechoLegivel } from "./ancora";
+import { textoPlano, TOKEN_BLOCO, trechoLegivel } from "./ancora";
 import { markdownParaDocumento } from "./markdown";
 import { aplicarSugestao, COMENTARIO_MAX, comentar, descartarPendente, enviarRevisao, listarComentarios, reabrirComentario, resolverComentario, responderComentario, versaoDosComentarios } from "./comentarios";
 import { criarProposta, passarCaneta, salvarRascunho, salvarVersao } from "./propostas";
+import { ancoraDaLinha } from "./sugestao-trecho";
 
 const db = dbTeste();
 
@@ -398,6 +399,22 @@ describe("sugestão aplicável (GAB-101)", () => {
     const p = await db.proposta.findFirstOrThrow();
     expect(p.revisao).toBe(s.revisao);
     expect((await listar(projeto.id))!.threads[0].resolvido).toBeNull();
+  });
+
+  it("vizinhos editados, trecho intacto (o + da linha): segue aplicável na lista e aplica", async () => {
+    const { projeto, ana, paula, revisao } = await semear();
+    // O + da linha de "30 dias.": o bloco inteiro é o trecho; os dois contextos da âncora moram nos vizinhos.
+    const plano = textoPlano(markdownParaDocumento("## Escopo\n\nSite com loja e blog.\n\n## Prazo\n\n30 dias.")).texto;
+    const a = ancoraDaLinha(plano, plano.indexOf("30 dias."), "30 dias.".length)!;
+    const c = await comentar(projeto.id, { texto: "", trecho: a, sugestao: "45 dias." }, paula);
+    if (!c.ok) throw new Error("seed");
+    const s = await salvarRascunho(projeto.id, { revisao, conteudo: { markdown: "## Escopo\n\nSite com loja, blog e app.\n\n## Prazo final\n\n30 dias.\n\nPagamento à vista." } }, ana);
+    if (!s.ok) throw new Error("seed");
+    const t = (await listar(projeto.id))!.threads[0];
+    expect(t.sugestao?.desatualizada).toBe(false);
+    expect(t.trechoAlterado).toBe(false);
+    expect(await aplicarSugestao(projeto.id, c.comentario.id, { revisao: s.revisao }, ana)).toMatchObject({ ok: true });
+    expect((await db.proposta.findFirstOrThrow()).conteudoMd).toContain("## Prazo final\n\n45 dias.\n\nPagamento à vista.");
   });
 
   it("aplica sobre o texto da tela, que vai junto (o que o autosave ainda não gravou)", async () => {

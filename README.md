@@ -554,8 +554,10 @@ Serviço em `src/lib/propostas/comentarios.ts` (tela e MCP chamam as mesmas fun�
     de um mesmo bloco, mostrado como diff no cartão. Só quem tem a caneta aplica, pela fila do autosave e
     pelo núcleo de `salvarRascunho` (lock, caneta, `revisao`, conflito); a mesma transação resolve a conversa e
     registra quem aplicou (`sugestao_aplicada` na Timeline). Aplicar é mais exigente que destacar: a
-    ocorrência precisa ter intacto ao menos um lado do contexto, senão a sugestão está desatualizada e não
-    se aplica. Texto novo herda a formatação do começo do trecho. Reabrir a conversa não desfaz o texto.
+    ocorrência precisa ter intacto ao menos um lado do contexto **dentro do próprio bloco** (o contexto da
+    âncora atravessa o `\n`; no "+" da linha ele mora todo nos vizinhos, e editar os vizinhos não muda o
+    trecho). O contexto inteiro só desempata entre ocorrências iguais; empate é ambíguo → desatualizada.
+    Texto novo herda a formatação do começo do trecho. Reabrir a conversa não desfaz o texto.
   - **Lote** (`pendente`): "Adicionar à revisão" fica só para o autor, em tudo (lista, carimbo do polling,
     MCP, id), e não conta como aberto. "Enviar revisão (N)" publica e gera um único aviso.
   - **Campo** (`campo`): valor, prazo, escopo e entregas aceitam comentário, sem sugestão, assim como os

@@ -6,9 +6,12 @@
  *
  * `localizarAncora` serve para DESTACAR: acha a ocorrência mais parecida, mesmo que seja outra.
  * Aplicar pede mais: se o trecho original mudou e o mesmo texto existe em outro lugar, a
- * sugestão não pode cair lá. Por isso a ocorrência precisa ter intacto ao menos um dos lados do contexto.
+ * sugestão não pode cair lá. Por isso a ocorrência precisa ter intacto ao menos um dos lados do
+ * contexto — medido SÓ DENTRO DO BLOCO do trecho (o contexto da âncora atravessa a fronteira `\n`,
+ * e no "+" da linha mora todo nos parágrafos vizinhos: editar os vizinhos não muda o trecho). O
+ * contexto inteiro, com os vizinhos, só desempata entre ocorrências iguais; empate é ambíguo → null.
  */
-import { criarAncora, OCORRENCIAS_MAX, textoPlano, TOKEN_BLOCO, TRECHO_MAX, type Ancora, type Faixa } from "./ancora";
+import { CONTEXTO_ANCORA, criarAncora, OCORRENCIAS_MAX, textoPlano, TOKEN_BLOCO, TRECHO_MAX, type Ancora, type Faixa } from "./ancora";
 import type { Bloco, Documento, ItemLista, NoTexto } from "./documento";
 
 const TOKENS = Object.values(TOKEN_BLOCO);
@@ -22,24 +25,62 @@ export function temCaractereReservado(texto: string): boolean {
   return TOKENS.some((t) => texto.includes(t));
 }
 
-/** Onde a sugestão se aplica no texto atual; null = desatualizada. */
+/**
+ * Um lado do contexto pronto para comparar. `ateABorda`: o contexto ia até a borda (do bloco ou do
+ * texto), então não quer dizer "qualquer coisa": a ocorrência tem que estar colada à mesma borda.
+ */
+type Lado = { texto: string; ateABorda: boolean };
+type Lados = { antes: Lado; depois: Lado };
+
+/** Contexto inteiro (atravessa blocos, borda = o texto) e só o que fica no bloco do trecho (borda = `\n`). */
+function ladosDaAncora(a: Ancora): { inteiro: Lados; noBloco: Lados } {
+  // Menor que o máximo é porque o texto acabou ali.
+  const curto = (c: string) => c.length < CONTEXTO_ANCORA;
+  const nlAntes = a.antes.lastIndexOf("\n");
+  const nlDepois = a.depois.indexOf("\n");
+  return {
+    inteiro: { antes: { texto: a.antes, ateABorda: curto(a.antes) }, depois: { texto: a.depois, ateABorda: curto(a.depois) } },
+    noBloco: {
+      antes: { texto: a.antes.slice(nlAntes + 1), ateABorda: nlAntes !== -1 || curto(a.antes) },
+      depois: { texto: nlDepois === -1 ? a.depois : a.depois.slice(0, nlDepois), ateABorda: nlDepois !== -1 || curto(a.depois) },
+    },
+  };
+}
+
+/** Quantos lados (0–2) continuam iguais em volta de [inicio, fim), dadas as bordas de referência. */
+function ladosIntactos(texto: string, l: Lados, inicio: number, fim: number, bordaAntes: number, bordaDepois: number): number {
+  const antes = texto.slice(l.antes.ateABorda ? bordaAntes : Math.max(0, inicio - l.antes.texto.length), inicio) === l.antes.texto;
+  const depois = texto.slice(fim, l.depois.ateABorda ? bordaDepois : fim + l.depois.texto.length) === l.depois.texto;
+  return Number(antes) + Number(depois);
+}
+
+/**
+ * Onde a sugestão se aplica no texto atual; null = desatualizada. Vale a ocorrência com ao menos um
+ * lado do contexto intacto no próprio bloco; entre várias, a de mais lados intactos (contando também
+ * o contexto inteiro, com os vizinhos). Empate no topo é ambíguo: ninguém aplica no lugar errado.
+ */
 export function localizarSugestao(texto: string, a: Ancora): Faixa | null {
   if (!trechoSugerivel(a.trecho)) return null;
+  const { inteiro, noBloco } = ladosDaAncora(a);
   let melhor: Faixa | null = null;
   let pontos = 0;
+  let empate = false;
   let n = 0;
   for (let i = texto.indexOf(a.trecho); i !== -1 && n < OCORRENCIAS_MAX; i = texto.indexOf(a.trecho, i + 1), n++) {
     const fim = i + a.trecho.length;
-    // Contexto vazio quer dizer "começo (ou fim) do texto", e não "qualquer coisa".
-    const antes = a.antes ? texto.slice(Math.max(0, i - a.antes.length), i) === a.antes : i === 0;
-    const depois = a.depois ? texto.slice(fim, fim + a.depois.length) === a.depois : fim === texto.length;
-    const p = Number(antes) + Number(depois);
+    const inicioBloco = i === 0 ? 0 : texto.lastIndexOf("\n", i - 1) + 1;
+    const quebra = texto.indexOf("\n", fim);
+    const fimBloco = quebra === -1 ? texto.length : quebra;
+    const doBloco = ladosIntactos(texto, noBloco, i, fim, inicioBloco, fimBloco);
+    if (doBloco === 0) continue;
+    const p = doBloco + ladosIntactos(texto, inteiro, i, fim, 0, texto.length);
     if (p > pontos) {
       pontos = p;
       melhor = { inicio: i, fim };
-    }
+      empate = false;
+    } else if (p === pontos) empate = true;
   }
-  return melhor;
+  return empate ? null : melhor;
 }
 
 /** Texto novo com a formatação do começo do trecho (a mesma regra no editor: `transacaoDeSugestao`). */

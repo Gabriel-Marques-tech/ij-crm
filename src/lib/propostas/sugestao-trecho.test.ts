@@ -38,6 +38,55 @@ describe("localizarSugestao", () => {
   });
 });
 
+describe("localizarSugestao: o contexto atravessa a fronteira do bloco (revisão da PR #74)", () => {
+  const texto = "Escopo do site.\nEntrega em 30 dias.\nPagamento à vista.";
+  // O + da linha: o bloco inteiro é o trecho, e os dois contextos moram nos vizinhos.
+  const linha = (t: string, bloco: string) => ancoraDaLinha(t, t.indexOf(bloco), bloco.length)!;
+
+  it("(a) + no bloco do meio: vizinhos editados, trecho intacto → aplica", () => {
+    const a = linha(texto, "Entrega em 30 dias.");
+    const novo = "Escopo do site e do blog.\nEntrega em 30 dias.\nPagamento parcelado.";
+    const i = novo.indexOf("Entrega");
+    expect(localizarSugestao(novo, a)).toEqual({ inicio: i, fim: i + "Entrega em 30 dias.".length });
+  });
+
+  it("(b) + no último bloco: anterior editado e parágrafo novo depois → aplica", () => {
+    const a = linha(texto, "Pagamento à vista.");
+    const novo = "Escopo do site.\nEntrega em 45 dias.\nPagamento à vista.\nGarantia de 90 dias.";
+    expect(localizarSugestao(novo, a)?.inicio).toBe(novo.indexOf("Pagamento"));
+  });
+
+  it("(c) seleção parcial num parágrafo curto, vizinhos editados → aplica", () => {
+    const a = anc(texto, "30 dias");
+    const novo = "Escopo do site e do blog.\nEntrega em 30 dias.\nPagamento parcelado.";
+    expect(localizarSugestao(novo, a)?.inicio).toBe(novo.indexOf("30 dias"));
+  });
+
+  it("o próprio bloco editado de um lado ainda aplica; trecho mudado não, mesmo com vizinhos iguais", () => {
+    const a = anc(texto, "30 dias");
+    expect(localizarSugestao("Escopo do site.\nEntrega final em 30 dias.\nPagamento à vista.", a)?.inicio).toBe("Escopo do site.\nEntrega final em ".length);
+    expect(localizarSugestao("Escopo do site.\nEntrega em 45 dias.\nPagamento à vista.", a)).toBeNull();
+    expect(localizarSugestao("Escopo do site.\nEntrega em 30 dias, no máximo.\nPagamento à vista.", linha(texto, "Entrega em 30 dias."))).toBeNull();
+  });
+
+  it("trecho repetido com contexto ambíguo continua desatualizado; o vizinho que sobreviveu desempata", () => {
+    const a = linha(texto, "Entrega em 30 dias.");
+    expect(localizarSugestao("A.\nEntrega em 30 dias.\nB.\nEntrega em 30 dias.\nC.", a)).toBeNull();
+    const t = "A.\nEntrega em 30 dias.\nB.\nEntrega em 30 dias.\nPagamento à vista.";
+    expect(localizarSugestao(t, a)?.inicio).toBe(t.lastIndexOf("Entrega"));
+    expect(localizarSugestao("Entrega em 30 dias.\nEntrega em 30 dias.", anc(texto, "30 dias"))).toBeNull();
+  });
+
+  it("bloco com mais de 40 caracteres: o contexto parcial segue comparado como antes", () => {
+    const longo = "Primeiro.\n" + "palavra ".repeat(12) + "30 dias" + " depois".repeat(8) + ".\nÚltimo.";
+    const a = anc(longo, "30 dias");
+    expect(a.antes.includes("\n")).toBe(false);
+    const novo = longo.replace("Primeiro.", "Outro começo.").replace("Último.", "Outro fim.");
+    expect(localizarSugestao(novo, a)?.inicio).toBe(novo.indexOf("30 dias"));
+    expect(localizarSugestao(novo.replace("palavra 30 dias", "palavra 45 dias"), a)).toBeNull();
+  });
+});
+
 describe("aplicarNoDocumento", () => {
   const p = (t: string): Documento["content"][number] => ({ type: "paragraph", content: [{ type: "text", text: t }] });
 
@@ -49,6 +98,7 @@ describe("aplicarNoDocumento", () => {
     const novo = aplicarNoDocumento(doc, localizarSugestao(plano, a)!, "item 2")!;
     expect(documentoParaMarkdown(novo)).toBe("## Escopo\n\nSite com loja.\n\n- item um\n- item 2");
   });
+
 
   it("o texto novo herda a formatação do começo do trecho; o resto do bloco não muda", () => {
     const doc: Documento = {
