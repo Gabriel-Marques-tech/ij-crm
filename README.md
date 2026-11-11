@@ -557,7 +557,8 @@ Serviço em `src/lib/propostas/comentarios.ts` (tela e MCP chamam as mesmas fun�
     ocorrência precisa ter intacto ao menos um lado do contexto **dentro do próprio bloco** (o contexto da
     âncora atravessa o `\n`; no "+" da linha ele mora todo nos vizinhos, e editar os vizinhos não muda o
     trecho). O contexto inteiro só desempata entre ocorrências iguais; empate é ambíguo → desatualizada.
-    Texto novo herda a formatação do começo do trecho. Reabrir a conversa não desfaz o texto.
+    Funciona também em célula de tabela. Texto novo herda a formatação do começo do trecho. Reabrir a
+    conversa não desfaz o texto.
   - **Lote** (`pendente`): "Adicionar à revisão" fica só para o autor, em tudo (lista, carimbo do polling,
     MCP, id), e não conta como aberto. "Enviar revisão (N)" publica e gera um único aviso.
   - **Campo** (`campo`): valor, prazo, escopo e entregas aceitam comentário, sem sugestão, assim como os

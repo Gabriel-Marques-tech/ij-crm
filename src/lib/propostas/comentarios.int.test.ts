@@ -417,6 +417,18 @@ describe("sugestão aplicável (GAB-101)", () => {
     expect((await db.proposta.findFirstOrThrow()).conteudoMd).toContain("## Prazo final\n\n45 dias.\n\nPagamento à vista.");
   });
 
+  it("célula de tabela (GAB-102): aplica no servidor; trecho que atravessa células não é sugerível", async () => {
+    const { projeto, ana, paula, revisao } = await semear();
+    const s = await salvarRascunho(projeto.id, { revisao, conteudo: { markdown: "## Valores\n\n| Item | Valor |\n| --- | --- |\n| Site | R$ 10 |" } }, ana);
+    if (!s.ok) throw new Error("seed");
+    expect(await comentar(projeto.id, { texto: "x", trecho: "Site\nR$ 10", sugestao: "y" }, paula)).toEqual({ ok: false, erro: "SUGESTAO_INVALIDA" });
+    const c = await comentar(projeto.id, { texto: "", trecho: "R$ 10", sugestao: "R$ 12" }, paula);
+    if (!c.ok) throw new Error("seed");
+    expect((await listar(projeto.id))!.threads[0].sugestao?.desatualizada).toBe(false);
+    expect(await aplicarSugestao(projeto.id, c.comentario.id, { revisao: s.revisao }, ana)).toMatchObject({ ok: true });
+    expect((await db.proposta.findFirstOrThrow()).conteudoMd).toContain("| Site | R$ 12 |");
+  });
+
   it("aplica sobre o texto da tela, que vai junto (o que o autosave ainda não gravou)", async () => {
     const { projeto, ana, id, revisao } = await comSugestao();
     const documento = markdownParaDocumento("## Escopo\n\nSite com loja e blog, ainda não salvo.\n\n## Prazo\n\n30 dias.");

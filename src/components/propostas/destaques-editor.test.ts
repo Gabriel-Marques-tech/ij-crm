@@ -125,6 +125,17 @@ describe("sugestão no editor (GAB-101)", () => {
     e.destroy();
   });
 
+  it("célula de tabela (GAB-102): o mesmo texto plano do servidor; troca na célula; trecho que atravessa células é null", () => {
+    const tabela = markdownParaDocumento("| Item | Valor |\n| --- | --- |\n| Site | R$ 10 |");
+    const e = new Editor({ extensions: [...EXTENSOES, DestaquesComentarios], content: documentoParaEditor(tabela) });
+    expect(planoDoEditor(e.state.doc).texto).toBe(textoPlano(tabela).texto);
+    const a = { trecho: "R$ 10", antes: "Item\nValor\nSite\n", depois: "\n\n" };
+    e.view.dispatch(transacaoDeSugestao(e.state, a, "R$ 12")!);
+    expect(documentoParaMarkdown(lerDocumento(e.getJSON())!)).toContain("| Site | R$ 12 |");
+    expect(transacaoDeSugestao(e.state, { trecho: "Site\nR$ 12", antes: "", depois: "" }, "x")).toBeNull();
+    e.destroy();
+  });
+
   it("espaços crus no editor: acha pelo texto canônico e troca no lugar certo", () => {
     const e = new Editor({ extensions: [...EXTENSOES, DestaquesComentarios], content: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Prazo  de 30   dias." }] }] } });
     const a = { trecho: "30 dias", antes: "Prazo de ", depois: "." };

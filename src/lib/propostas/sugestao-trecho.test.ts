@@ -99,6 +99,21 @@ describe("aplicarNoDocumento", () => {
     expect(documentoParaMarkdown(novo)).toBe("## Escopo\n\nSite com loja.\n\n- item um\n- item 2");
   });
 
+  it("troca dentro da célula da tabela (GAB-102): a travessia é a mesma de textoPlano e do editor", () => {
+    const md = "Antes.\n\n| Item | Valor |\n| --- | --- |\n| Site | R$ 10 |\n\nDepois.";
+    const doc = markdownParaDocumento(md);
+    const plano = textoPlano(doc).texto;
+    expect(plano).toContain("Site\nR$ 10\nDepois.");
+    const a = anc(plano, "R$ 10");
+    const novo = aplicarNoDocumento(doc, localizarSugestao(plano, a)!, "R$ 12")!;
+    expect(documentoParaMarkdown(novo)).toBe("Antes.\n\n| Item | Valor |\n| --- | --- |\n| Site | R$ 12 |\n\nDepois.");
+    // Cabeçalho também é célula.
+    const h = anc(plano, "Valor");
+    expect(documentoParaMarkdown(aplicarNoDocumento(doc, localizarSugestao(plano, h)!, "Preço")!)).toContain("| Item | Preço |");
+    // Trecho que atravessa células não é sugerível: a âncora o recusa antes de chegar aqui.
+    expect(trechoSugerivel("Site\nR$ 10")).toBe(false);
+    expect(aplicarNoDocumento(doc, { inicio: plano.indexOf("Site"), fim: plano.indexOf("R$ 10") + 5 }, "x")).toBeNull();
+  });
 
   it("o texto novo herda a formatação do começo do trecho; o resto do bloco não muda", () => {
     const doc: Documento = {

@@ -12,7 +12,7 @@
  * contexto inteiro, com os vizinhos, só desempata entre ocorrências iguais; empate é ambíguo → null.
  */
 import { CONTEXTO_ANCORA, criarAncora, OCORRENCIAS_MAX, textoPlano, TOKEN_BLOCO, TRECHO_MAX, type Ancora, type Faixa } from "./ancora";
-import type { Bloco, Documento, ItemLista, NoTexto } from "./documento";
+import type { Bloco, CelulaTabela, Documento, ItemLista, LinhaTabela, NoTexto } from "./documento";
 
 const TOKENS = Object.values(TOKEN_BLOCO);
 
@@ -108,11 +108,17 @@ function trocarNoBloco(nos: NoTexto[], de: number, ate: number, novo: string): N
   return saida;
 }
 
-/** Documento com `novo` no lugar da faixa do texto plano; null = a faixa não cabe num bloco de texto. */
+type NoVisitavel = Bloco | ItemLista | LinhaTabela | CelulaTabela;
+
+/**
+ * Documento com `novo` no lugar da faixa do texto plano; null = a faixa não cabe num bloco de texto.
+ * Visita os mesmos nós, na mesma ordem, de `textoPlano` (e do `planoDoEditor` da tela): listas e
+ * tabelas inclusive — senão a sugestão numa célula pareceria aplicável e o servidor a recusaria.
+ */
 export function aplicarNoDocumento(doc: Documento, f: Faixa, novo: string): Documento | null {
   const { inicios } = textoPlano(doc);
   let aplicado = false;
-  const visitar = <T extends Bloco | ItemLista>(b: T): T => {
+  const visitar = <T extends NoVisitavel>(b: T): T => {
     if (b.type === "paragraph" || b.type === "heading") {
       const ini = inicios.get(b);
       const nos = b.content ?? [];
@@ -121,7 +127,9 @@ export function aplicarNoDocumento(doc: Documento, f: Faixa, novo: string): Docu
       aplicado = true;
       return { ...b, content: trocarNoBloco(nos, f.inicio - ini, f.fim - ini, novo) };
     }
-    if (b.type === "bulletList" || b.type === "orderedList" || b.type === "listItem") return { ...b, content: (b.content as (Bloco | ItemLista)[]).map(visitar) } as T;
+    if (b.type === "bulletList" || b.type === "orderedList" || b.type === "listItem" || b.type === "table" || b.type === "tableRow" || b.type === "tableHeader" || b.type === "tableCell") {
+      return { ...b, content: (b.content as NoVisitavel[]).map(visitar) } as T;
+    }
     return b;
   };
   const content = doc.content.map(visitar);
