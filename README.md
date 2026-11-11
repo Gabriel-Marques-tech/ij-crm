@@ -563,7 +563,8 @@ Serviço em `src/lib/propostas/comentarios.ts` (tela e MCP chamam as mesmas fun�
     MCP, id), e não conta como aberto. "Enviar revisão (N)" publica e gera um único aviso.
   - **Campo** (`campo`): valor, prazo, escopo e entregas aceitam comentário, sem sugestão, assim como os
     blocos Cronograma e Investimento.
-  - **Por id**: inexistente, sem acesso e pendente de outra pessoa dão a mesma resposta ("não encontrado").
+  - **Por id**: inexistente, sem acesso e pendente de outra pessoa dão a mesma resposta ("não encontrado");
+    no MCP, `comentario_id` tem que ser do `projeto_id` informado (e não combina com `trecho`/`campo`).
 
 ## Painel de mensagens e cron (GAB-41)
 

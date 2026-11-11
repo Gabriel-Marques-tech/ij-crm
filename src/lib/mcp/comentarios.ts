@@ -136,13 +136,20 @@ const sugerirMcp = ferramenta({
 const adicionarMcp = ferramenta({
   nome: "adicionar_a_revisao_proposta",
   titulo: "Adicionar comentário à revisão",
-  descricao: `Guarda um comentário na sua revisão da proposta: só você vê, não conta como aberto e ninguém é avisado até enviar_revisao_proposta. Sem \`trecho\` nem \`campo\`: geral. \`trecho\`: como em comentar_proposta. ${NOTA_CAMPO} \`comentario_id\`: em vez disso, responde nessa thread. Texto puro, até ${COMENTARIO_MAX} caracteres.`,
+  descricao: `Guarda um comentário na sua revisão da proposta: só você vê, não conta como aberto e ninguém é avisado até enviar_revisao_proposta. Sem \`trecho\` nem \`campo\`: geral. \`trecho\`: como em comentar_proposta. ${NOTA_CAMPO} \`comentario_id\`: em vez disso, responde nessa thread (comentário deste mesmo projeto; não combina com \`trecho\` nem \`campo\`). Texto puro, até ${COMENTARIO_MAX} caracteres.`,
   escrita: false,
   muda: true,
   guarda: propostaVisivel,
   entrada: { projeto_id: id, texto, trecho: z.string().min(1).max(TRECHO_MAX).optional(), campo: campo.optional(), comentario_id: id.optional() },
   executar: async (a, eu) => {
-    const r = a.comentario_id ? await responderComentario(a.comentario_id, a.texto, eu, { pendente: true }) : await comentar(a.projeto_id, { texto: a.texto, trecho: a.trecho ?? null, campo: a.campo ?? null, pendente: true }, eu);
+    if (a.comentario_id) {
+      // `trecho`/`campo` seriam ignorados em silêncio: melhor dizer.
+      if (a.trecho !== undefined || a.campo !== undefined) return { ok: false, erro: "Com `comentario_id` a resposta entra na thread desse comentário: não passe `trecho` nem `campo`." };
+      const r = await responderComentario(a.comentario_id, a.texto, eu, { pendente: true, projetoId: a.projeto_id });
+      if (!r.ok && r.erro === "COMENTARIO_NAO_ENCONTRADO") return { ok: false, erro: "Comentário não encontrado neste projeto: confira `comentario_id` (de listar_comentarios_proposta) e `projeto_id`." };
+      return r.ok ? ok({ id: r.comentario.id, pendente: true }) : falha(r);
+    }
+    const r = await comentar(a.projeto_id, { texto: a.texto, trecho: a.trecho ?? null, campo: a.campo ?? null, pendente: true }, eu);
     return r.ok ? ok({ id: r.comentario.id, pendente: true }) : falha(r);
   },
 });

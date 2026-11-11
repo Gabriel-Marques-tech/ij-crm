@@ -1016,4 +1016,30 @@ describe("comentários via MCP (GAB-91): mesma camada e permissões da tela", ()
     expect(nada.isError).toBe(true);
     for (const n of ["sugerir_texto_proposta", "adicionar_a_revisao_proposta", "enviar_revisao_proposta", "descartar_da_revisao_proposta"]) expect(FERRAMENTAS.find((f) => f.nome === n)?.muda, n).toBe(true);
   });
+
+  it("adicionar_a_revisao_proposta com comentario_id: só comentário do projeto informado, e sem trecho/campo junto", async () => {
+    const { vendas, vendedora } = await semear();
+    const card = await criarCard({ pipelineId: vendas.id, faseId: fase(vendas, "primeiro_contato").id, titulo: "Padaria" }, vendedora);
+    const outro = await criarCard({ pipelineId: vendas.id, faseId: fase(vendas, "primeiro_contato").id, titulo: "Mercado" }, vendedora);
+    if (!card.ok || !outro.ok) throw new Error("seed");
+    await criarProposta(card.id, vendedora);
+    await criarProposta(outro.id, vendedora);
+    await executarFerramenta("editar_proposta", { projeto_id: card.id, revisao: 0, markdown: "## Prazo\n\nEntrega em 30 dias." }, vendedora);
+    const raiz = dados(await executarFerramenta("comentar_proposta", { projeto_id: card.id, texto: "Raiz" }, vendedora));
+
+    // A guarda passa (ela vê os dois projetos), mas o comentário não é deste projeto.
+    const deOutro = await executarFerramenta("adicionar_a_revisao_proposta", { projeto_id: outro.id, texto: "x", comentario_id: raiz.id }, vendedora);
+    expect(deOutro.isError).toBe(true);
+    expect(texto(deOutro)).toMatch(/não encontrado neste projeto/);
+    for (const extra of [{ trecho: "30 dias" }, { campo: "valor" }]) {
+      const r = await executarFerramenta("adicionar_a_revisao_proposta", { projeto_id: card.id, texto: "x", comentario_id: raiz.id, ...extra }, vendedora);
+      expect(r.isError).toBe(true);
+      expect(texto(r)).toMatch(/comentario_id/);
+    }
+    expect(await db.propostaComentario.count()).toBe(1);
+
+    const certo = dados(await executarFerramenta("adicionar_a_revisao_proposta", { projeto_id: card.id, texto: "Na thread", comentario_id: raiz.id }, vendedora));
+    expect(certo.pendente).toBe(true);
+    expect(await db.propostaComentario.findUniqueOrThrow({ where: { id: certo.id } })).toMatchObject({ paiId: raiz.id, pendente: true });
+  });
 });

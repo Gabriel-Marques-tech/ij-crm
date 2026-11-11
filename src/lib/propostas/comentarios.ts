@@ -233,12 +233,17 @@ export async function comentar(projetoId: string, e: NovoComentario, ator: Ator)
   return { ok: true, comentario: c };
 }
 
-/** Resposta na thread de `comentarioId` (resposta a resposta vai para a mesma raiz). Na própria revisão pendente, a resposta também fica pendente. */
-export async function responderComentario(comentarioId: string, texto: string, ator: Ator, opcoes: { pendente?: boolean } = {}): Promise<{ ok: true; comentario: { id: string } } | Falha> {
+/**
+ * Resposta na thread de `comentarioId` (resposta a resposta vai para a mesma raiz). Na própria revisão
+ * pendente, a resposta também fica pendente. `projetoId` amarra o id ao projeto informado (MCP): comentário
+ * de outro projeto é "não encontrado", como em `aplicarSugestao`.
+ */
+export async function responderComentario(comentarioId: string, texto: string, ator: Ator, opcoes: { pendente?: boolean; projetoId?: string } = {}): Promise<{ ok: true; comentario: { id: string } } | Falha> {
   const t = limparTexto(texto);
   if (!t.ok) return t;
   const r = await comentarioVisivel(comentarioId, ator);
   if (ehFalha(r)) return r;
+  if (opcoes.projetoId !== undefined && r.proposta.projetoId !== opcoes.projetoId) return NAO_ENCONTRADO;
   const pendente = opcoes.pendente === true || r.raizPendente;
   const c = await db.propostaComentario.create({
     data: { propostaId: r.proposta.id, paiId: r.raizId, autorId: r.autor.id, texto: t.texto, pendente, viaMcp: emViaMcp() },
