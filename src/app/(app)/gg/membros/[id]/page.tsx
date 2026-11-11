@@ -67,9 +67,9 @@ export default async function FichaPage({ params }: { params: Promise<{ id: stri
       <PonteCrm
         membroId={id}
         temEmail={!!m.email}
-        conta={conta ? { papel: conta.papel, area: conta.area, gp: conta.cargos.includes("GP"), ativo: conta.ativo, conviteAberto: !conta.senhaHash } : null}
+        conta={conta ? { papel: conta.papel, area: conta.area, cargos: conta.cargos, ativo: conta.ativo, conviteAberto: !conta.senhaHash } : null}
         derivado={d}
-        difere={conta ? contaDifere({ papel: conta.papel, area: conta.area, gp: conta.cargos.includes("GP") }, d) : false}
+        difere={conta ? contaDifere(conta, d) : false}
         podeMudarConta={gestao}
         desligado={m.status === "INATIVO" ? { cards: responsavelDe?.[0] ?? 0, tarefas: responsavelDe?.[1] ?? 0 } : null}
       />

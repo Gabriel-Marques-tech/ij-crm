@@ -120,7 +120,7 @@ export function podeEscreverResumo(u: PessoaComLado): boolean {
   return podeEscrever(u.papel) && ladoDe(u) === "VENDAS";
 }
 
-/** Quem designa o GP do projeto: o GP de projetos (spec §4.12). */
+/** Quem designa o GP do projeto: o PM de projetos (spec §4.12). */
 export function podeDesignarGp(u: PessoaComLado): boolean {
   return ehGpDoLado(u, "PROJETOS");
 }

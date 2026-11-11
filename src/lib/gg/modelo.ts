@@ -4,7 +4,8 @@
  * temCiclo, validarImportacao); o resto é a ponte com o CRM e a rotina (fase B).
  * Spec: docs/superpowers/specs/2026-11-05-gg-no-crm-design.md
  */
-import type { Area, CategoriaCargo, CategoriaEvento, FuncaoProjeto, Papel, StatusMembro, TipoAreaOrg, TipoDemanda } from "@prisma/client";
+import type { Area, Cargo, CategoriaCargo, CategoriaEvento, FuncaoProjeto, Papel, StatusMembro, TipoAreaOrg, TipoDemanda } from "@prisma/client";
+import { CARGO_GP_DO_LADO, CARGOS, resolverAreaCargos } from "@/lib/auth/areas";
 
 export const ROTULO_STATUS_MEMBRO: Record<StatusMembro, string> = { NAO_INFORMADO: "Não informado", ATIVO: "Ativo", AFASTADO: "Afastado", INATIVO: "Desligado" };
 export const STATUS_MEMBRO = Object.keys(ROTULO_STATUS_MEMBRO) as StatusMembro[];
@@ -86,18 +87,24 @@ export function validarImportacao(input: unknown, hoje: string): LinhaImportacao
 
 // ---------------------------------------------------------------- ponte organograma → CRM
 
-/** O que o organograma diz sobre uma ocupação vigente: lado da área-raiz, categoria e GP do cargo. */
-export type PostoDerivavel = { ladoCrm: Area | null; categoria: CategoriaCargo; ehGp: boolean; principal: boolean };
+/** O que o organograma diz sobre uma ocupação vigente: lado da área-raiz, categoria e marcas do cargo (GP = PM/GP; PO). */
+export type PostoDerivavel = { ladoCrm: Area | null; categoria: CategoriaCargo; ehGp: boolean; ehPo: boolean; principal: boolean };
 
-export type Derivado = { area: Area | null; papel: Papel | null; gp: boolean; conflito: Area[] | null };
+export type Derivado = { area: Area | null; papel: Papel | null; cargos: Cargo[]; conflito: Area[] | null };
+
+/** Ordem do catálogo (`CARGOS`), sem repetição: o que a comparação e o form esperam. */
+const ordenarCargos = (cs: Iterable<Cargo>): Cargo[] => CARGOS.filter((c) => [...cs].includes(c));
 
 /**
- * Área, papel e GP que o organograma sugere para a conta do CRM (decisões da spec §3):
- * diretoria → GESTOR; lado da área (Projetos/Vendas) → PROJETOS/VENDEDOR; outra área → VISUALIZADOR;
- * cargo marcado como GP (PM) → GP. Duas áreas: vale a ocupação principal; sem principal entre elas, conflito.
+ * Área, papel e cargos que o organograma sugere para a conta do CRM (decisões da spec §3
+ * e cargos de Projetos): diretoria → GESTOR (e, se a diretoria é da área de Projetos, cargo
+ * DIRETOR); lado da área (Projetos/Vendas) → PROJETOS/VENDEDOR; outra área → VISUALIZADOR;
+ * cargo marcado como GP → o GP do lado (PM em Projetos, GP em Vendas); cargo PO em Projetos → PO.
+ * Só contam cargos de postos no lado escolhido. Duas áreas: vale a ocupação principal; sem
+ * principal entre elas, conflito (e nenhum cargo).
  */
 export function derivarDoOrganograma(postos: PostoDerivavel[]): Derivado {
-  if (postos.length === 0) return { area: null, papel: null, gp: false, conflito: null };
+  if (postos.length === 0) return { area: null, papel: null, cargos: [], conflito: null };
   const lados = [...new Set(postos.map((p) => p.ladoCrm).filter((l): l is Area => l !== null))];
   let area: Area | null = lados.length === 1 ? lados[0] : null;
   let conflito: Area[] | null = null;
@@ -107,15 +114,27 @@ export function derivarDoOrganograma(postos: PostoDerivavel[]): Derivado {
     else conflito = lados;
   }
   const gestor = postos.some((p) => p.categoria === "DIRETORIA");
-  const gp = area !== null && postos.some((p) => p.ehGp && p.ladoCrm === area);
   const papel: Papel = gestor ? "GESTOR" : area === "PROJETOS" ? "PROJETOS" : area === "VENDAS" ? "VENDEDOR" : "VISUALIZADOR";
-  return { area, papel, gp, conflito };
+  const cargos = new Set<Cargo>();
+  if (area !== null) {
+    const noLado = postos.filter((p) => p.ladoCrm === area);
+    if (noLado.some((p) => p.ehGp)) cargos.add(CARGO_GP_DO_LADO[area]);
+    if (area === "PROJETOS" && noLado.some((p) => p.ehPo)) cargos.add("PO");
+    if (area === "PROJETOS" && noLado.some((p) => p.categoria === "DIRETORIA")) cargos.add("DIRETOR");
+  }
+  // A mesma régua do convite: o que a conta não pode ter (ex.: Diretor sem gestão) não é sugerido.
+  return { area, papel, cargos: ordenarCargos(resolverAreaCargos(papel, area, [...cargos]).cargos), conflito };
 }
 
-/** A conta difere do que o organograma sugere? (ADMIN nunca é rebaixado pela sugestão.) */
-export function contaDifere(conta: { papel: Papel; area: Area | null; gp: boolean }, d: Derivado): boolean {
+/**
+ * A conta difere do que o organograma sugere? (ADMIN nunca é rebaixado pela sugestão.)
+ * Os cargos da conta são lidos pela régua do convite (GP legado em Projetos = PM, sujeira
+ * fora da área não conta), para uma conta válida nunca ficar "difere" sem ter o que aplicar.
+ */
+export function contaDifere(conta: { papel: Papel; area: Area | null; cargos: readonly Cargo[] }, d: Derivado): boolean {
   if (d.papel === null || d.conflito || conta.papel === "ADMIN") return false;
-  return conta.papel !== d.papel || conta.area !== d.area || conta.gp !== d.gp;
+  const daConta = ordenarCargos(resolverAreaCargos(conta.papel, conta.area, conta.cargos).cargos);
+  return conta.papel !== d.papel || conta.area !== d.area || daConta.join() !== d.cargos.join();
 }
 
 // ---------------------------------------------------------------- rotina (fase B)

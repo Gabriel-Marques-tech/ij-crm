@@ -1,6 +1,6 @@
 import type { Area, AreaEntrada } from "@prisma/client";
 import type { PaginaInicial } from "@/lib/preferencias/preferencias";
-import { AREAS, ehGpDoLado, ladoDe, temCargo, usaAreaDeEntrada, type PessoaComLado } from "./areas";
+import { AREAS, ehGpDoLado, ehGpDoProprioLado, ladoDe, usaAreaDeEntrada, type PessoaComLado } from "./areas";
 import { podeEscrever, temPapelMinimo } from "./papeis";
 
 /**
@@ -161,9 +161,9 @@ export function quadroPadrao(p: PessoaComLado): string {
   return (ladoDe(p) ?? "VENDAS").toLowerCase();
 }
 
-/** Vê todas as propostas: GESTOR com ou sem área, ADMIN e GP (§4.7). */
+/** Vê todas as propostas: GESTOR com ou sem área, ADMIN e o GP do lado (GP de vendas, PM de projetos) (§4.7). */
 export function veTodasAsPropostas(p: PessoaComLado): boolean {
-  return temPapelMinimo(p.papel, "GESTOR") || temCargo(p, "GP");
+  return temPapelMinimo(p.papel, "GESTOR") || ehGpDoProprioLado(p);
 }
 
 /** `escalado` = responsável do card, dono atual ou ex-dono da caneta, ou quem criou a proposta. VISUALIZADOR: nenhuma. */

@@ -124,9 +124,9 @@ describe("HandoffDoProjeto (GAB-93)", () => {
     expect(screen.getByRole("option", { name: "Pedro (não pode mais ser GP)" })).toBeTruthy();
   });
 
-  it("sem GP de projetos: diz que ninguém tem o cargo e pede à gestão", () => {
+  it("sem PM de projetos: diz que ninguém tem o cargo e pede à gestão", () => {
     montar({ semGpDeProjetos: true });
-    expect(screen.getByText(/Ninguém tem o cargo de GP de projetos.*Peça à gestão/)).toBeTruthy();
+    expect(screen.getByText(/Ninguém tem o cargo de PM de projetos.*Peça à gestão/)).toBeTruthy();
   });
 
   it("PDF: envia arquivo ou aponta um já anexado", async () => {

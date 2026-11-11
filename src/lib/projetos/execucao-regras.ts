@@ -8,7 +8,7 @@
  *   Sem GP válido (card isento, migrado, GP que saiu), responde o responsável do card.
  * - Apoio: ADMIN e GESTOR da área, que é o gestor de projetos ou o sem área (conta nas duas).
  * - O resto lê: a tela e `ver_cronograma` não restringem leitura.
- * Mudar só o campo Responsável não troca o GP: quem troca o GP é o GP de projetos, designando
+ * Mudar só o campo Responsável não troca o GP: quem troca o GP é o PM de projetos, designando
  * outro (`designarGpDoProjeto`). O Responsável é trocado pelo responsável atual, pelo GP da área
  * dona ou pela gestão da área (`podeTrocarResponsavel`), regra que não fala de execução.
  */

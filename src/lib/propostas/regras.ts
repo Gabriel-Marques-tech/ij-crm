@@ -103,10 +103,10 @@ export const MENSAGEM_ERRO_PROPOSTA: Record<ErroProposta, string> = {
   CONCORDAR_PROPRIA_VERSAO: "Só dá para concordar com uma versão que veio do outro lado. A última versão é do seu lado: devolva para o outro lado avaliar.",
   CONCORDAR_RASCUNHO_ALTERADO: "O rascunho mudou depois da versão recebida, e concordar é aceitar sem editar. Devolva (salva uma versão com as mudanças) ou desfaça-as.",
   DEVOLVER_SEM_MUDANCAS: "Nada mudou desde a versão que veio do outro lado: para aceitá-la como está, use Concordar.",
-  SO_GP_PEGA: "Só o GP do lado que está com a caneta pode pegá-la. Peça a quem está com ela para passar.",
+  SO_GP_PEGA: "Só o GP do lado que está com a caneta (GP de vendas, PM de projetos) pode pegá-la. Peça a quem está com ela para passar.",
   JA_COM_A_CANETA: "Você já está com a caneta.",
   REABRIR_SO_PRONTA: "Só dá para reabrir uma proposta pronta para envio.",
-  INVIAVEL_SEM_PERMISSAO: "Só o GP de projetos ou quem está com a caneta do lado de projetos marca a proposta como inviável.",
+  INVIAVEL_SEM_PERMISSAO: "Só o PM de projetos ou quem está com a caneta do lado de projetos marca a proposta como inviável.",
   MOTIVO_INVIAVEL_OBRIGATORIO: "Diga o motivo de a proposta ser inviável.",
   MOTIVO_INVIAVEL_LONGO: `O motivo pode ter até ${MOTIVO_INVIAVEL_MAX} caracteres.`,
   PROJETO_FORA_DE_VENDAS:

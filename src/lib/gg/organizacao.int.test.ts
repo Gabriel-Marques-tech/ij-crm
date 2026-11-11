@@ -165,7 +165,7 @@ describe("organograma (regras do ajustar_ocupacao)", () => {
 });
 
 describe("ponte com o CRM", () => {
-  it("PM de Projetos sugere PROJETOS + GP; diretor sugere GESTOR; contas ligam pelo e-mail", async () => {
+  it("PM de Projetos sugere PROJETOS + PM; diretor de Projetos sugere GESTOR + Diretor; PO sugere PO; contas ligam pelo e-mail", async () => {
     const { admin, paulaU } = await semear();
     const paula = await db.membro.create({ data: { nome: "Paula", email: "PAULA@ij.test", status: "ATIVO" } });
     expect(await ligarContasPorEmail(admin)).toEqual({ ok: true, ligados: 1 });
@@ -174,8 +174,14 @@ describe("ponte com o CRM", () => {
     const g = await novo("Guto", admin);
     await adicionarOcupante("p_dproj", g, null, admin);
     const base = await carregarBase();
-    expect(derivadoDe(base, paula.id)).toEqual({ area: "PROJETOS", papel: "PROJETOS", gp: true, conflito: null });
-    expect(derivadoDe(base, g)).toMatchObject({ area: "PROJETOS", papel: "GESTOR", gp: false });
+    expect(derivadoDe(base, paula.id)).toEqual({ area: "PROJETOS", papel: "PROJETOS", cargos: ["PM"], conflito: null });
+    expect(derivadoDe(base, g)).toEqual({ area: "PROJETOS", papel: "GESTOR", cargos: ["DIRETOR"], conflito: null });
+    // PO vem do catálogo (id `cargo_po`) ou do nome, como na importação.
+    await db.cargoOrg.create({ data: { id: "po_importado", nome: "PO", categoria: "LIDERANCA" } });
+    await db.posicao.create({ data: { id: "p_po", nome: "PO", areaId: "proj", cargoId: "po_importado", liderancaId: "p_dproj" } });
+    const o = await novo("Olga", admin);
+    await adicionarOcupante("p_po", o, null, admin);
+    expect(derivadoDe(await carregarBase(), o)).toEqual({ area: "PROJETOS", papel: "PROJETOS", cargos: ["PO"], conflito: null });
   });
 });
 

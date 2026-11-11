@@ -2,14 +2,14 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import type { Area, Papel, StatusMembro } from "@prisma/client";
+import type { Area, Cargo, Papel, StatusMembro } from "@prisma/client";
 import { MensagemErro } from "@/components/erros/mensagem-erro";
 import { CAMPO, Chip } from "@/components/gg/ui";
 import { useAcao } from "@/components/gg/use-acao";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { Derivado } from "@/lib/gg/modelo";
-import { ROTULO_AREA } from "@/lib/auth/areas";
+import { cargosDe, ROTULO_AREA, ROTULO_CARGO } from "@/lib/auth/areas";
 import { ROTULO_STATUS_MEMBRO, STATUS_MEMBRO } from "@/lib/gg/modelo";
 import { aplicarNoCrmAction, convidarParaCrmAction, editarMembroAction, registrarEntradaAction, registrarSaidaAction } from "../../actions";
 
@@ -101,7 +101,7 @@ export function PonteCrm({
 }: {
   membroId: string;
   temEmail: boolean;
-  conta: { papel: Papel; area: Area | null; gp: boolean; ativo: boolean; conviteAberto: boolean } | null;
+  conta: { papel: Papel; area: Area | null; cargos: readonly Cargo[]; ativo: boolean; conviteAberto: boolean } | null;
   derivado: Derivado;
   difere: boolean;
   podeMudarConta: boolean;
@@ -109,8 +109,9 @@ export function PonteCrm({
 }) {
   const { pendente, erro, rodar } = useAcao();
   const [link, setLink] = useState<string | null>(null);
-  const descrever = (papel: Papel, area: Area | null, gp: boolean) => `papel ${papel} · ${area ? `área ${ROTULO_AREA[area]}` : "sem área"}${gp ? " · GP" : ""}`;
-  const sugestao = d.conflito ? `duas áreas (${d.conflito.map((a) => ROTULO_AREA[a]).join(" e ")}): marque a posição principal` : d.papel ? descrever(d.papel, d.area, d.gp) : "sem posição: nada a sugerir";
+  // A conta é descrita pelos cargos efetivos (`cargosDe`): GP legado em Projetos aparece como PM, igual à tabela de usuários.
+  const descrever = (papel: Papel, area: Area | null, cargos: readonly Cargo[]) => `papel ${papel} · ${area ? `área ${ROTULO_AREA[area]}` : "sem área"}${cargos.length ? ` · ${cargos.map((c) => ROTULO_CARGO[c]).join(", ")}` : ""}`;
+  const sugestao = d.conflito ? `duas áreas (${d.conflito.map((a) => ROTULO_AREA[a]).join(" e ")}): marque a posição principal` : d.papel ? descrever(d.papel, d.area, d.cargos) : "sem posição: nada a sugerir";
   return (
     <section className="grid gap-2 rounded-xl border border-primary/35 bg-primary-soft/30 p-4 text-sm">
       <div className="flex flex-wrap items-center gap-2">
@@ -124,7 +125,7 @@ export function PonteCrm({
       </p>
       {conta ? (
         <p className="font-mono text-xs text-fg-mute">
-          Hoje no CRM: {descrever(conta.papel, conta.area, conta.gp)}
+          Hoje no CRM: {descrever(conta.papel, conta.area, cargosDe(conta))}
         </p>
       ) : null}
       <div className="flex flex-wrap items-center gap-2">

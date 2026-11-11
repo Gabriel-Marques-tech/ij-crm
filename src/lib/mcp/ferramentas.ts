@@ -846,7 +846,7 @@ const reabrirMcp = ferramenta({
 const inviavelMcp = ferramenta({
   nome: "marcar_proposta_inviavel",
   titulo: "Marcar proposta como inviável",
-  descricao: `Projetos diz que a proposta é inviável, com motivo (até ${MOTIVO_INVIAVEL_MAX} caracteres): a proposta sai do pingue-pongue e o projeto vai para Perdido no quadro de Vendas. Só o GP de projetos ou quem está com a caneta do lado de projetos. Não tem volta pelo MCP: confirme com a pessoa antes.`,
+  descricao: `Projetos diz que a proposta é inviável, com motivo (até ${MOTIVO_INVIAVEL_MAX} caracteres): a proposta sai do pingue-pongue e o projeto vai para Perdido no quadro de Vendas. Só o PM de projetos ou quem está com a caneta do lado de projetos. Não tem volta pelo MCP: confirme com a pessoa antes.`,
   escrita: true,
   guarda: propostaVisivel,
   entrada: { projeto_id: projetoId, motivo: z.string().max(2000) },
@@ -1032,7 +1032,7 @@ const lerHandoff = ferramenta({
       completo: h.completo,
       falta: h.pendencias.length ? descreverPendencias(h.pendencias) : null,
       gp: h.gp ? { ...h.gp, valido: h.gpValido, responsavel: !h.responsavelDiverge } : null,
-      ...(h.emHandoff && !h.gpValido && (await listarGpsDeProjetos()).length === 0 ? { aviso: "Ninguém tem o cargo de GP de projetos: peça à gestão para dar o cargo a alguém, que então designa o GP do projeto." } : {}),
+      ...(h.emHandoff && !h.gpValido && (await listarGpsDeProjetos()).length === 0 ? { aviso: "Ninguém tem o cargo de PM de projetos: peça à gestão para dar o cargo a alguém, que então designa o GP do projeto." } : {}),
       checklist: {
         proposta_congelada: { feito: h.proposta.congelada, dispensada: h.proposta.dispensada, versao: (await podeVerPropostaDoProjeto(eu, a.id)) ? h.proposta.versao : null, automatico: true },
         contrato_pdf: { feito: !!h.contrato, anexo: h.contrato },
@@ -1079,7 +1079,7 @@ const escreverResumoHandoff = ferramenta({
 const designarGpProjeto = ferramenta({
   nome: "designar_gp_projeto",
   titulo: "Designar o GP do projeto",
-  descricao: "Só o GP de projetos, com o projeto em Handoff ou Execução: designa o GP do projeto (uma pessoa da área projetos; candidatos em ler_handoff ou ver_cronograma). Ela vira a responsável pelo projeto e recebe o aviso. Designar de novo a mesma pessoa a devolve à responsabilidade, se o responsável tiver mudado.",
+  descricao: "Só o PM de projetos, com o projeto em Handoff ou Execução: designa o GP do projeto (uma pessoa da área projetos; candidatos em ler_handoff ou ver_cronograma). Ela vira a responsável pelo projeto e recebe o aviso. Designar de novo a mesma pessoa a devolve à responsabilidade, se o responsável tiver mudado.",
   escrita: true,
   entrada: { id, gp_id: id },
   executar: async (a, eu) => {

@@ -206,6 +206,10 @@ const comId = <T extends object>(p: T) => ({ ...p, id: ID });
 const GP_VENDAS = { ...pessoa("VENDEDOR", "VENDAS"), cargos: ["GP"] as Cargo[] };
 const GP_PROJETOS = { ...pessoa("PROJETOS", "PROJETOS"), cargos: ["GP"] as Cargo[] };
 const GESTOR_GP_VENDAS = { ...pessoa("GESTOR", "VENDAS"), cargos: ["GP"] as Cargo[] };
+// Cargos de Projetos: PM é o GP do lado; PO e Diretor não dão nada além do papel.
+const PM_PROJETOS = { ...pessoa("PROJETOS", "PROJETOS"), cargos: ["PM"] as Cargo[] };
+const PO_PROJETOS = { ...pessoa("PROJETOS", "PROJETOS"), cargos: ["PO"] as Cargo[] };
+const DIRETOR_PROJETOS = { ...pessoa("GESTOR", "PROJETOS"), cargos: ["DIRETOR"] as Cargo[] };
 
 /** Matriz papel × área (GAB-98): o que o servidor decide, igual em tela, action e MCP. */
 const MATRIZ: { nome: string; p: typeof VENDEDOR; tabelaRanking: boolean; vendas: boolean; projetos: boolean; todasPropostas: boolean; agenda: "nenhum" | "proprio" | "area" | "todos" }[] = [
@@ -213,6 +217,9 @@ const MATRIZ: { nome: string; p: typeof VENDEDOR; tabelaRanking: boolean; vendas
   { nome: "GP de vendas", p: GP_VENDAS, tabelaRanking: true, vendas: true, projetos: false, todasPropostas: true, agenda: "proprio" },
   { nome: "membro de projetos", p: MEMBRO_PROJETOS, tabelaRanking: false, vendas: false, projetos: true, todasPropostas: false, agenda: "proprio" },
   { nome: "GP de projetos", p: GP_PROJETOS, tabelaRanking: false, vendas: false, projetos: true, todasPropostas: true, agenda: "proprio" },
+  { nome: "PM de projetos", p: PM_PROJETOS, tabelaRanking: false, vendas: false, projetos: true, todasPropostas: true, agenda: "proprio" },
+  { nome: "PO de projetos", p: PO_PROJETOS, tabelaRanking: false, vendas: false, projetos: true, todasPropostas: false, agenda: "proprio" },
+  { nome: "diretor de projetos (gestor com lado)", p: DIRETOR_PROJETOS, tabelaRanking: false, vendas: false, projetos: true, todasPropostas: true, agenda: "area" },
   { nome: "gestor de vendas", p: GESTOR_VENDAS, tabelaRanking: true, vendas: true, projetos: false, todasPropostas: true, agenda: "area" },
   { nome: "gestor de projetos", p: GESTOR_PROJETOS, tabelaRanking: false, vendas: false, projetos: true, todasPropostas: true, agenda: "area" },
   { nome: "gestor sem área", p: GESTOR_SEM_AREA, tabelaRanking: true, vendas: true, projetos: true, todasPropostas: true, agenda: "todos" },
@@ -293,6 +300,9 @@ describe("GAB-98: trocar o responsável", () => {
     ["GP de vendas", GP_VENDAS, true, false],
     ["membro de projetos", MEMBRO_PROJETOS, false, false],
     ["GP de projetos", GP_PROJETOS, false, true],
+    ["PM de projetos", PM_PROJETOS, false, true],
+    ["PO de projetos", PO_PROJETOS, false, false],
+    ["diretor de projetos", DIRETOR_PROJETOS, false, true],
     ["gestor de vendas", GESTOR_VENDAS, true, false],
     ["gestor de projetos", GESTOR_PROJETOS, false, true],
     ["gestor sem área", GESTOR_SEM_AREA, true, true],

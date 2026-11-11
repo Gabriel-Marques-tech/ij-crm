@@ -49,9 +49,37 @@ ADMIN_NOME="Seu Nome" ADMIN_EMAIL=voce@ij.com ADMIN_SENHA='min 8 chars' pnpm adm
 ```
 
 Entre em `/login`. Em **Gestão → Usuários** gere convites: o link é mostrado uma vez,
-vale 7 dias, e quem abre define a própria senha. Papéis: `VENDEDOR` (opera),
-`GESTOR` (+ usuários, fases, import), `ADMIN` (+ config técnica). Sessões vivem no
-banco (`sessao`): desativar alguém derruba o acesso na hora.
+vale 7 dias, e quem abre define a própria senha. Papéis: `VISUALIZADOR` (só lê), `VENDEDOR` e
+`PROJETOS` (operam, cada um no seu lado), `GESTOR` (+ usuários, fases, import), `ADMIN` (+ config
+técnica). Sessões vivem no banco (`sessao`): desativar alguém derruba o acesso na hora.
+
+### Papéis, áreas e cargos
+
+Regra pura em `src/lib/auth/papeis.ts` (quem pode o quê) e `src/lib/auth/areas.ts` (de que lado é e
+que cargo tem). O **papel** dá permissão; a **área** (`usuario.area`: Vendas ou Projetos) diz por
+qual lado a pessoa age na caneta da proposta; o **cargo** (`usuario.cargos`) é um atributo dentro
+da área, nunca um papel. Vendedor é sempre de Vendas e Projetos sempre de Projetos; visualizador não
+tem lado; gestor e admin só têm lado se a gestão der (ex.: o diretor que também é GP de vendas).
+
+| Área | Cargo | O que muda |
+|---|---|---|
+| Vendas | **GP** | Age em nome de vendas na caneta: pega a caneta, envia e registra a resposta do cliente sem estar com ela; vê todas as propostas |
+| Projetos | **PM** | O "GP do lado" de projetos: pega a caneta, marca a proposta inviável, designa o GP do projeto no handoff; vê todas as propostas |
+| Projetos | **PO** | Só o cargo (em geral é quem vira GP do projeto; os POs aparecem primeiro na lista de candidatos). Nenhuma permissão além do papel |
+| Projetos | **Diretor** | Só com papel `GESTOR` (ou `ADMIN`) e lado Projetos: é a gestão com lado Projetos, nomeada. Nenhuma permissão nova |
+
+- No convite e na edição, o form oferece só os cargos da área; marcar **Diretor** com papel Projetos
+  troca o papel para Gestor na hora (quem não pode atribuir Gestor não vê a opção). O servidor
+  (`resolverAreaCargos`) reaplica a regra: cargo de outra área ou Diretor sem gestão é descartado,
+  mesmo num FormData forjado.
+- **GP em Projetos é legado**: contas anteriores aos cargos de Projetos seguem valendo como PM na
+  leitura (`cargosDe`) e viram PM quando reeditadas. O form não oferece GP para Projetos.
+- `ehGpDoLado(u, lado)` responde "é o GP deste lado" (GP em Vendas, PM em Projetos): é a função que a
+  caneta, o handoff e o MCP consultam. `descreverLado` dá "GP de vendas", "PM, PO de projetos"…
+- Novo cargo = `ALTER TYPE "Cargo" ADD VALUE` (aditivo) + entrada em `CARGOS_DA_AREA`.
+- A ponte Gente & Gestão → conta (`derivarDoOrganograma`) sugere os cargos pelo organograma: cargo
+  com `eh_gp` em área de Projetos → PM, em Vendas → GP; cargo PO → PO; diretoria em área de Projetos
+  → Gestor + Diretor.
 
 ## Como funciona a conexão com o WhatsApp
 
@@ -618,9 +646,9 @@ entra em fase de ganho. Cards `isento_trava_contrato` seguem isentos. No detalhe
 `marcarContratoAssinado` (`contrato-assinado.ts`) é a porta da tela e da ferramenta MCP
 `marcar_contrato_assinado`: confere a regra, anexa pelo sistema de anexos e só então move. WhatsApp
 "assinou" fora da regra marca `revisar` e responde no grupo o que falta.
-**Handoff (GAB-93, spec fase 2 §4.8/§4.11/§4.12).** O ganho leva o card à coluna Handoff e avisa os GPs de
+**Handoff (GAB-93, spec fase 2 §4.8/§4.11/§4.12).** O ganho leva o card à coluna Handoff e avisa os PMs de
 projetos (app + WhatsApp privado, tipo `HANDOFF`). No detalhe do Projeto, o bloco Handoff reúne: GP do projeto
-(designado pelo GP de projetos, pessoa da área projetos; vira a responsável e recebe aviso); checklist (proposta
+(designado pelo PM de projetos, pessoa da área projetos; vira a responsável e recebe aviso); checklist (proposta
 final congelada, automática; PDF do contrato assinado; contatos, kickoff, acessos/materiais); e o resumo escrito
 por vendas (contexto, combinados verbais, riscos, o que o cliente valoriza). Execução, e toda fase depois dela ou
 de ganho no quadro, só com tudo fechado: arraste, MCP, card novo, lixeira e Gestão de fases, nem gestor força
@@ -651,7 +679,7 @@ mais de um na semana vale, e o último é o badge do card, só com o card em Exe
 Timeline (tipo `EXECUCAO`). Painel: leia as duas tabelas, com `cancelada_em IS NULL` (`ENTREGA_ATIVA`).
 Quem opera: o GP do projeto (o designado no handoff, enquanto ativo e da área projetos; sem ele, o responsável do card), com
 ADMIN e GESTOR de projetos ou sem área de apoio. Os demais leem. Regra só em `podeOperarExecucao` (`execucao-regras.ts`), aplicada
-em `recusaDeExecucao`; no MCP, a guarda `cardEditavel` vem antes. O GP de projetos troca o GP do projeto também em Execução, no bloco
+em `recusaDeExecucao`; no MCP, a guarda `cardEditavel` vem antes. O PM de projetos troca o GP do projeto também em Execução, no bloco
 e em `designar_gp_projeto`; o GP anterior recebe aviso só no app (`GP_TROCADO`). Trocar o campo Responsável não troca um GP válido. Fora de Execução o cronograma é só registro.
 O GP designado conta como escalado na proposta (`ondeEscalado`). Quem não vê a proposta (`podeVerPropostaDoProjeto`) vê título e datas, sem valor, versão e `copiaveis`, e não copia
 (`cronogramaSemProposta`; `timelineSemProposta` tira a versão de `cronograma_copiado`).
@@ -760,13 +788,13 @@ Tudo no servidor: página, action, rota de API e MCP, com as regras puras de
 | Painel | todos, como antes. No de projetos, o tempo com a caneta segue as propostas (GAB-96) |
 | Mover e editar dados do card, excluir card | área dona (`pipeline.chave`), responsável do card, gestor sem área e admin |
 | Criar card | quem é da área do quadro, gestor sem área e admin |
-| Trocar o responsável | o responsável atual, GP do lado dono, gestor da área dona ou sem área, e admin |
+| Trocar o responsável | o responsável atual, GP do lado dono (GP de vendas, PM de projetos), gestor da área dona ou sem área, e admin |
 | Restaurar card da lixeira | gestor da área dona ou sem área, e admin (e o responsável, se for gestor) |
 | Handoff: itens e PDF do contrato | em Handoff, quem edita o card e quem é de Vendas (etapa conjunta, §4.7). O resumo continua de vendas |
 | Handoff: Mover para Execução | Projetos, responsável, gestor sem área e admin |
 | `propostaUrl` | ler e gravar só com acesso à proposta |
 | Comentar, criar prazo e anexar em card de outra área | todo mundo que escreve |
-| Proposta (lista, página, versões, diff, PDF, comentários, badge, eventos na Timeline, link) | responsável do card, dono e ex-dono da caneta, quem a criou, GP, gestor com ou sem área e admin. VISUALIZADOR: nenhuma |
+| Proposta (lista, página, versões, diff, PDF, comentários, badge, eventos na Timeline, link) | responsável do card, dono e ex-dono da caneta, quem a criou, GP do lado (GP de vendas, PM de projetos), gestor com ou sem área e admin. VISUALIZADOR: nenhuma |
 | Calendário e `/semana?vendedor=` | membro: só o próprio. Gestor com área: mesmo `ladoDe`. Gestor sem área e admin: todos. VISUALIZADOR: /403 |
 
 Limitações: anexos seguem lidos por quem vê o card (decisão provisória, §4.7). Aviso antigo de quem perdeu
@@ -938,7 +966,7 @@ cor funcional só em ponto e borda.
 
 | Quem | Execução e alertas | Tempo com a caneta |
 |---|---|---|
-| Admin, gestor com ou sem área, GP (`veTodasAsPropostas`) | tudo | todas as propostas |
+| Admin, gestor com ou sem área, GP de vendas / PM de projetos (`veTodasAsPropostas`) | tudo | todas as propostas |
 | Membro com ranking visível | tudo | só as propostas em que está escalado (`filtroPropostasVisiveis`) |
 | Membro com ranking oculto | tudo | como acima, e só as próprias linhas |
 | Visualizador | tudo | não vê: seção some, e a ferramenta recusa |

@@ -22,7 +22,7 @@
  * rebaixado ou trocado de lado na Gestão vale na hora, tela e MCP).
  */
 import { Prisma, type Area, type Papel, type StatusProposta } from "@prisma/client";
-import { ladoDe } from "@/lib/auth/areas";
+import { ehGpDoLado, ladoDe } from "@/lib/auth/areas";
 import { emViaMcp } from "@/lib/canal";
 import { db } from "@/lib/db";
 import { SELECAO_NOME_EXIBIDO, nomeExibido } from "@/lib/entidades/vinculo";
@@ -648,7 +648,7 @@ export async function reabrirProposta(projetoId: string, ator: Ator): Promise<Re
 }
 
 /**
- * Inviável (GP de projetos, ou o dono da caneta do lado projetos), com motivo:
+ * Inviável (PM de projetos, ou o dono da caneta do lado projetos), com motivo:
  * a proposta sai do pingue-pongue e o Projeto vai para o marco Perdido do
  * quadro de Vendas, pelo MESMO caminho do Kanban (`registrarMovimento`: lock
  * do quadro, TransicaoFase, Timeline e `motivo_perda` = "Outro: Proposta inviável"; o motivo fica em `motivoInviavel`).
@@ -936,12 +936,12 @@ export async function pdfDoRascunho(projetoId: string): Promise<Resultado<{ byte
 
 // ---------------------------------------------------------------- leitura da caneta
 
-/** Pessoas que podem receber a caneta (ativas, que escrevem e têm lado), por lado. */
+/** Pessoas que podem receber a caneta (ativas, que escrevem e têm lado), por lado. `gp` = o GP do lado (GP de vendas, PM de projetos). */
 export async function listarPessoasDaCaneta(): Promise<{ id: string; nome: string; lado: Area; gp: boolean }[]> {
   const us = await db.usuario.findMany({ where: { ativo: true }, orderBy: { nome: "asc" }, select: SELECAO_PESSOA });
   return us.flatMap((u) => {
     const lado = ladoDe(u);
-    return lado && podeAtuarNaCaneta(u) ? [{ id: u.id, nome: u.nome, lado, gp: u.cargos.includes("GP") }] : [];
+    return lado && podeAtuarNaCaneta(u) ? [{ id: u.id, nome: u.nome, lado, gp: ehGpDoLado(u, lado) }] : [];
   });
 }
 

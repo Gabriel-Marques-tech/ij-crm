@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Papel } from "@prisma/client";
+import type { Area, Cargo, Papel } from "@prisma/client";
 import { dbTeste, limparBanco } from "@/test/db";
 import { db as dbApp } from "@/lib/db";
 import { invalidarCachePipelines } from "@/lib/fases/cache";
@@ -568,8 +568,24 @@ describe("caneta via MCP (GAB-87): mesmas regras e permissões da tela", () => {
     expect(texto(await executarFerramenta("concordar_proposta", { projeto_id: id, revisao: 0 }, vendedora))).toMatch(/Só dá para concordar com uma versão que veio do outro lado/);
     expect(texto(await executarFerramenta("passar_caneta_proposta", { projeto_id: id, para_id: projetos.id }, vendedora))).toMatch(/MESMO lado/);
     expect(texto(await executarFerramenta("pegar_caneta_proposta", { projeto_id: id }, gestor))).toMatch(/Só o GP do lado/);
-    expect(texto(await executarFerramenta("marcar_proposta_inviavel", { projeto_id: id, motivo: "caro" }, vendedora))).toMatch(/Só o GP de projetos/);
+    expect(texto(await executarFerramenta("marcar_proposta_inviavel", { projeto_id: id, motivo: "caro" }, vendedora))).toMatch(/Só o PM de projetos/);
     expect(texto(await executarFerramenta("reabrir_proposta", { projeto_id: id }, vendedora))).toMatch(/Só dá para reabrir/);
+  });
+
+  it("PM de projetos (cargo novo) pega a caneta pelo MCP e aparece como gp em pessoasParaCaneta; PO não pega", async () => {
+    const { id, vendedora, projetos } = await comProposta();
+    const mcp = (u: { id: string; nome: string; papel: Papel; area: Area | null; cargos: Cargo[] }): UsuarioMcp => ({ id: u.id, nome: u.nome, papel: u.papel, area: u.area, cargos: u.cargos });
+    const pm = mcp(await db.usuario.create({ data: { nome: "Mia", email: "mia@ij.test", papel: "PROJETOS", area: "PROJETOS", cargos: ["PM"] } }));
+    const po = mcp(await db.usuario.create({ data: { nome: "Olga", email: "olga@ij.test", papel: "PROJETOS", area: "PROJETOS", cargos: ["PO"] } }));
+    const pessoas = dados(await executarFerramenta("ler_proposta", { projeto_id: id }, vendedora)).pessoasParaCaneta;
+    expect(pessoas).toEqual(expect.arrayContaining([{ id: pm.id, nome: "Mia", lado: "Projetos", gp: true }, { id: po.id, nome: "Olga", lado: "Projetos" }]));
+    await executarFerramenta("editar_proposta", { projeto_id: id, revisao: 0, markdown: "Site." }, vendedora);
+    expect(dados(await executarFerramenta("devolver_proposta", { projeto_id: id, revisao: 1, para_id: projetos.id }, vendedora))).toMatchObject({ canetaCom: "Paula" });
+    // PO não tem permissão nova: nem vê a proposta (não está escalada nem é GP do lado), e a guarda recusa antes da caneta.
+    expect(texto(await executarFerramenta("pegar_caneta_proposta", { projeto_id: id }, po))).toMatch(/não tem acesso a esta proposta/);
+    expect(texto(await executarFerramenta("pegar_caneta_proposta", { projeto_id: id }, { ...po, id: projetos.id, cargos: ["PO"] }))).toMatch(/Só o GP do lado/);
+    expect(dados(await executarFerramenta("pegar_caneta_proposta", { projeto_id: id }, pm))).toMatchObject({ canetaCom: "Mia" });
+    expect(dados(await executarFerramenta("ler_proposta", { projeto_id: id }, pm)).acoesQueVocePode).toContain("marcar_proposta_inviavel");
   });
 
   it("inviável pelo Claude de quem está com a caneta em projetos: Projeto em Perdido, via MCP", async () => {

@@ -25,7 +25,7 @@ const verCronograma = ferramenta({
   nome: "ver_cronograma",
   titulo: "Ver cronograma e check-ins do projeto",
   descricao:
-    "Mostra a execução de um projeto do quadro projetos: entregas com previsto original (não muda nunca), previsto atual, data real, atrasada e ajustes com motivo; entregas canceladas à parte, com motivo; check-ins recentes (cor e motivo, o primeiro é o status atual); e quem é o GP. pode_operar diz se você pode alterar; para trocar o GP, o GP de projetos usa designar_gp_projeto com um de candidatos_gp. copiaveis > 0: nada impede a cópia, e a proposta final tem cronograma (use copiar_cronograma_proposta). Valor, versão e copiaveis só para quem vê a proposta. Sem controle de horas.",
+    "Mostra a execução de um projeto do quadro projetos: entregas com previsto original (não muda nunca), previsto atual, data real, atrasada e ajustes com motivo; entregas canceladas à parte, com motivo; check-ins recentes (cor e motivo, o primeiro é o status atual); e quem é o GP. pode_operar diz se você pode alterar; para trocar o GP, o PM de projetos usa designar_gp_projeto com um de candidatos_gp. copiaveis > 0: nada impede a cópia, e a proposta final tem cronograma (use copiar_cronograma_proposta). Valor, versão e copiaveis só para quem vê a proposta. Sem controle de horas.",
   escrita: false,
   entrada: { id },
   executar: async (a, eu) => {

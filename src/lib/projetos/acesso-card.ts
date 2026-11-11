@@ -14,7 +14,7 @@ import { MENSAGEM_SEM_ACESSO_PROPOSTA, podeVerPropostaDoProjeto } from "@/lib/pr
 import { MENSAGEM_ERRO_PROJETO } from "./erros";
 
 const MENSAGEM_CRIAR = "Este quadro é de outra área: aqui você acompanha, mas só quem é da área cria card.";
-const MENSAGEM_RESPONSAVEL = "Trocar o responsável é com o responsável atual, o GP da área dona ou a gestão da área.";
+const MENSAGEM_RESPONSAVEL = "Trocar o responsável é com o responsável atual, o GP da área dona (GP de vendas, PM de projetos) ou a gestão da área.";
 
 type OpcoesEdicao = {
   /** Campos que vão mudar: `responsavelId` e `propostaUrl` têm regra própria, além da área. */

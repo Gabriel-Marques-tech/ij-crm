@@ -6,7 +6,7 @@
  * Permissões, sempre com a pessoa RELIDA do banco:
  * - Itens manuais e PDF do contrato: etapa conjunta, quem edita o card ou é de Vendas; Execução: quem
  *   edita o card. Conferido antes de chamar (GAB-98, `acesso-card.ts`), nas actions, na rota e no MCP.
- * - Resumo: lado vendas. GP do projeto: só o GP de projetos, e a pessoa é da área
+ * - Resumo: lado vendas. GP do projeto: só o PM de projetos, e a pessoa é da área
  *   projetos; ela vira a responsável pelo Projeto.
  * - Proposta congelada: automática, não tem escrita aqui.
  *
@@ -23,6 +23,7 @@ import type { Papel, Prisma } from "@prisma/client";
 import type { AnexoCriado } from "@/lib/anexos/anexos";
 import { MENSAGEM_ERRO_ANEXO, type ErroAnexo } from "@/lib/anexos/tipos";
 import { avisarGpDesignado, avisarGpTrocado } from "@/lib/avisos/handoff";
+import { temCargo, type PessoaComLado } from "@/lib/auth/areas";
 import { podeEscrever, QUEM_ATUA } from "@/lib/auth/papeis";
 import { db } from "@/lib/db";
 import { anexarPdfDoContrato, definirAnexoDoContrato } from "./contrato-anexo";
@@ -62,7 +63,7 @@ export const MENSAGEM_ERRO_HANDOFF: Record<ErroHandoff, string> = {
   SEM_PERMISSAO: MENSAGEM_ERRO_PROJETO.SEM_PERMISSAO,
   CARD_NAO_ENCONTRADO: MENSAGEM_ERRO_PROJETO.CARD_NAO_ENCONTRADO,
   HANDOFF_ENCERRADO: "O handoff só é editável com o projeto na coluna Handoff (quadro Projetos, antes de Execução).",
-  SO_GP_DE_PROJETOS: "Só o GP de projetos designa o GP do projeto. Se ninguém tem esse cargo, peça à gestão para dar.",
+  SO_GP_DE_PROJETOS: "Só o PM de projetos designa o GP do projeto. Se ninguém tem esse cargo, peça à gestão para dar.",
   GP_INVALIDO: "O GP do projeto precisa ser uma pessoa ativa da área de projetos.",
   SO_VENDAS_ESCREVE_RESUMO: "O resumo de handoff é escrito por vendas.",
   RESUMO_LONGO: `Cada parte do resumo pode ter até ${RESUMO_CAMPO_MAX} caracteres.`,
@@ -115,10 +116,14 @@ export async function obterHandoff(projetoId: string): Promise<VisaoHandoff | nu
   return { ...a, emHandoff: faseDeHandoff(card.fase, card.pipeline.chave, ex), isento: card.isentoTravaHandoff, completo: a.pendencias.length === 0 };
 }
 
-/** Quem pode ser designado GP do projeto. */
+/** Quem pode ser designado GP do projeto: POs e PMs primeiro (só ordem; qualquer pessoa ativa de projetos vale), depois por nome. */
 export async function listarCandidatosGp(): Promise<{ id: string; nome: string }[]> {
   const us = await db.usuario.findMany({ where: { ativo: true, ...QUEM_ATUA }, orderBy: { nome: "asc" }, select: { id: true, nome: true, papel: true, area: true, cargos: true, ativo: true } });
-  return us.filter(podeSerGpDoProjeto).map((u) => ({ id: u.id, nome: u.nome }));
+  const ordem = (u: PessoaComLado) => (temCargo(u, "PO") ? 0 : temCargo(u, "PM") ? 1 : 2);
+  return us
+    .filter(podeSerGpDoProjeto)
+    .sort((a, b) => ordem(a) - ordem(b))
+    .map((u) => ({ id: u.id, nome: u.nome }));
 }
 
 // ---------------------------------------------------------------- escrita

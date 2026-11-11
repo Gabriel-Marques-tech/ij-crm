@@ -14,7 +14,7 @@ import { podeVerProposta, veTodasAsPropostas, type PessoaComId } from "@/lib/aut
 import { podeEscrever } from "@/lib/auth/papeis";
 import { db } from "@/lib/db";
 
-export const MENSAGEM_SEM_ACESSO_PROPOSTA = "Você não tem acesso a esta proposta: ela é visível a quem está escalado (responsável do card, quem teve a caneta ou o GP do projeto), ao GP e à gestão.";
+export const MENSAGEM_SEM_ACESSO_PROPOSTA = "Você não tem acesso a esta proposta: ela é visível a quem está escalado (responsável do card, quem teve a caneta ou o GP do projeto), ao GP do lado (GP de vendas, PM de projetos) e à gestão.";
 
 /** Filtro das propostas em que a pessoa está escalada. */
 function ondeEscalado(usuarioId: string): Prisma.PropostaWhereInput {
