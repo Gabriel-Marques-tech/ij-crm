@@ -150,6 +150,15 @@ describe("Autosave", () => {
     expect(a.situacao.tipo).toBe("salvo");
   });
 
+  it("versão que falha devolve o texto à fila, com o erro e a ref", async () => {
+    const a = new Autosave<string>({ revisao: 1, atrasoMs: 10, salvarTexto: vi.fn(), aoMudar: () => undefined });
+    a.alterou("rascunho");
+    await a.executar(async () => ({ ok: false, erro: "falhou", ref: "abc" }), true);
+    expect(a.situacao).toEqual({ tipo: "erro", texto: "falhou", ref: "abc" });
+    // O texto que iria na versão volta a ser pendente: repetir (versão ou texto) ainda o leva.
+    expect(a.temPendencia).toBe(true);
+  });
+
   it("'tentar de novo' sem nada pendente limpa o erro de outra gravação", async () => {
     const a = new Autosave<string>({ revisao: 1, atrasoMs: 10, salvarTexto: vi.fn(), aoMudar: () => undefined });
     await a.executar(async () => ({ ok: false, erro: "falhou" }));
