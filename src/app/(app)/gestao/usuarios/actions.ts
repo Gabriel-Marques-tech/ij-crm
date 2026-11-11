@@ -25,7 +25,8 @@ export type EstadoConvite = { erro?: string; link?: string; expiraEm?: string } 
 const papelSchema = z.enum(["ADMIN", "GESTOR", "VENDEDOR", "PROJETOS", "VISUALIZADOR"]);
 // "" = nenhuma área. Coerência com o papel é resolvida no serviço (lib/auth/areas).
 const areaSchema = z.enum(["VENDAS", "PROJETOS", ""]).transform((a) => (a === "" ? null : a));
-const cargosSchema = z.array(z.enum(["GP"]));
+// Qualquer cargo do enum entra aqui; "é da área" e "Diretor só com gestão" é o serviço que resolve (lib/auth/areas).
+const cargosSchema = z.array(z.enum(["GP", "PM", "PO", "DIRETOR"]));
 // "" = campo fora do form (papel não usa área de entrada). Coerência no serviço, como a área.
 const areaEntradaSchema = z.enum(["VENDAS", "PROJETOS", "GERAL", ""]).transform((a) => (a === "" ? null : a));
 

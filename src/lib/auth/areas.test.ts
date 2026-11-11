@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Area, Cargo, Papel } from "@prisma/client";
-import { descreverLado, ehGpDoLado, ladoDe, podeEditarEquipe, podeSerResponsavelNoProjeto, podeVerTarefas, podeVerTarefasDoProjeto, regraDeArea, resolverAreaCargos, temCargo } from "./areas";
+import { CARGOS_DA_AREA, cargosDaArea, cargosDe, descreverLado, ehGpDoLado, ehGpDoProprioLado, ladoDe, podeEditarEquipe, podeSerResponsavelNoProjeto, podeVerTarefas, podeVerTarefasDoProjeto, regraDeArea, resolverAreaCargos, temCargo } from "./areas";
 
 const pessoa = (papel: Papel, area: Area | null = null, cargos: Cargo[] = []) => ({ papel, area, cargos });
 
@@ -22,6 +22,44 @@ describe("regraDeArea / resolverAreaCargos (coerência área × papel)", () => {
     expect(regraDeArea("ADMIN")).toEqual({ tipo: "livre" });
     expect(resolverAreaCargos("GESTOR", null, ["GP"])).toEqual({ area: null, cargos: [] });
     expect(resolverAreaCargos("GESTOR", "VENDAS", ["GP", "GP"])).toEqual({ area: "VENDAS", cargos: ["GP"] });
+  });
+});
+
+describe("cargos por área (PM, PO e Diretor em Projetos; GP em Vendas)", () => {
+  it("catálogo: cada área tem os seus cargos", () => {
+    expect(CARGOS_DA_AREA).toEqual({ VENDAS: ["GP"], PROJETOS: ["PM", "PO", "DIRETOR"] });
+  });
+
+  it("resolver só mantém cargo da área efetiva, na ordem do catálogo", () => {
+    expect(resolverAreaCargos("PROJETOS", null, ["PO", "PM"])).toEqual({ area: "PROJETOS", cargos: ["PM", "PO"] });
+    expect(resolverAreaCargos("VENDEDOR", "VENDAS", ["PM", "PO", "GP"])).toEqual({ area: "VENDAS", cargos: ["GP"] });
+    expect(resolverAreaCargos("GESTOR", "VENDAS", ["PM"])).toEqual({ area: "VENDAS", cargos: [] });
+    expect(resolverAreaCargos("GESTOR", "PROJETOS", ["GP", "PM", "PO"])).toEqual({ area: "PROJETOS", cargos: ["PM", "PO"] });
+  });
+
+  it("GP legado em Projetos é sinônimo de PM (contas antigas seguem valendo, sem migrar dados)", () => {
+    expect(resolverAreaCargos("PROJETOS", "PROJETOS", ["GP"])).toEqual({ area: "PROJETOS", cargos: ["PM"] });
+    expect(resolverAreaCargos("PROJETOS", "PROJETOS", ["GP", "PM"])).toEqual({ area: "PROJETOS", cargos: ["PM"] });
+    expect(cargosDe(pessoa("PROJETOS", "PROJETOS", ["GP"]))).toEqual(["PM"]);
+    expect(temCargo(pessoa("PROJETOS", "PROJETOS", ["GP"]), "PM")).toBe(true);
+  });
+
+  it("DIRETOR só com papel GESTOR/ADMIN e lado Projetos; com papel PROJETOS (action direta) é descartado", () => {
+    expect(resolverAreaCargos("GESTOR", "PROJETOS", ["DIRETOR"])).toEqual({ area: "PROJETOS", cargos: ["DIRETOR"] });
+    expect(resolverAreaCargos("ADMIN", "PROJETOS", ["DIRETOR", "PM"])).toEqual({ area: "PROJETOS", cargos: ["PM", "DIRETOR"] });
+    expect(resolverAreaCargos("PROJETOS", "PROJETOS", ["DIRETOR"])).toEqual({ area: "PROJETOS", cargos: [] });
+    expect(resolverAreaCargos("PROJETOS", null, ["DIRETOR", "PO"])).toEqual({ area: "PROJETOS", cargos: ["PO"] });
+    expect(resolverAreaCargos("GESTOR", "VENDAS", ["DIRETOR"])).toEqual({ area: "VENDAS", cargos: [] });
+    // Sujeira no banco (DIRETOR com papel PROJETOS) não vale na leitura.
+    expect(cargosDe(pessoa("PROJETOS", "PROJETOS", ["DIRETOR"]))).toEqual([]);
+  });
+
+  it("cargosDaArea: o que o form oferece — Diretor só para gestão; GP nunca em Projetos", () => {
+    expect(cargosDaArea("VENDAS", "VENDEDOR")).toEqual(["GP"]);
+    expect(cargosDaArea("VENDAS", "GESTOR")).toEqual(["GP"]);
+    expect(cargosDaArea("PROJETOS", "PROJETOS")).toEqual(["PM", "PO"]);
+    expect(cargosDaArea("PROJETOS", "GESTOR")).toEqual(["PM", "PO", "DIRETOR"]);
+    expect(cargosDaArea("PROJETOS", "ADMIN")).toEqual(["PM", "PO", "DIRETOR"]);
   });
 });
 
@@ -76,6 +114,25 @@ describe("ehGpDoLado / temCargo", () => {
     expect(ehGpDoLado(u, "PROJETOS")).toBe(true);
     expect(ehGpDoLado(u, "VENDAS")).toBe(false);
   });
+
+  it("PM é quem age por Projetos na caneta (o 'GP do lado' de projetos); GP legado em Projetos continua valendo", () => {
+    expect(ehGpDoLado(pessoa("PROJETOS", "PROJETOS", ["PM"]), "PROJETOS")).toBe(true);
+    expect(ehGpDoLado(pessoa("PROJETOS", "PROJETOS", ["PM"]), "VENDAS")).toBe(false);
+    expect(ehGpDoLado(pessoa("GESTOR", "PROJETOS", ["PM"]), "PROJETOS")).toBe(true);
+    expect(ehGpDoLado(pessoa("PROJETOS", "PROJETOS", ["GP"]), "PROJETOS")).toBe(true);
+    expect(ehGpDoProprioLado(pessoa("PROJETOS", "PROJETOS", ["PM"]))).toBe(true);
+    expect(ehGpDoProprioLado(pessoa("VENDEDOR", "VENDAS", ["GP"]))).toBe(true);
+  });
+
+  it("PO e Diretor não dão a caneta: nenhuma permissão nova", () => {
+    expect(ehGpDoLado(pessoa("PROJETOS", "PROJETOS", ["PO"]), "PROJETOS")).toBe(false);
+    expect(ehGpDoLado(pessoa("GESTOR", "PROJETOS", ["DIRETOR"]), "PROJETOS")).toBe(false);
+    expect(ehGpDoProprioLado(pessoa("PROJETOS", "PROJETOS", ["PO"]))).toBe(false);
+    expect(ehGpDoProprioLado(pessoa("GESTOR", "PROJETOS", ["DIRETOR"]))).toBe(false);
+    expect(ehGpDoProprioLado(pessoa("GESTOR", null, ["PM"]))).toBe(false);
+    // PM em Vendas não existe: não vira GP de vendas por engano
+    expect(ehGpDoLado(pessoa("VENDEDOR", "VENDAS", ["PM"]), "VENDAS")).toBe(false);
+  });
 });
 
 describe("descreverLado", () => {
@@ -83,6 +140,15 @@ describe("descreverLado", () => {
     expect(descreverLado(pessoa("VENDEDOR", "VENDAS", ["GP"]))).toBe("GP de vendas");
     expect(descreverLado(pessoa("PROJETOS", "PROJETOS"))).toBe("Projetos");
     expect(descreverLado(pessoa("GESTOR"))).toBe("—");
+  });
+
+  it("cargos de Projetos: PM, PO e Diretor; GP legado aparece como PM", () => {
+    expect(descreverLado(pessoa("PROJETOS", "PROJETOS", ["PM"]))).toBe("PM de projetos");
+    expect(descreverLado(pessoa("PROJETOS", "PROJETOS", ["PO"]))).toBe("PO de projetos");
+    expect(descreverLado(pessoa("PROJETOS", "PROJETOS", ["PO", "PM"]))).toBe("PM, PO de projetos");
+    expect(descreverLado(pessoa("GESTOR", "PROJETOS", ["DIRETOR"]))).toBe("Diretor de projetos");
+    expect(descreverLado(pessoa("PROJETOS", "PROJETOS", ["GP"]))).toBe("PM de projetos");
+    expect(descreverLado(pessoa("PROJETOS", "PROJETOS", ["DIRETOR"]))).toBe("Projetos"); // sujeira: Diretor exige gestão
   });
 });
 

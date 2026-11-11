@@ -25,7 +25,7 @@ type Props = {
   /** GAB-98: link e versão da proposta só para quem a vê. */
   veProposta?: boolean;
   candidatosGp: { id: string; nome: string }[];
-  /** Ninguém ativo tem o cargo de GP de projetos: ninguém consegue designar. */
+  /** Ninguém ativo tem o cargo de PM de projetos: ninguém consegue designar. */
   semGpDeProjetos: boolean;
   /** PDFs já anexados ao Projeto, para apontar qual é o contrato. */
   pdfs: { id: string; nome: string }[];
@@ -89,7 +89,7 @@ export function HandoffDoProjeto({ cardId, handoff: h, somenteLeitura, podeDesig
       <div className="mt-4 grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <div className="space-y-4">
           <div>
-            <h3 className="mb-1 text-xs font-medium text-fg-soft">GP do projeto</h3>
+            <h3 className="mb-1 text-xs font-medium text-fg-soft">GP do projeto (em geral, o PO)</h3>
             {editavel && podeDesignar ? (
               <div className="flex flex-wrap items-center gap-2">
                 <select aria-label="GP do projeto" value={gpId} onChange={(e) => setGpId(e.target.value)} disabled={pendente} className={`${CAMPO} max-w-64`}>
@@ -105,11 +105,11 @@ export function HandoffDoProjeto({ cardId, handoff: h, somenteLeitura, podeDesig
                 </Button>
               </div>
             ) : (
-              <p className="text-sm">{h.gp ? h.gp.nome : <span className="text-fg-mute">Ainda não designado (quem designa é o GP de projetos).</span>}</p>
+              <p className="text-sm">{h.gp ? h.gp.nome : <span className="text-fg-mute">Ainda não designado (quem designa é o PM de projetos).</span>}</p>
             )}
             {h.gp && !h.gpValido ? <p className="mt-1 text-xs text-danger">Essa pessoa não está mais ativa na área de projetos: é preciso designar outra.</p> : null}
             {h.gpValido && h.responsavelDiverge ? <p className="mt-1 text-xs text-danger">O responsável pelo projeto mudou e não é mais o GP: designe de novo para corrigir.</p> : null}
-            {semGpDeProjetos ? <p className="mt-1 text-xs text-danger">Ninguém tem o cargo de GP de projetos, então ninguém consegue designar. Peça à gestão para dar esse cargo a alguém.</p> : null}
+            {semGpDeProjetos ? <p className="mt-1 text-xs text-danger">Ninguém tem o cargo de PM de projetos, então ninguém consegue designar. Peça à gestão para dar esse cargo a alguém.</p> : null}
           </div>
 
           <div>

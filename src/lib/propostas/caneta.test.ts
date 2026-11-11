@@ -17,7 +17,10 @@ const bia: Pessoa = { id: "bia", papel: "VENDEDOR", area: null, cargos: [], ativ
 const gpVendas: Pessoa = { id: "gv", papel: "VENDEDOR", area: "VENDAS", cargos: ["GP"], ativo: true };
 const paula: Pessoa = { id: "paula", papel: "PROJETOS", area: null, cargos: [], ativo: true };
 const pedro: Pessoa = { id: "pedro", papel: "PROJETOS", area: null, cargos: [], ativo: true };
-const gpProjetos: Pessoa = { id: "gp", papel: "PROJETOS", area: "PROJETOS", cargos: ["GP"], ativo: true };
+const gpProjetos: Pessoa = { id: "gp", papel: "PROJETOS", area: "PROJETOS", cargos: ["GP"], ativo: true }; // GP legado em Projetos = PM
+const pmProjetos: Pessoa = { id: "pm", papel: "PROJETOS", area: "PROJETOS", cargos: ["PM"], ativo: true };
+const poProjetos: Pessoa = { id: "po", papel: "PROJETOS", area: "PROJETOS", cargos: ["PO"], ativo: true };
+const diretorProjetos: Pessoa = { id: "dirp", papel: "GESTOR", area: "PROJETOS", cargos: ["DIRETOR"], ativo: true };
 const gestor: Pessoa = { id: "gil", papel: "GESTOR", area: null, cargos: [], ativo: true };
 const diretorVendas: Pessoa = { id: "dir", papel: "GESTOR", area: "VENDAS", cargos: [], ativo: true };
 const vera: Pessoa = { id: "vera", papel: "VISUALIZADOR", area: null, cargos: [], ativo: true };
@@ -135,6 +138,13 @@ describe("caneta: transições", () => {
         expect(recusaDaAcao("pegar", p, estado()), p.id).toBe("SO_GP_PEGA");
       }
     });
+    it("em Projetos quem pega é o PM (o GP legado também); PO e Diretor não", () => {
+      expect(recusaDaAcao("pegar", pmProjetos, comProjetos())).toBeNull();
+      expect(recusaDaAcao("pegar", pmProjetos, comProjetos({ canetaComId: null }))).toBeNull();
+      expect(recusaDaAcao("pegar", gpProjetos, comProjetos())).toBeNull();
+      expect(recusaDaAcao("pegar", pmProjetos, estado())).toBe("SO_GP_PEGA"); // caneta em vendas
+      for (const p of [poProjetos, diretorProjetos, pedro]) expect(recusaDaAcao("pegar", p, comProjetos()), p.id).toBe("SO_GP_PEGA");
+    });
     it("quem já está com ela", () => {
       expect(recusaDaAcao("pegar", gpVendas, estado({ canetaComId: "gv" }))).toBe("JA_COM_A_CANETA");
     });
@@ -150,7 +160,9 @@ describe("caneta: transições", () => {
   });
 
   describe("inviável", () => {
-    it("GP de projetos (sempre) ou o dono da caneta do lado projetos", () => {
+    it("PM de projetos (sempre; GP legado idem) ou o dono da caneta do lado projetos", () => {
+      expect(recusaDaAcao("inviavel", pmProjetos, estado())).toBeNull();
+      expect(recusaDaAcao("inviavel", pmProjetos, comProjetos())).toBeNull();
       expect(recusaDaAcao("inviavel", gpProjetos, estado())).toBeNull();
       expect(recusaDaAcao("inviavel", gpProjetos, comProjetos())).toBeNull();
       expect(recusaDaAcao("inviavel", paula, comProjetos())).toBeNull();
@@ -162,6 +174,9 @@ describe("caneta: transições", () => {
       expect(recusaDaAcao("inviavel", pedro, comProjetos())).toBe("INVIAVEL_SEM_PERMISSAO");
       expect(recusaDaAcao("inviavel", paula, estado())).toBe("INVIAVEL_SEM_PERMISSAO");
       expect(recusaDaAcao("inviavel", gestor, comProjetos())).toBe("INVIAVEL_SEM_PERMISSAO");
+      // PO e Diretor: nenhuma permissão nova na caneta
+      expect(recusaDaAcao("inviavel", poProjetos, estado())).toBe("INVIAVEL_SEM_PERMISSAO");
+      expect(recusaDaAcao("inviavel", diretorProjetos, comProjetos())).toBe("INVIAVEL_SEM_PERMISSAO");
     });
   });
 

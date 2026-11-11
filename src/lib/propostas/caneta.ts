@@ -13,7 +13,7 @@
  * - `concordar` só se a última versão veio do OUTRO lado → consenso = Pronta
  *   para envio. Ninguém chega lá sem os dois lados verem a última versão.
  * - `reabrir`: pronta → em ajuste (vendas quer mexer antes de enviar).
- * - `inviavel`: GP de projetos ou o dono da caneta do lado projetos.
+ * - `inviavel`: PM de projetos ou o dono da caneta do lado projetos.
  * - Enviada (GAB-89): só passar/pegar; envio e resposta do cliente seguem
  *   `./envio.ts`.
  *

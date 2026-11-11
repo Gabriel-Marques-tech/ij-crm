@@ -19,7 +19,7 @@ type Props = {
   /** `AAAA-MM-DD` em São Paulo, vindo do servidor. */
   hoje: string;
   podeOperar: boolean;
-  /** É o GP de projetos: pode trocar o GP do projeto, também em Execução. */
+  /** É o PM de projetos: pode trocar o GP do projeto, também em Execução. */
   podeDesignar: boolean;
   candidatosGp: { id: string; nome: string }[];
 };
@@ -161,7 +161,7 @@ export function ExecucaoDoProjeto({ cardId, cronograma: c, hoje, podeOperar, pod
 
       {c.emExecucao && !podeOperar ? (
         <p className="mt-1 text-xs text-fg-mute">
-          Quem opera: {c.gp.nome}, com o gestor de projetos e o admin de apoio. Para trocar, o GP de projetos designa outro GP do projeto neste bloco.
+          Quem opera: {c.gp.nome}, com o gestor de projetos e o admin de apoio. Para trocar, o PM de projetos designa outro GP do projeto neste bloco.
         </p>
       ) : null}
       {c.emExecucao && podeDesignar ? (

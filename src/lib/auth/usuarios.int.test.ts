@@ -269,15 +269,42 @@ describe("área e cargos (GAB-82)", () => {
   afterEach(() => info.mockRestore());
   const auditoria = () => info.mock.calls.map((c) => String(c[0])).filter((l) => l.startsWith("[auditoria]"));
 
-  it("convite de projetos com GP grava área PROJETOS e cargo; registra auditoria", async () => {
+  it("convite de projetos com PM grava área PROJETOS e cargo; registra auditoria", async () => {
     const g = await gestor();
-    const r = await criarConvite({ nome: "P", email: "p@ij.test", papel: "PROJETOS", area: "VENDAS", cargos: ["GP"] }, g);
+    const r = await criarConvite({ nome: "P", email: "p@ij.test", papel: "PROJETOS", area: "VENDAS", cargos: ["PM"] }, g);
     if (!r.ok) throw new Error("setup");
     const u = await db.usuario.findUniqueOrThrow({ where: { id: r.usuarioId } });
     expect(u.papel).toBe("PROJETOS");
     expect(u.area).toBe("PROJETOS"); // área pedida é ignorada: vem do papel
-    expect(u.cargos).toEqual(["GP"]);
-    expect(auditoria()).toContainEqual(expect.stringMatching(new RegExp(`usuario\\.convidado usuario=${r.usuarioId} por=${g.id} papel=PROJETOS lado=PROJETOS\\[GP\\]`)));
+    expect(u.cargos).toEqual(["PM"]);
+    expect(auditoria()).toContainEqual(expect.stringMatching(new RegExp(`usuario\\.convidado usuario=${r.usuarioId} por=${g.id} papel=PROJETOS lado=PROJETOS\\[PM\\]`)));
+  });
+
+  it("cargos de Projetos: PO grava; GP pedido para Projetos vira PM (sinônimo legado); Diretor só com gestão", async () => {
+    const g = await gestor();
+    const po = await criarConvite({ nome: "O", email: "o@ij.test", papel: "PROJETOS", cargos: ["PO", "DIRETOR"] }, g);
+    const legado = await criarConvite({ nome: "L", email: "l@ij.test", papel: "PROJETOS", cargos: ["GP"] }, g);
+    const dir = await criarConvite({ nome: "D", email: "d@ij.test", papel: "GESTOR", area: "PROJETOS", cargos: ["DIRETOR"] }, g);
+    const dirVendas = await criarConvite({ nome: "E", email: "e@ij.test", papel: "GESTOR", area: "VENDAS", cargos: ["DIRETOR", "PM"] }, g);
+    if (!po.ok || !legado.ok || !dir.ok || !dirVendas.ok) throw new Error("setup");
+    const lado = (id: string) => db.usuario.findUniqueOrThrow({ where: { id }, select: { papel: true, area: true, cargos: true } });
+    expect(await lado(po.usuarioId)).toEqual({ papel: "PROJETOS", area: "PROJETOS", cargos: ["PO"] });
+    expect(await lado(legado.usuarioId)).toEqual({ papel: "PROJETOS", area: "PROJETOS", cargos: ["PM"] });
+    expect(await lado(dir.usuarioId)).toEqual({ papel: "GESTOR", area: "PROJETOS", cargos: ["DIRETOR"] });
+    expect(await lado(dirVendas.usuarioId)).toEqual({ papel: "GESTOR", area: "VENDAS", cargos: [] });
+  });
+
+  it("conta antiga com GP em Projetos: segue GP do lado na leitura; ao ser reeditada grava PM; rebaixar o Diretor a Projetos tira o cargo", async () => {
+    const g = await gestor();
+    const ladoDb = (id: string) => db.usuario.findUniqueOrThrow({ where: { id }, select: { papel: true, area: true, cargos: true } });
+    const p = await db.usuario.create({ data: { nome: "P", email: "p@ij.test", papel: "PROJETOS", area: "PROJETOS", cargos: ["GP"] } });
+    expect(ehGpDoLado(await ladoDb(p.id), "PROJETOS")).toBe(true);
+    expect(await atualizarUsuario(p.id, { nome: "Pê", papel: "PROJETOS", area: "PROJETOS", cargos: ["GP"] }, g)).toEqual({ ok: true });
+    expect(await ladoDb(p.id)).toEqual({ papel: "PROJETOS", area: "PROJETOS", cargos: ["PM"] });
+    expect(ehGpDoLado(await ladoDb(p.id), "PROJETOS")).toBe(true);
+    const d = await db.usuario.create({ data: { nome: "D", email: "d@ij.test", papel: "GESTOR", area: "PROJETOS", cargos: ["DIRETOR", "PM"] } });
+    expect(await atualizarUsuario(d.id, { papel: "PROJETOS" }, g)).toEqual({ ok: true });
+    expect(await ladoDb(d.id)).toEqual({ papel: "PROJETOS", area: "PROJETOS", cargos: ["PM"] });
   });
 
   it("convite de vendedor sem área explícita → VENDAS; visualizador nunca tem lado", async () => {

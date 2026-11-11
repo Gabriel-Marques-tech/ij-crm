@@ -59,6 +59,58 @@ describe("editarUsuarioAction: admin editando a si mesmo", () => {
   });
 });
 
+describe("cargos de Projetos (PM, PO, Diretor) pela server action", () => {
+  const ladoDe = (id: string) => db.usuario.findUniqueOrThrow({ where: { id }, select: { papel: true, area: true, cargos: true } });
+  const porEmail = (email: string) => db.usuario.findUniqueOrThrow({ where: { email }, select: { papel: true, area: true, cargos: true } });
+
+  async function comGestor() {
+    const g = await db.usuario.create({ data: { nome: "Gestor", email: "gestor@ij.test", papel: "GESTOR" } });
+    exigirPapel.mockResolvedValue({ id: g.id, papel: "GESTOR" });
+    return g;
+  }
+
+  it("convite de projetos grava PM e PO; GP pedido para Projetos vira PM", async () => {
+    await comGestor();
+    expect(await criarConviteAction(undefined, form({ nome: "Paula", email: "paula@ij.test", papel: "PROJETOS", ladoNoForm: "1", area: "PROJETOS", cargos: ["PO", "PM"] }))).toHaveProperty("link");
+    expect(await porEmail("paula@ij.test")).toEqual({ papel: "PROJETOS", area: "PROJETOS", cargos: ["PM", "PO"] });
+    expect(await criarConviteAction(undefined, form({ nome: "Lia", email: "lia@ij.test", papel: "PROJETOS", ladoNoForm: "1", area: "PROJETOS", cargos: ["GP"] }))).toHaveProperty("link");
+    expect(await porEmail("lia@ij.test")).toEqual({ papel: "PROJETOS", area: "PROJETOS", cargos: ["PM"] });
+  });
+
+  it("Diretor com papel PROJETOS forjado direto na action não passa; com Gestor e lado Projetos, grava", async () => {
+    await comGestor();
+    expect(await criarConviteAction(undefined, form({ nome: "Dani", email: "dani@ij.test", papel: "PROJETOS", ladoNoForm: "1", area: "PROJETOS", cargos: ["DIRETOR", "PO"] }))).toHaveProperty("link");
+    expect(await porEmail("dani@ij.test")).toEqual({ papel: "PROJETOS", area: "PROJETOS", cargos: ["PO"] });
+    expect(await criarConviteAction(undefined, form({ nome: "Dora", email: "dora@ij.test", papel: "GESTOR", ladoNoForm: "1", area: "PROJETOS", cargos: ["DIRETOR"] }))).toHaveProperty("link");
+    expect(await porEmail("dora@ij.test")).toEqual({ papel: "GESTOR", area: "PROJETOS", cargos: ["DIRETOR"] });
+  });
+
+  it("cargo fora da área é descartado (PM/PO/Diretor em Vendas; GP de vendas segue); valor fora do enum é recusado", async () => {
+    await comGestor();
+    expect(await criarConviteAction(undefined, form({ nome: "Vini", email: "vini@ij.test", papel: "VENDEDOR", ladoNoForm: "1", area: "VENDAS", cargos: ["PM", "PO", "DIRETOR"] }))).toHaveProperty("link");
+    expect(await porEmail("vini@ij.test")).toEqual({ papel: "VENDEDOR", area: "VENDAS", cargos: [] });
+    expect(await criarConviteAction(undefined, form({ nome: "Gabi", email: "gabi@ij.test", papel: "GESTOR", ladoNoForm: "1", area: "VENDAS", cargos: ["GP", "DIRETOR"] }))).toHaveProperty("link");
+    expect(await porEmail("gabi@ij.test")).toEqual({ papel: "GESTOR", area: "VENDAS", cargos: ["GP"] });
+    const r = await criarConviteAction(undefined, form({ nome: "Ceo", email: "ceo@ij.test", papel: "PROJETOS", ladoNoForm: "1", area: "PROJETOS", cargos: ["CEO"] }));
+    expect(r).toHaveProperty("erro");
+    expect(await db.usuario.count({ where: { email: "ceo@ij.test" } })).toBe(0);
+  });
+
+  it("edição: conta antiga com GP em Projetos reeditada pelo form grava PM; marcar Diretor com papel Gestor grava; rebaixar tira", async () => {
+    await comGestor();
+    const p = await db.usuario.create({ data: { nome: "Pat", email: "pat@ij.test", papel: "PROJETOS", area: "PROJETOS", cargos: ["GP"] } });
+    // O form mostra PM marcado (sinônimo) e manda PM.
+    expect(await editarUsuarioAction(undefined, form({ usuarioId: p.id, nome: "Pat", papel: "PROJETOS", ladoNoForm: "1", area: "PROJETOS", cargos: ["PM"] }))).toEqual({ ok: true });
+    expect(await ladoDe(p.id)).toEqual({ papel: "PROJETOS", area: "PROJETOS", cargos: ["PM"] });
+    // Marcar Diretor: o form já trocou o papel para Gestor; o servidor confere de novo.
+    expect(await editarUsuarioAction(undefined, form({ usuarioId: p.id, nome: "Pat", papel: "GESTOR", ladoNoForm: "1", area: "PROJETOS", cargos: ["PM", "DIRETOR"] }))).toEqual({ ok: true });
+    expect(await ladoDe(p.id)).toEqual({ papel: "GESTOR", area: "PROJETOS", cargos: ["PM", "DIRETOR"] });
+    // Form forjado: Diretor com papel PROJETOS não eleva nada.
+    expect(await editarUsuarioAction(undefined, form({ usuarioId: p.id, nome: "Pat", papel: "PROJETOS", ladoNoForm: "1", area: "PROJETOS", cargos: ["DIRETOR"] }))).toEqual({ ok: true });
+    expect(await ladoDe(p.id)).toEqual({ papel: "PROJETOS", area: "PROJETOS", cargos: [] });
+  });
+});
+
 describe("área de entrada (GAB-97)", () => {
   const entradaDe = async (id: string) => (await db.usuario.findUniqueOrThrow({ where: { id }, select: { areaEntrada: true } })).areaEntrada;
 

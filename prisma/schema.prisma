@@ -42,8 +42,12 @@ enum AreaEntrada {
 
 // Cargo DENTRO da área (não é papel de permissão). Novo cargo da IJ = só
 // `ALTER TYPE "Cargo" ADD VALUE` (aditivo), sem mexer em linhas existentes.
+// Quais valem em cada área e o que cada um faz: src/lib/auth/areas.ts (CARGOS_DA_AREA).
 enum Cargo {
-  GP // GP da área: age em nome do seu lado na caneta da proposta
+  GP // Vendas: age em nome do seu lado na caneta da proposta (em Projetos, legado = PM)
+  PM // Projetos: age em nome do seu lado na caneta da proposta e designa o GP do projeto
+  PO // Projetos: rótulo (costuma ser o GP do projeto); nenhuma permissão própria
+  DIRETOR // Projetos: só com papel GESTOR/ADMIN — a gestão com lado Projetos, nomeada
 }
 
 enum TipoContatoPonto {

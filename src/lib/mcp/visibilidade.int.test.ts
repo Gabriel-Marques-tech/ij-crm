@@ -213,7 +213,7 @@ describe("MCP: casos que a matriz não cobre", () => {
     // Regra própria, em que o de fora também age ou que o serviço decide. Ferramenta nova não entra aqui sem motivo.
     const SEM_AREA: Record<string, string> = {
       registrar_nota: "comentar vale para todo mundo que escreve",
-      designar_gp_projeto: "só o GP de projetos, no serviço",
+      designar_gp_projeto: "só o PM de projetos, no serviço",
       escrever_resumo_handoff: "é do lado vendas, no serviço",
     };
     const comId = FERRAMENTAS.filter((f) => f.escrita && "id" in f.entrada && !(f.nome in SEM_AREA));

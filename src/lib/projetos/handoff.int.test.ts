@@ -358,6 +358,16 @@ describe("GP do projeto", () => {
     expect(await designarGpDoProjeto(id, s.pedro.id, dir)).toMatchObject({ ok: true });
   });
 
+  it("o PM (cargo novo) designa; PO e Diretor não: nenhuma permissão nova", async () => {
+    const id = await s.emHandoff();
+    const pm = await db.usuario.create({ data: { nome: "Mia", email: "mia@ij.test", papel: "PROJETOS", area: "PROJETOS", cargos: ["PM"] } });
+    const po = await db.usuario.create({ data: { nome: "Olga", email: "olga@ij.test", papel: "PROJETOS", area: "PROJETOS", cargos: ["PO"] } });
+    const dir = await db.usuario.create({ data: { nome: "Dora", email: "dora@ij.test", papel: "GESTOR", area: "PROJETOS", cargos: ["DIRETOR"] } });
+    expect(await designarGpDoProjeto(id, s.pedro.id, po)).toEqual({ ok: false, erro: "SO_GP_DE_PROJETOS" });
+    expect(await designarGpDoProjeto(id, s.pedro.id, dir)).toEqual({ ok: false, erro: "SO_GP_DE_PROJETOS" });
+    expect(await designarGpDoProjeto(id, po.id, pm)).toMatchObject({ ok: true, mudou: true });
+  });
+
   it("GP gravado que diverge do responsável segura a trava; designar de novo corrige, sem reavisar", async () => {
     const id = await s.emHandoff();
     await s.completar(id);
@@ -388,6 +398,14 @@ describe("GP do projeto", () => {
     for (const alvo of [s.ana, s.gil, s.vera, s.inativo]) expect(await designarGpDoProjeto(id, alvo.id, s.paula)).toEqual({ ok: false, erro: "GP_INVALIDO" });
     expect(await designarGpDoProjeto(id, "nao-existe", s.paula)).toEqual({ ok: false, erro: "GP_INVALIDO" });
     expect((await listarCandidatosGp()).map((c) => c.nome)).toEqual(["Paula", "Pedro"]);
+  });
+
+  it("candidatos: POs primeiro, depois PMs, depois o resto do time, cada grupo por nome (só ordem; todos valem)", async () => {
+    await db.usuario.create({ data: { nome: "Zoe", email: "zoe@ij.test", papel: "PROJETOS", area: "PROJETOS", cargos: ["PO"] } });
+    await db.usuario.create({ data: { nome: "Beto", email: "beto@ij.test", papel: "PROJETOS", area: "PROJETOS" } });
+    await db.usuario.create({ data: { nome: "Yan", email: "yan@ij.test", papel: "PROJETOS", area: "PROJETOS", cargos: ["PM", "PO"] } });
+    // Paula tem GP legado em Projetos (= PM); Pedro e Beto não têm cargo.
+    expect((await listarCandidatosGp()).map((c) => c.nome)).toEqual(["Yan", "Zoe", "Paula", "Beto", "Pedro"]);
   });
 });
 

@@ -62,12 +62,12 @@ describe("ExecucaoDoProjeto (GAB-95)", () => {
 
   it("quem não opera vê quem opera e como mudar; em registro, não", () => {
     const { rerender } = montar({ podeOperar: false });
-    expect(screen.getByText(/Quem opera: Pedro/).textContent).toContain("o GP de projetos designa outro GP");
+    expect(screen.getByText(/Quem opera: Pedro/).textContent).toContain("o PM de projetos designa outro GP");
     rerender(<ExecucaoDoProjeto cardId="c1" cronograma={{ ...BASE, emExecucao: false }} hoje="2026-11-04" podeOperar={false} podeDesignar={false} candidatosGp={[]} />);
     expect(screen.queryByText(/Quem opera/)).toBeNull();
   });
 
-  it("o GP de projetos troca o GP do projeto aqui, sem operar", async () => {
+  it("o PM de projetos troca o GP do projeto aqui, sem operar", async () => {
     montar({ podeOperar: false, podeDesignar: true, candidatosGp: [{ id: "u1", nome: "Pedro" }, { id: "u2", nome: "Paula" }] });
     const trocar = screen.getByRole("button", { name: "Trocar GP" }) as HTMLButtonElement;
     expect(trocar.disabled).toBe(true);

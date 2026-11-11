@@ -63,6 +63,10 @@ async function semear() {
 }
 
 let s: Awaited<ReturnType<typeof semear>>;
+const pessoaMcp = async (nome: string, papel: Papel, extra: { area?: Area; cargos?: Cargo[] } = {}): Promise<UsuarioMcp> => {
+  const u = await db.usuario.create({ data: { nome, email: `${nome.toLowerCase()}@ij.test`, papel, ...extra } });
+  return { id: u.id, nome: u.nome, papel: u.papel, area: u.area, cargos: u.cargos };
+};
 let dir: string;
 let id: string;
 const chamar = (nome: string, args: Record<string, unknown>, eu: UsuarioMcp) => executarFerramenta(nome, args, eu);
@@ -126,7 +130,12 @@ describe("MCP do handoff (GAB-93)", () => {
 
   it("as mesmas permissões da tela", async () => {
     expect(texto(await chamar("marcar_item_handoff", { id, item: "kickoff", feito: true }, s.vera))).toBe(SO_LEITURA);
-    expect(texto(await chamar("designar_gp_projeto", { id, gp_id: s.pedro.id }, s.gil))).toContain("Só o GP de projetos");
+    expect(texto(await chamar("designar_gp_projeto", { id, gp_id: s.pedro.id }, s.gil))).toContain("Só o PM de projetos");
+    // Cargos de Projetos: o PM designa pelo MCP; o PO (sem permissão nova) não.
+    const pm = await pessoaMcp("Mia", "PROJETOS", { area: "PROJETOS", cargos: ["PM"] });
+    const po = await pessoaMcp("Olga", "PROJETOS", { area: "PROJETOS", cargos: ["PO"] });
+    expect(texto(await chamar("designar_gp_projeto", { id, gp_id: s.pedro.id }, po))).toContain("Só o PM de projetos");
+    expect(dados(await chamar("designar_gp_projeto", { id, gp_id: po.id }, pm))).toMatchObject({ mudou: true });
     expect(texto(await chamar("escrever_resumo_handoff", { id, contexto: "x" }, s.pedro))).toContain("escrito por vendas");
     expect((await chamar("marcar_item_handoff", { id, item: "proposta", feito: true }, s.ana)).isError).toBe(true);
   });
@@ -140,10 +149,10 @@ describe("MCP do handoff (GAB-93)", () => {
     expect(dados(await chamar("listar_anexos", { projeto_id: id }, s.ana)).anexos[0].contratoAssinado).toBe(true);
   });
 
-  it("sem GP de projetos ativo, ler_handoff avisa que ninguém tem o cargo", async () => {
+  it("sem PM de projetos ativo, ler_handoff avisa que ninguém tem o cargo", async () => {
     expect(dados(await chamar("ler_handoff", { id }, s.ana)).aviso).toBeUndefined();
     await db.usuario.update({ where: { id: s.paula.id }, data: { cargos: [] } });
-    expect(dados(await chamar("ler_handoff", { id }, s.ana)).aviso).toContain("Ninguém tem o cargo de GP de projetos");
+    expect(dados(await chamar("ler_handoff", { id }, s.ana)).aviso).toContain("Ninguém tem o cargo de PM de projetos");
   });
 
   it("ler_handoff de card em Vendas explica que o handoff começa no Ganho", async () => {
