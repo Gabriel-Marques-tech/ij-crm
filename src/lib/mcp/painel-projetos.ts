@@ -110,7 +110,7 @@ const consultarCaneta = ferramenta({
   nome: "consultar_tempo_caneta_proposta",
   titulo: "Consultar o tempo com a caneta",
   descricao:
-    "Com quem a caneta das propostas está parada? Por pessoa: propostas paradas agora, a mais antiga e a média em dias desde a chegada da caneta, tempo com a caneta no período, e as mais paradas, com a última edição como informação secundária; também as propostas em curso sem ninguém com a caneta, que não acompanham o filtro. Os mesmos números da tela /painel/projetos. Vem das propostas: GP, gestão e admin veem todas; os demais, só as propostas em que estão escalados e, com o ranking oculto, só as próprias linhas (`visao` diz qual). Filtro opcional por pessoa (id ou \"eu\").",
+    "Com quem a caneta das propostas está parada? Por pessoa: propostas paradas agora, a mais antiga e a média em dias desde a chegada da caneta, tempo com a caneta no período, e as mais paradas, com a última edição como informação secundária; também as propostas em curso sem ninguém com a caneta, que não acompanham o filtro. Os mesmos números da tela /painel/projetos. Vem das propostas: o GP do lado (GP de vendas, PM de projetos), gestão e admin veem todas; os demais, só as propostas em que estão escalados e, com o ranking oculto, só as próprias linhas (`visao` diz qual). Filtro opcional por pessoa (id ou \"eu\").",
   escrita: false,
   guarda: canetaDoPainelVisivel,
   entrada: { ...PERIODO, pessoa_id: pessoaId.optional().describe('id da pessoa, ou "eu"') },

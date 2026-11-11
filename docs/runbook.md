@@ -1094,7 +1094,7 @@ Máquina de estados pura em `src/lib/propostas/caneta.ts`, aplicada no serviço
   (cargo, GAB-82) **pega** — destrava quando o dono sumiu ou ninguém está com ela.
 - **Concordar**: só se a última versão veio do outro lado e o rascunho é igual a
   ela → **Pronta para envio** (a caneta fica com vendas). **Reabrir** volta para
-  Em ajuste. **Inviável** (GP de projetos ou dono do lado projetos, com motivo):
+  Em ajuste. **Inviável** (PM de projetos ou dono do lado projetos, com motivo):
   status Inviável e o Projeto vai para Perdido pelo mesmo caminho do Kanban.
 - **Concorrência:** autosave, salvar versão e toda ação da caneta travam a
   linha da proposta (`FOR UPDATE`), e toda mudança de caneta/status incrementa

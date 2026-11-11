@@ -633,7 +633,7 @@ entra em fase de ganho. Cards `isento_trava_contrato` seguem isentos. No detalhe
 `marcarContratoAssinado` (`contrato-assinado.ts`) é a porta da tela e da ferramenta MCP
 `marcar_contrato_assinado`: confere a regra, anexa pelo sistema de anexos e só então move. WhatsApp
 "assinou" fora da regra marca `revisar` e responde no grupo o que falta.
-**Handoff (GAB-93, spec fase 2 §4.8/§4.11/§4.12).** O ganho leva o card à coluna Handoff e avisa os GPs de
+**Handoff (GAB-93, spec fase 2 §4.8/§4.11/§4.12).** O ganho leva o card à coluna Handoff e avisa os PMs de
 projetos (app + WhatsApp privado, tipo `HANDOFF`). No detalhe do Projeto, o bloco Handoff reúne: GP do projeto
 (designado pelo PM de projetos, pessoa da área projetos; vira a responsável e recebe aviso); checklist (proposta
 final congelada, automática; PDF do contrato assinado; contatos, kickoff, acessos/materiais); e o resumo escrito

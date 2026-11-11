@@ -550,7 +550,9 @@ describe("caneta via MCP (GAB-87): mesmas regras e permissões da tela", () => {
     expect(pessoas).toEqual(expect.arrayContaining([{ id: pm.id, nome: "Mia", lado: "Projetos", gp: true }, { id: po.id, nome: "Olga", lado: "Projetos" }]));
     await executarFerramenta("editar_proposta", { projeto_id: id, revisao: 0, markdown: "Site." }, vendedora);
     expect(dados(await executarFerramenta("devolver_proposta", { projeto_id: id, revisao: 1, para_id: projetos.id }, vendedora))).toMatchObject({ canetaCom: "Paula" });
-    expect(texto(await executarFerramenta("pegar_caneta_proposta", { projeto_id: id }, po))).toMatch(/Só o GP do lado/);
+    // PO não tem permissão nova: nem vê a proposta (não está escalada nem é GP do lado), e a guarda recusa antes da caneta.
+    expect(texto(await executarFerramenta("pegar_caneta_proposta", { projeto_id: id }, po))).toMatch(/não tem acesso a esta proposta/);
+    expect(texto(await executarFerramenta("pegar_caneta_proposta", { projeto_id: id }, { ...po, id: projetos.id, cargos: ["PO"] }))).toMatch(/Só o GP do lado/);
     expect(dados(await executarFerramenta("pegar_caneta_proposta", { projeto_id: id }, pm))).toMatchObject({ canetaCom: "Mia" });
     expect(dados(await executarFerramenta("ler_proposta", { projeto_id: id }, pm)).acoesQueVocePode).toContain("marcar_proposta_inviavel");
   });

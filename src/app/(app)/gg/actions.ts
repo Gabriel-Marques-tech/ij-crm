@@ -129,7 +129,8 @@ export async function convidarParaCrmAction(membroId: string): Promise<EstadoGG>
     const r = await criarConvite({ nome: m.nome, email: m.email, papel, area: lado.area, cargos: lado.cargos }, a);
     if (!r.ok) return { erro: r.erro === "PAPEL_NAO_PERMITIDO" ? "Só a gestão convida para o CRM." : r.erro === "EMAIL_EM_USO" ? "Já existe uma conta com esse e-mail: use Ligar contas pelo e-mail." : "Não foi possível convidar." };
     await db.membro.update({ where: { id: membroId }, data: { usuarioId: r.usuarioId } });
-    await db.historicoOrg.create({ data: { membroId, evento: `Convidado para o CRM como ${papel}`, autorId: a.id } });
+    const cargos = lado.cargos.map((c) => ROTULO_CARGO[c]).join(", ");
+    await db.historicoOrg.create({ data: { membroId, evento: `Convidado para o CRM como ${papel}${lado.area ? ` · ${lado.area}` : ""}${cargos ? ` · ${cargos}` : ""}`, autorId: a.id } });
     const base_ = process.env.APP_URL?.replace(/\/+$/, "") ?? "http://localhost:3000";
     return { ok: true, link: `${base_}/convite/${r.token}` };
   });

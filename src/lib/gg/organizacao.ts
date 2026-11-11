@@ -144,7 +144,11 @@ export function derivadoDe(base: BaseOrg, membroId: string): Derivado {
   );
 }
 
-/** O cargo PO do catálogo (semeado como `cargo_po`; importado, pelo nome). */
+/**
+ * O cargo PO do catálogo: o semeado (`cargo_po`) ou um importado com esse nome. Decisão de simplicidade:
+ * sem coluna própria (como `eh_gp`), então um cargo renomeado ("Product Owner") deixa de sugerir PO; se
+ * isso incomodar, a saída é uma coluna `eh_po` numa próxima migration de G&G, não mais heurística aqui.
+ */
 export function ehCargoPo(cargo: { id: string; nome: string }): boolean {
   return cargo.id === "cargo_po" || normalizar(cargo.nome) === "po";
 }

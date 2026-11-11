@@ -50,7 +50,9 @@ export function CamposPapelLado({
 }) {
   const [papel, setPapel] = useState<Papel>(papelInicial);
   const [areaLivre, setAreaLivre] = useState<Area | null>(areaInicial);
-  const [cargos, setCargos] = useState<Cargo[]>([...cargosIniciais]);
+  // Estado já normalizado pela régua do servidor: conta antiga com GP em Projetos entra como PM (e pode ser
+  // desmarcada), e cargo que não vale para o lado atual não fica escondido para reaparecer em outro lado.
+  const [cargos, setCargos] = useState<Cargo[]>(() => resolverAreaCargos(papelInicial, areaInicial, cargosIniciais).cargos);
   // Sem valor no banco vale Geral: o select mostra o que de fato acontece.
   const [areaEntrada, setAreaEntrada] = useState<AreaEntrada>(areaEntradaInicial ?? "GERAL");
 
@@ -63,17 +65,24 @@ export function CamposPapelLado({
 
   function trocarPapel(novo: Papel) {
     // Lado de gestor/admin só por escolha explícita: não herda a área fixa do papel anterior.
-    if (regraDeArea(novo).tipo === "livre" && regraDeArea(papel).tipo !== "livre") {
-      setAreaLivre(null);
-      setCargos([]);
-    }
+    const viraLivre = regraDeArea(novo).tipo === "livre" && regraDeArea(papel).tipo !== "livre";
+    if (viraLivre) setAreaLivre(null);
+    // Cargo não viaja de lado: se o lado efetivo muda com o papel, os cargos zeram.
+    if (viraLivre || resolverAreaCargos(novo, areaLivre, []).area !== areaEfetiva) setCargos([]);
     // Diretor é da gestão: ao deixar de ser gestor/admin, o cargo sai (senão voltaria marcado ao reescolher Gestor).
-    if (!temPapelMinimo(novo, "GESTOR")) setCargos((atual) => atual.filter((c) => c !== "DIRETOR"));
+    else if (!temPapelMinimo(novo, "GESTOR")) setCargos((atual) => atual.filter((c) => c !== "DIRETOR"));
     setPapel(novo);
   }
 
+  function trocarArea(nova: Area | null) {
+    setAreaLivre(nova);
+    // Gestor/admin mudando de lado: GP de vendas não vira PM de projetos (nem o contrário) sem a gestão marcar.
+    setCargos([]);
+  }
+
   function marcarCargo(c: Cargo, marcado: boolean) {
-    setCargos((atual) => (marcado ? [...atual, c] : atual.filter((x) => x !== c)));
+    // Parte do que está visível (efetivo), não do estado cru: nada escondido sobrevive ao clique.
+    setCargos(marcado ? [...efetivo.cargos, c] : efetivo.cargos.filter((x) => x !== c));
     // Diretor = gestão com lado Projetos: marcar com papel Projetos promove a Gestor, mantendo o lado.
     if (c === "DIRETOR" && marcado && papel === "PROJETOS") {
       setAreaLivre("PROJETOS");
@@ -98,7 +107,7 @@ export function CamposPapelLado({
             id="area"
             value={efetivo.area ?? ""}
             disabled={regra.tipo !== "livre"}
-            onChange={(e) => setAreaLivre((e.currentTarget.value || null) as Area | null)}
+            onChange={(e) => trocarArea((e.currentTarget.value || null) as Area | null)}
             className={CLASSE_SELECT}
           >
             <option value="">Nenhuma</option>
@@ -131,7 +140,7 @@ export function CamposPapelLado({
             ? "Visualizador não tem área nem cargo."
             : "Gestão/admin: área só se a pessoa também responde por um lado."}{" "}
         GP (vendas) e PM (projetos) agem em nome do seu lado na proposta; PO é só o cargo.
-        {opcoes.includes("DIRETOR") ? " Diretor = gestão com lado Projetos: marcar troca o papel para Gestor." : ""}
+        {podeVirarDiretor ? " Diretor = gestão com lado Projetos: marcar troca o papel para Gestor." : ""}
       </p>
       {usaAreaDeEntrada(papel, efetivo.area) ? (
         <div className="space-y-1.5">

@@ -25,5 +25,5 @@ export const camposEditaveis = (a: { id: string; campos: Record<string, string |
 export const canetaDoPainelVisivel = async (_a: unknown, eu: UsuarioMcp) =>
   visaoDaCanetaNoPainel(eu, true) === "nenhuma" ? "Você não tem acesso às propostas: o tempo com a caneta vem delas." : null;
 
-/** Proposta do projeto `projeto_id`: quem está escalado, o GP e a gestão. */
+/** Proposta do projeto `projeto_id`: quem está escalado, o GP do lado (GP de vendas, PM de projetos) e a gestão. */
 export const propostaVisivel = (a: { projeto_id: string }, eu: UsuarioMcp) => recusaDaProposta(a.projeto_id, eu);
