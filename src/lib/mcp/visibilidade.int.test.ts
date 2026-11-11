@@ -87,6 +87,9 @@ describe.each(MATRIZ)("matriz MCP: $nome", ({ nome, escreve, editaVendas, editaP
       ["gerar_pdf_proposta", {}],
       ["listar_comentarios_proposta", {}],
       ["comentar_proposta", { texto: "oi" }],
+      ["sugerir_texto_proposta", { trecho: "x", texto_novo: "y" }],
+      ["adicionar_a_revisao_proposta", { texto: "oi" }],
+      ["enviar_revisao_proposta", {}],
     ];
     for (const [ferramenta, extra] of leituras) {
       const r = await roda(ferramenta, { projeto_id: m.cardV.id, ...extra }, eu);
@@ -201,7 +204,7 @@ describe("MCP: casos que a matriz não cobre", () => {
     await comProposta();
     const comProjeto = FERRAMENTAS.filter((f) => "projeto_id" in f.entrada && f.nome !== "criar_proposta" && f.nome !== "criar_prazo" && f.nome !== "listar_anexos");
     expect(comProjeto.length).toBeGreaterThan(15);
-    const base = { projeto_id: m.cardV.id, revisao: 0, para_id: m.p.gpProjetos.id, numero: 1, motivo: "x", resposta: "aceita", texto: "oi", anexo_id: "x" };
+    const base = { projeto_id: m.cardV.id, revisao: 0, para_id: m.p.gpProjetos.id, numero: 1, motivo: "x", resposta: "aceita", texto: "oi", anexo_id: "x", trecho: "x", texto_novo: "y" };
     for (const f of comProjeto) {
       const r = await roda(f.nome, base, m.p.membroProjetos);
       if (f.nome === "comentar_proposta") expect(r.texto, f.nome).toMatch(/acesso à proposta/);
@@ -238,13 +241,13 @@ describe("MCP: casos que a matriz não cobre", () => {
     expect(await lista(m.p.visualizador)).toBe(0);
   });
 
-  it("comentário por id: responder, resolver e reabrir recusam quem não vê; quem vê, comenta", async () => {
+  it("comentário por id: responder, resolver e reabrir dizem só \"não encontrado\" a quem não vê (GAB-101); quem vê, comenta", async () => {
     await comProposta();
     const { comentario } = (await (await import("@/lib/propostas/comentarios")).comentar(m.cardV.id, { texto: "oi" }, m.p.donoV)) as { comentario: { id: string } };
     for (const quem of [m.p.visualizador, m.p.membroProjetos]) {
-      expect((await roda("responder_comentario_proposta", { comentario_id: comentario.id, texto: "x" }, quem)).texto).toMatch(/acesso à proposta/);
-      expect((await roda("resolver_comentario_proposta", { comentario_id: comentario.id }, quem)).texto).toMatch(/acesso à proposta/);
-      expect((await roda("reabrir_comentario_proposta", { comentario_id: comentario.id }, quem)).texto).toMatch(/acesso à proposta/);
+      expect((await roda("responder_comentario_proposta", { comentario_id: comentario.id, texto: "x" }, quem)).texto).toMatch(/^Comentário não encontrado/);
+      expect((await roda("resolver_comentario_proposta", { comentario_id: comentario.id }, quem)).texto).toMatch(/^Comentário não encontrado/);
+      expect((await roda("reabrir_comentario_proposta", { comentario_id: comentario.id }, quem)).texto).toMatch(/^Comentário não encontrado/);
     }
     expect((await roda("resolver_comentario_proposta", { comentario_id: comentario.id }, m.p.gpProjetos)).erro).toBe(false);
     await passarCaneta(m.cardV.id, m.p.vendedor.id, m.p.donoV);

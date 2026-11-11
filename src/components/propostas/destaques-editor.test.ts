@@ -4,7 +4,7 @@ import { documentoParaEditor, lerDocumento, type Documento } from "@/lib/propost
 import { textoPlano } from "@/lib/propostas/ancora";
 import { documentoParaMarkdown, markdownParaDocumento } from "@/lib/propostas/markdown";
 import { EXTENSOES } from "./editor-texto";
-import { ancoraDaSelecao, chaveDestaques, DestaquesComentarios, planoDoEditor } from "./destaques-editor";
+import { ancoraDaSelecao, ancoraDoElemento, chaveDestaques, DestaquesComentarios, planoDoEditor, transacaoDeSugestao } from "./destaques-editor";
 
 const doc: Documento = {
   type: "doc",
@@ -99,6 +99,64 @@ describe("espaços que o Markdown não guarda (editor ao vivo × canônico)", ()
     e.view.dispatch(e.state.tr.setMeta(chaveDestaques, { destaques: [{ id: "c1", ancora: { trecho: "Prazo: 30 dias", antes: "", depois: "" } }], ativo: null }));
     const marcas = [...e.view.dom.querySelectorAll("[data-comentario]")].map((n) => n.textContent).join("");
     expect(marcas).toBe("Prazo:  30\tdias");
+    e.destroy();
+  });
+});
+
+describe("sugestão no editor (GAB-101)", () => {
+  it("troca o trecho com a formatação do começo dele, igual ao servidor, e entra no histórico", () => {
+    const e = novo();
+    const a = { trecho: "com loja", antes: "Escopo\nSite ", depois: "\nitem um\n\uE001\n\uE002" };
+    e.view.dispatch(transacaoDeSugestao(e.state, a, "sem loja")!);
+    expect(planoDoEditor(e.state.doc).texto).toContain("Site sem loja");
+    const p = e.getJSON().content![1];
+    expect(p.content![1]).toMatchObject({ text: "sem loja", marks: [{ type: "bold" }] });
+    e.commands.undo();
+    expect(planoDoEditor(e.state.doc).texto).toContain("Site com loja");
+    e.destroy();
+  });
+
+  it("trecho mudado: null; texto novo vazio apaga", () => {
+    const e = novo();
+    expect(transacaoDeSugestao(e.state, { trecho: "nada disso", antes: "", depois: "" }, "x")).toBeNull();
+    const a = { trecho: "item um", antes: "Site com loja\n", depois: "\n\uE001\n\uE002" };
+    e.view.dispatch(transacaoDeSugestao(e.state, a, "")!);
+    expect(planoDoEditor(e.state.doc).texto).not.toContain("item um");
+    e.destroy();
+  });
+
+  it("célula de tabela (GAB-102): o mesmo texto plano do servidor; troca na célula; trecho que atravessa células é null", () => {
+    const tabela = markdownParaDocumento("| Item | Valor |\n| --- | --- |\n| Site | R$ 10 |");
+    const e = new Editor({ extensions: [...EXTENSOES, DestaquesComentarios], content: documentoParaEditor(tabela) });
+    expect(planoDoEditor(e.state.doc).texto).toBe(textoPlano(tabela).texto);
+    const a = { trecho: "R$ 10", antes: "Item\nValor\nSite\n", depois: "\n\n" };
+    e.view.dispatch(transacaoDeSugestao(e.state, a, "R$ 12")!);
+    expect(documentoParaMarkdown(lerDocumento(e.getJSON())!)).toContain("| Site | R$ 12 |");
+    expect(transacaoDeSugestao(e.state, { trecho: "Site\nR$ 12", antes: "", depois: "" }, "x")).toBeNull();
+    e.destroy();
+  });
+
+  it("espaços crus no editor: acha pelo texto canônico e troca no lugar certo", () => {
+    const e = new Editor({ extensions: [...EXTENSOES, DestaquesComentarios], content: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Prazo  de 30   dias." }] }] } });
+    const a = { trecho: "30 dias", antes: "Prazo de ", depois: "." };
+    e.view.dispatch(transacaoDeSugestao(e.state, a, "45 dias")!);
+    expect(e.state.doc.textContent).toBe("Prazo  de 45 dias.");
+    e.destroy();
+  });
+});
+
+describe("o + da linha (GAB-101)", () => {
+  it("a âncora é o bloco inteiro; bloco móvel pelo data-bloco; vazio não comenta", () => {
+    const e = novo();
+    const p = e.view.dom.querySelectorAll("p")[0];
+    expect(ancoraDoElemento(e.view, p)?.trecho).toBe("Site com loja");
+    const h = e.view.dom.querySelector("h2")!;
+    expect(ancoraDoElemento(e.view, h)?.trecho).toBe("Escopo");
+    const li = e.view.dom.querySelector("li p")!;
+    expect(ancoraDoElemento(e.view, li)?.trecho).toBe("item um");
+    const bloco = document.createElement("div");
+    bloco.setAttribute("data-bloco", "cronograma");
+    expect(ancoraDoElemento(e.view, bloco)?.trecho).toBe("\uE001");
     e.destroy();
   });
 });

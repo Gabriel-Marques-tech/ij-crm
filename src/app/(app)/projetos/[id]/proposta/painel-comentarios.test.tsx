@@ -1,8 +1,9 @@
+import { useEffect } from "react";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Documento } from "@/lib/propostas/documento";
 
-const acoes = vi.hoisted(() => ({ comentarAction: vi.fn(), responderComentarioAction: vi.fn(), resolverComentarioAction: vi.fn() }));
+const acoes = vi.hoisted(() => ({ comentarAction: vi.fn(), responderComentarioAction: vi.fn(), resolverComentarioAction: vi.fn(), enviarRevisaoAction: vi.fn(), descartarPendenteAction: vi.fn() }));
 vi.mock("./comentarios-actions", () => acoes);
 
 const { ATRASO_TEXTO_MS, BotaoComentarTrecho, ComentariosProvider, INTERVALO_COMENTARIOS_MS, SESSAO_EXPIRADA, TextoComentavel, useComentarios } = await import("./comentarios-contexto");
@@ -16,6 +17,9 @@ const thread = (over: object = {}) => ({
   texto: "30 é pouco <b>mesmo</b>",
   criadoEm: "2026-11-03T12:00:00.000Z",
   viaMcp: false,
+  pendente: false,
+  campo: null,
+  sugestao: null,
   ancora: { trecho: "30 dias", antes: "Prazo de ", depois: " para o site." },
   trechoAlterado: false,
   resolvido: null,
@@ -59,12 +63,12 @@ describe("comentários ao vivo", () => {
     expect(screen.getByText("30 é pouco <b>mesmo</b>")).toBeTruthy();
     expect([...document.querySelectorAll("b")].some((b) => b.textContent === "mesmo")).toBe(false);
     expect(document.querySelector("mark[data-comentario='c1']")?.textContent).toBe("30 dias");
-    expect(screen.queryByText("trecho alterado")).toBeNull();
+    expect(screen.queryByText("desatualizado")).toBeNull();
   });
 
   it("trecho que não está mais no texto: 'trecho alterado', sem realce, comentário visível", () => {
     montar([thread()], { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Prazo de 45 dias." }] }] });
-    expect(screen.getByText("trecho alterado")).toBeTruthy();
+    expect(screen.getByText("desatualizado")).toBeTruthy();
     expect(document.querySelector("mark")).toBeNull();
     expect(screen.getByText("30 é pouco <b>mesmo</b>")).toBeTruthy();
   });
@@ -98,12 +102,12 @@ describe("comentários ao vivo", () => {
     montar([]);
     acoes.comentarAction.mockResolvedValueOnce({ ok: false, erro: "INESPERADO", ref: "f00dbabe" });
     fireEvent.change(screen.getByLabelText("Comentário geral"), { target: { value: "Faltou o valor" } });
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Comentar" })));
-    expect(acoes.comentarAction).toHaveBeenCalledWith("p1", "Faltou o valor", null);
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Comentar agora" })));
+    expect(acoes.comentarAction).toHaveBeenCalledWith("p1", "Faltou o valor", null, { pendente: false });
     expect(screen.getByRole("alert").textContent).toContain("ref: f00dbabe");
 
     acoes.comentarAction.mockResolvedValueOnce({ ok: true });
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Comentar" })));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Comentar agora" })));
     expect(fetchMock).toHaveBeenCalled();
     expect((screen.getByLabelText("Comentário geral") as HTMLTextAreaElement).value).toBe("");
   });
@@ -123,8 +127,8 @@ describe("comentários ao vivo", () => {
     expect(screen.getByText("“30 dias”")).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Comentário sobre o trecho"), { target: { value: "pouco" } });
     acoes.comentarAction.mockResolvedValueOnce({ ok: true });
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Comentar" })));
-    expect(acoes.comentarAction).toHaveBeenCalledWith("p1", "pouco", { trecho: "30 dias", antes: "Prazo de ", depois: " para o site.\n\uE001\n\uE002" });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Comentar agora" })));
+    expect(acoes.comentarAction).toHaveBeenCalledWith("p1", "pouco", { trecho: "30 dias", antes: "Prazo de ", depois: " para o site.\n\uE001\n\uE002" }, { pendente: false });
   });
 
   it("resolver, reabrir e responder chamam as actions", async () => {
@@ -133,16 +137,21 @@ describe("comentários ao vivo", () => {
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Resolver" })));
     expect(acoes.resolverComentarioAction).toHaveBeenCalledWith("c1", true);
 
-    fireEvent.click(screen.getByRole("button", { name: "Ver resolvidos (1)" }));
-    expect(screen.getByText(/Resolvido por Ana/)).toBeTruthy();
+    // Resolvida vira linha fina: o texto da conversa só aparece ao abrir.
+    expect(screen.queryByText("geral")).toBeNull();
+    expect(screen.getByText("Resolvido por Ana")).toBeTruthy();
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Reabrir" })));
     expect(acoes.resolverComentarioAction).toHaveBeenCalledWith("c2", false);
+    fireEvent.click(screen.getByRole("button", { name: /Ver a conversa/ }));
+    expect(screen.getAllByText("geral").length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: "Recolher" }));
+    expect(screen.queryByText("geral")).toBeNull();
 
     acoes.responderComentarioAction.mockResolvedValue({ ok: true });
     fireEvent.click(screen.getAllByRole("button", { name: "Responder" })[0]);
     fireEvent.change(screen.getByLabelText("Sua resposta"), { target: { value: "concordo" } });
     await act(async () => fireEvent.submit(screen.getByLabelText("Sua resposta").closest("form")!));
-    expect(acoes.responderComentarioAction).toHaveBeenCalledWith("c1", "concordo");
+    expect(acoes.responderComentarioAction).toHaveBeenCalledWith("c1", "concordo", false);
   });
 
   it("401: para o polling e pede para recarregar", async () => {
@@ -164,7 +173,7 @@ describe("comentários ao vivo", () => {
     await act(async () => vi.advanceTimersByTimeAsync(INTERVALO_COMENTARIOS_MS)); // polling (fica pendurado)
     acoes.comentarAction.mockResolvedValueOnce({ ok: true });
     fireEvent.change(screen.getByLabelText("Comentário geral"), { target: { value: "x" } });
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Comentar" }))); // recarga chega
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Comentar agora" }))); // recarga chega
     expect(screen.getByText("Novo")).toBeTruthy();
     await act(async () => soltarVelha(new Response(JSON.stringify({ versao: "2.2", comentarios: [] }))));
     expect(screen.getByText("Novo")).toBeTruthy();
@@ -190,7 +199,7 @@ describe("comentários ao vivo", () => {
     expect(screen.getByRole("alert").textContent).toBe(SESSAO_EXPIRADA);
     acoes.comentarAction.mockResolvedValueOnce({ ok: true });
     fireEvent.change(screen.getByLabelText("Comentário geral"), { target: { value: "x" } });
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Comentar" })));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Comentar agora" })));
     expect(screen.queryByText(SESSAO_EXPIRADA)).toBeNull();
     const n = fetchMock.mock.calls.length;
     await act(async () => vi.advanceTimersByTimeAsync(INTERVALO_COMENTARIOS_MS));
@@ -211,11 +220,11 @@ describe("comentários ao vivo", () => {
       </ComentariosProvider>,
     );
     act(() => informar!(p("Prazo de  30   dias para o site."))); // 1ª vez: na hora; espaços extras não importam
-    expect(screen.queryByText("trecho alterado")).toBeNull();
+    expect(screen.queryByText("desatualizado")).toBeNull();
     act(() => informar!(p("Prazo de 45 dias.")));
-    expect(screen.queryByText("trecho alterado")).toBeNull(); // ainda na pausa
+    expect(screen.queryByText("desatualizado")).toBeNull(); // ainda na pausa
     await act(async () => vi.advanceTimersByTimeAsync(ATRASO_TEXTO_MS));
-    expect(screen.getByText("trecho alterado")).toBeTruthy();
+    expect(screen.getByText("desatualizado")).toBeTruthy();
   });
 
   it("rascunho e resposta sobrevivem a fechar o painel no celular (o provider guarda)", () => {
@@ -287,5 +296,139 @@ describe("comentários ao vivo", () => {
     );
     fireEvent.click(screen.getByText("trecho"));
     expect(screen.getByTestId("pedido")).toHaveTextContent("0");
+  });
+
+  it("sugestão: diff no cartão; sem a caneta, explica; com a caneta, aplica pelo aplicador", async () => {
+    const sug = thread({ sugestao: { texto: "45 dias", aplicada: null, desatualizada: false } });
+    montar([sug]);
+    expect(screen.getByTestId("diff-texto").textContent).toContain("45");
+    expect(screen.getByText("Só quem está com a caneta aplica.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Aplicar sugestão" })).toBeNull();
+  });
+
+  it("aplicar chama o aplicador da tela e mostra o erro dele", async () => {
+    const sug = thread({ sugestao: { texto: "45 dias", aplicada: null, desatualizada: false } });
+    const aplicador = vi.fn(async () => "Deu conflito");
+    const Registra = () => {
+      const r = useComentarios()!.registrarAplicador;
+      useEffect(() => r(aplicador), [r]);
+      return null;
+    };
+    render(
+      <ComentariosProvider projetoId="p1" euId="u1" inicial={{ versao: "1.1", threads: [sug] }}>
+        <Registra />
+        <TextoComentavel documento={doc} />
+        <PainelComentarios />
+      </ComentariosProvider>,
+    );
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Aplicar sugestão" })));
+    expect(aplicador).toHaveBeenCalledWith(expect.objectContaining({ id: "c1" }));
+    expect(screen.getByRole("alert").textContent).toBe("Deu conflito");
+  });
+
+  it("trecho mudado: sugestão desatualizada, sem botão de aplicar", () => {
+    const sug = thread({ sugestao: { texto: "45 dias", aplicada: null, desatualizada: true } });
+    const Registra = () => {
+      const r = useComentarios()!.registrarAplicador;
+      useEffect(() => r(async () => null), [r]);
+      return null;
+    };
+    render(
+      <ComentariosProvider projetoId="p1" euId="u1" inicial={{ versao: "1.1", threads: [sug] }}>
+        <Registra />
+        <TextoComentavel documento={{ type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Prazo de 45 dias." }] }] }} />
+        <PainelComentarios />
+      </ComentariosProvider>,
+    );
+    expect(screen.getByText("desatualizada")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Aplicar sugestão" })).toBeNull();
+  });
+
+  it("lote: pendente não conta como aberto; 'Adicionar à revisão' e 'Enviar revisão (N)' chamam as actions", async () => {
+    montar([thread({ pendente: true, respostas: [{ id: "r1", autor: { id: "u1", nome: "Eu" }, texto: "resp", criadoEm: "2026-11-03T12:00:00.000Z", viaMcp: false, pendente: true }] })]);
+    expect(screen.getByText(/0 abertos · 0 resolvidos/)).toBeTruthy();
+    expect(screen.getAllByText("pendente")).toHaveLength(2);
+    acoes.enviarRevisaoAction.mockResolvedValueOnce({ ok: true });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: /Enviar revisão \(2\)/ })));
+    expect(acoes.enviarRevisaoAction).toHaveBeenCalledWith("p1");
+
+    fireEvent.change(screen.getByLabelText("Comentário geral"), { target: { value: "guardar" } });
+    acoes.comentarAction.mockResolvedValueOnce({ ok: true });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Adicionar à revisão" })));
+    expect(acoes.comentarAction).toHaveBeenCalledWith("p1", "guardar", null, { pendente: true });
+
+    acoes.descartarPendenteAction.mockResolvedValueOnce({ ok: true });
+    await act(async () => fireEvent.click(screen.getAllByRole("button", { name: /^Descartar$/ })[0]));
+    expect(acoes.descartarPendenteAction).toHaveBeenCalled();
+  });
+
+  it("citar para sugerir: o texto novo começa do trecho e a action leva a sugestão; trecho de outro bloco não sugere", async () => {
+    let citar: ((a: { trecho: string; antes: string; depois: string } | null, o?: { sugerir?: boolean }) => void) | undefined;
+    const Citador = () => {
+      citar = useComentarios()?.citar;
+      return null;
+    };
+    render(
+      <ComentariosProvider projetoId="p1" euId="u1" inicial={{ versao: "1.1", threads: [] }}>
+        <Citador />
+        <PainelComentarios />
+      </ComentariosProvider>,
+    );
+    const a = { trecho: "30 dias", antes: "", depois: "" };
+    act(() => citar!(a, { sugerir: true }));
+    const novo = screen.getByLabelText("Texto novo do trecho") as HTMLTextAreaElement;
+    expect(novo.value).toBe("30 dias");
+    expect(document.activeElement).toBe(novo);
+    expect(screen.getByRole("button", { name: "Sugerir agora" })).toBeDisabled();
+    fireEvent.change(novo, { target: { value: "45 dias" } });
+    acoes.comentarAction.mockResolvedValueOnce({ ok: true });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Sugerir agora" })));
+    expect(acoes.comentarAction).toHaveBeenCalledWith("p1", "", a, { pendente: false, sugestao: "45 dias" });
+
+    act(() => citar!({ trecho: "a\nb", antes: "", depois: "" }));
+    expect(screen.queryByRole("button", { name: "Sugerir texto" })).toBeNull();
+    act(() => citar!({ trecho: "só um", antes: "", depois: "" }));
+    fireEvent.click(screen.getByRole("button", { name: "Sugerir texto" }));
+    expect((screen.getByLabelText("Texto novo do trecho") as HTMLTextAreaElement).value).toBe("só um");
+  });
+
+  it("comentário em campo: cartão e formulário mostram o dado; sem sugestão", async () => {
+    let citarCampo: ((c: "valor") => void) | undefined;
+    const Citador = () => {
+      citarCampo = useComentarios()?.citarCampo;
+      return null;
+    };
+    render(
+      <ComentariosProvider projetoId="p1" euId="u1" inicial={{ versao: "1.1", threads: [thread({ id: "c9", ancora: null, campo: "prazo" })] }}>
+        <Citador />
+        <PainelComentarios />
+      </ComentariosProvider>,
+    );
+    expect(screen.getByText("Dados · Prazo")).toBeTruthy();
+    act(() => citarCampo!("valor"));
+    expect(screen.getByText("Dados · Valor total")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Sugerir texto" })).toBeNull();
+    fireEvent.change(screen.getByLabelText("Comentário sobre o dado"), { target: { value: "caro" } });
+    acoes.comentarAction.mockResolvedValueOnce({ ok: true });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Comentar agora" })));
+    expect(acoes.comentarAction).toHaveBeenCalledWith("p1", "caro", null, { pendente: false, campo: "valor" });
+  });
+
+  it("setas passam pelos gerais e alterados, além dos trechos", async () => {
+    const espiar = vi.fn();
+    Element.prototype.scrollIntoView = espiar;
+    const raf = vi.spyOn(window, "requestAnimationFrame").mockImplementation((f) => {
+      f(0);
+      return 0;
+    });
+    montar([thread(), thread({ id: "c2", ancora: null, texto: "geral aqui" }), thread({ id: "c3", ancora: { trecho: "sumiu", antes: "", depois: "" }, texto: "antigo" })]);
+    const ativos: (string | null)[] = [];
+    for (let i = 0; i < 3; i++) {
+      fireEvent.click(screen.getByRole("button", { name: "Próximo comentário" }));
+      ativos.push(document.querySelector("li.border-warn")?.getAttribute("data-thread") ?? null);
+    }
+    expect(ativos).toEqual(["c2", "c3", "c1"]);
+    expect(espiar).toHaveBeenCalled();
+    raf.mockRestore();
   });
 });

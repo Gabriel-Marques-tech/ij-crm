@@ -17,6 +17,6 @@ export function Marcador({ ok, texto, valor }: { ok: boolean; texto: string; val
 /** Ao vivo, pelo polling dos comentários. */
 export function ComentariosAbertos() {
   const c = useComentarios();
-  const abertos = c?.threads.filter((t) => !t.resolvido).length ?? 0;
+  const abertos = c?.threads.filter((t) => !t.resolvido && !t.pendente).length ?? 0;
   return <Marcador ok={abertos === 0} texto="Comentários abertos" valor={String(abertos)} />;
 }

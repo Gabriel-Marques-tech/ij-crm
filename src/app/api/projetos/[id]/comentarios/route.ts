@@ -25,10 +25,10 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     if (!(await podeVerPropostaDoProjeto(eu, id))) return NextResponse.json({ erro: MENSAGEM_SEM_ACESSO_PROPOSTA }, { status: 403, headers: SEM_CACHE });
     const v = new URL(req.url).searchParams.get("v");
     if (v) {
-      const versao = await versaoDosComentarios(id);
+      const versao = await versaoDosComentarios(id, eu);
       if (versao === v) return NextResponse.json({ versao }, { headers: SEM_CACHE });
     }
-    const l = await listarComentarios(id);
+    const l = await listarComentarios(id, eu);
     if (!l) return NextResponse.json({ erro: "Proposta não encontrada." }, { status: 404, headers: SEM_CACHE });
     return NextResponse.json({ versao: l.versao, comentarios: l.threads }, { headers: SEM_CACHE });
   } catch (e) {
