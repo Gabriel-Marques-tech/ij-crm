@@ -51,7 +51,7 @@ import {
   type Pessoa,
 } from "./caneta";
 import { diffEstruturado, diffMarkdown, type LinhaDiff, type MudancaCampo } from "./diff";
-import { lerDocumento, MARKDOWN_MAX } from "./documento";
+import { interpretarDocumento, MARKDOWN_MAX } from "./documento";
 import { PEDIDO_REVISAO_MAX, recusaDoEnvio, RESPOSTAS_CLIENTE, versaoDoPdf, type AcaoEnvio, type RespostaCliente } from "./envio";
 import { interpretarEstruturado, lerEstruturadoGravado, mesmoEstruturado, type Estruturado } from "./estruturado";
 import { documentoParaMarkdown, markdownParaDocumento, motivoTabelaForaDoLimite } from "./markdown";
@@ -79,6 +79,8 @@ export type Falha =
   | { ok: false; erro: "ESTRUTURADO_INVALIDO"; mensagem: string }
   /** Regra do Projeto ao movê-lo (inviável → Perdido): `mensagem` já em português. */
   | { ok: false; erro: "REGRA_PROJETO"; mensagem: string }
+  /** Tabela além dos limites: `mensagem` diz qual limite e quanto passou (`motivoForaDoLimite`). */
+  | { ok: false; erro: "TABELA_GRANDE"; mensagem: string }
   | { ok: false; erro: "CONFLITO"; conflito: Conflito };
 
 export type Resultado<T> = ({ ok: true } & T) | Falha;
@@ -94,6 +96,10 @@ class ErroDeProposta extends Error {
 
 function falhar(erro: ErroProposta): never {
   throw new ErroDeProposta({ ok: false, erro });
+}
+
+function falharTabela(mensagem: string): never {
+  throw new ErroDeProposta({ ok: false, erro: "TABELA_GRANDE", mensagem });
 }
 
 async function emTransacao<T>(corpo: (tx: Tx) => Promise<T>): Promise<T | Falha> {
@@ -187,12 +193,16 @@ function conteudoParaMarkdown(c: ConteudoEntrada): string {
   if ("markdown" in c) {
     if (typeof c.markdown !== "string") falhar("CONTEUDO_INVALIDO");
     if (c.markdown.length > MARKDOWN_MAX) falhar("CONTEUDO_LONGO");
-    if (motivoTabelaForaDoLimite(c.markdown)) falhar("TABELA_GRANDE");
+    const motivo = motivoTabelaForaDoLimite(c.markdown);
+    if (motivo) falharTabela(motivo);
     return documentoParaMarkdown(markdownParaDocumento(c.markdown));
   }
-  const doc = lerDocumento(c.documento);
-  if (!doc) falhar("CONTEUDO_INVALIDO");
-  const md = documentoParaMarkdown(doc);
+  const r = interpretarDocumento(c.documento);
+  if (!r.ok) {
+    if (r.tabela) falharTabela(r.tabela);
+    falhar("CONTEUDO_INVALIDO");
+  }
+  const md = documentoParaMarkdown(r.documento);
   if (md.length > MARKDOWN_MAX) falhar("CONTEUDO_LONGO");
   return md;
 }
@@ -998,7 +1008,7 @@ export async function diffDaProposta(projetoId: string, opts: { de?: number; par
 
 /** Falha → texto em português (o mesmo na tela e no MCP). */
 export function mensagemDaFalha(f: Falha): string {
-  if (f.erro === "ESTRUTURADO_INVALIDO" || f.erro === "REGRA_PROJETO") return f.mensagem;
+  if ("mensagem" in f) return f.mensagem;
   if (f.erro === "CONFLITO") return mensagemConflito(f.conflito);
   return MENSAGEM_ERRO_PROPOSTA[f.erro];
 }

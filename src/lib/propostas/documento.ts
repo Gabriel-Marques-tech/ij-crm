@@ -140,17 +140,29 @@ function profundidade(b: BlocoEntrada, nivel = 0): number {
   return max;
 }
 
-/** Valida o JSON do editor e devolve o documento normalizado (ou null se não for do subconjunto). */
-export function lerDocumento(bruto: unknown): Documento | null {
+/** Leitura do JSON do editor: o documento normalizado, ou por que não (`tabela` = o motivo do limite, em português; null = fora do subconjunto). */
+export type LeituraDocumento = { ok: true; documento: Documento } | { ok: false; tabela: string | null };
+
+/** Valida o JSON do editor e devolve o documento normalizado, ou o motivo de recusar (a tela e o MCP mostram o da tabela). */
+export function interpretarDocumento(bruto: unknown): LeituraDocumento {
   const p = documentoEntradaSchema.safeParse(bruto);
-  if (!p.success) return null;
+  if (!p.success) return { ok: false, tabela: null };
   const doc = p.data as unknown as BlocoEntrada;
   // listas aninhadas: lista → item → lista … (2 níveis por lista)
-  if (profundidade(doc) > PROFUNDIDADE_MAX * 2 + 2) return null;
+  if (profundidade(doc) > PROFUNDIDADE_MAX * 2 + 2) return { ok: false, tabela: null };
   const normal = normalizarDocumento(doc as unknown as Documento);
   // O editor recusa antes de chegar aqui (`tabela-node.ts`): só passa disto quem chama a action na mão.
-  if (normal.content.some((b) => b.type === "table" && motivoForaDoLimite(medirTabela(b)))) return null;
-  return normal;
+  for (const b of normal.content) {
+    const motivo = b.type === "table" ? motivoForaDoLimite(medirTabela(b)) : null;
+    if (motivo) return { ok: false, tabela: motivo };
+  }
+  return { ok: true, documento: normal };
+}
+
+/** `interpretarDocumento` sem o motivo: null se não for do subconjunto ou passar dos limites. */
+export function lerDocumento(bruto: unknown): Documento | null {
+  const r = interpretarDocumento(bruto);
+  return r.ok ? r.documento : null;
 }
 
 // ---------------------------------------------------------------- normalização

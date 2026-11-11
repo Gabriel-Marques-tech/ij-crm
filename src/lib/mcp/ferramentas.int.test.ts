@@ -515,7 +515,7 @@ describe("tabela via MCP (GAB-102)", () => {
 
     // Além do limite, o MCP recebe o erro, em vez de a tabela virar parágrafos sem aviso.
     const grande = ["| a |", "| --- |", ...Array.from({ length: 100 }, () => "| b |")].join("\n");
-    expect(texto(await executarFerramenta("editar_proposta", { projeto_id: id, revisao: 1, markdown: grande }, vendedora))).toMatch(/até 100 linhas/);
+    expect(texto(await executarFerramenta("editar_proposta", { projeto_id: id, revisao: 1, markdown: grande }, vendedora))).toMatch(/até 100 linhas \(esta teria 101\)/);
   });
 });
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { documentoComBlocos, documentoDoEditor, herdarBlocos, lerDocumento, normalizarDocumento, textoDoDocumento, type Bloco, type Documento, type NoTexto, type Paragrafo, type Tabela } from "./documento";
+import { type Bloco, type Documento, documentoComBlocos, documentoDoEditor, herdarBlocos, interpretarDocumento, lerDocumento, normalizarDocumento, type NoTexto, type Paragrafo, type Tabela, textoDoDocumento } from "./documento";
 import { documentoParaMarkdown, markdownParaDocumento, motivoTabelaForaDoLimite, normalizarMarkdown } from "./markdown";
 import { CELULA_MAX, TABELA_COLUNAS_MAX, TABELA_LINHAS_MAX } from "./tabela";
 
@@ -388,6 +388,18 @@ describe("tabela (GAB-102)", () => {
       expect(markdownParaDocumento(md), md).toEqual(d);
       expect(normalizarMarkdown(md)).toBe(md);
     }
+  });
+
+  it("interpretarDocumento diz por que a tabela não passou (a tela e o MCP mostram o motivo); fora do subconjunto, sem motivo", () => {
+    const larga = tabela(Array.from({ length: TABELA_COLUNAS_MAX + 1 }, (_, i) => [t(`c${i}`)]));
+    expect(interpretarDocumento(doc(larga))).toEqual({ ok: false, tabela: `A tabela pode ter até ${TABELA_COLUNAS_MAX} colunas (esta teria ${TABELA_COLUNAS_MAX + 1}).` });
+    expect(lerDocumento(doc(larga))).toBeNull();
+    // Torta: a conta é pelo máximo entre as linhas, como no editor.
+    const torta = tabela([[t("só uma")]], Array.from({ length: TABELA_COLUNAS_MAX + 1 }, (_, i) => [t(`d${i}`)]));
+    expect(interpretarDocumento(doc(torta))).toMatchObject({ ok: false, tabela: expect.stringContaining(`${TABELA_COLUNAS_MAX + 1}`) });
+    expect(interpretarDocumento({ type: "doc", content: [{ type: "image", attrs: { src: "x" } }] })).toEqual({ ok: false, tabela: null });
+    const ok = doc(tabela([[t("a")]]));
+    expect(interpretarDocumento(ok)).toEqual({ ok: true, documento: ok });
   });
 
   it("texto com marca de total só marca a linha quando é o marcador de verdade, no começo da 1ª célula", () => {

@@ -157,7 +157,12 @@ describe("rascunho (autosave): Markdown canônico, controle otimista", () => {
     });
     expect(await salvarRascunho(projeto.id, { revisao: 0, conteudo: { markdown: "x".repeat(100_001) } }, ana)).toEqual({ ok: false, erro: "CONTEUDO_LONGO" });
     const larga = `| ${Array.from({ length: 9 }, () => "a").join(" | ")} |\n| ${Array.from({ length: 9 }, () => "---").join(" | ")} |`;
-    expect(await salvarRascunho(projeto.id, { revisao: 0, conteudo: { markdown: larga } }, ana)).toEqual({ ok: false, erro: "TABELA_GRANDE" });
+    const motivo = "A tabela pode ter até 8 colunas (esta teria 9).";
+    expect(await salvarRascunho(projeto.id, { revisao: 0, conteudo: { markdown: larga } }, ana)).toEqual({ ok: false, erro: "TABELA_GRANDE", mensagem: motivo });
+    // Pelo JSON do editor (quem chama a action na mão) o motivo é o mesmo, e não o "conteúdo inválido" genérico.
+    const celula = (t: string) => ({ type: "tableCell", content: [{ type: "paragraph", content: [{ type: "text", text: t }] }] });
+    const largaJson = { type: "doc", content: [{ type: "table", content: [{ type: "tableRow", content: Array.from({ length: 9 }, (_, i) => celula(`c${i}`)) }] }] };
+    expect(await salvarRascunho(projeto.id, { revisao: 0, conteudo: { documento: largaJson } }, ana)).toEqual({ ok: false, erro: "TABELA_GRANDE", mensagem: motivo });
     const merge = { type: "doc", content: [{ type: "table", content: [{ type: "tableRow", content: [{ type: "tableHeader", attrs: { colspan: 2 }, content: [{ type: "paragraph" }] }] }] }] };
     expect(await salvarRascunho(projeto.id, { revisao: 0, conteudo: { documento: merge } }, ana)).toEqual({ ok: false, erro: "CONTEUDO_INVALIDO" });
     const r = await salvarRascunho(projeto.id, { revisao: 0, conteudo: { markdown: "<script>alert(1)</script>" } }, ana);
