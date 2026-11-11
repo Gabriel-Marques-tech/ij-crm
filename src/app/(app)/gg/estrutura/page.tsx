@@ -3,7 +3,7 @@ import { PageHeader } from "@/components/shell/page-header";
 import { ROTULO_AREA } from "@/lib/auth/areas";
 import { exigirUsuario } from "@/lib/auth/atual";
 import { descendentes, ROTULO_CATEGORIA, ROTULO_TIPO_AREA, vigente } from "@/lib/gg/modelo";
-import { carregarBase, ehEditorGG } from "@/lib/gg/organizacao";
+import { carregarBase, ehCargoPo, ehEditorGG } from "@/lib/gg/organizacao";
 import { NovaPosicao } from "./nova-posicao";
 
 export const metadata = { title: "Áreas e cargos · G&G" };
@@ -60,7 +60,7 @@ export default async function EstruturaPage() {
                 </td>
                 <td className="text-fg-mute">{ps.map((p) => p.nome).join(", ") || "—"}</td>
                 <td className="font-mono tabular">{pessoas}</td>
-                <td className="text-xs text-fg-mute">{c.categoria === "DIRETORIA" ? "papel GESTOR" : c.ehGp ? "GP da área (Projetos)" : "papel da área"}</td>
+                <td className="text-xs text-fg-mute">{c.categoria === "DIRETORIA" ? "papel GESTOR (em Projetos, cargo Diretor)" : c.ehGp ? "GP do lado: PM em Projetos, GP em Vendas" : ehCargoPo(c) ? "cargo PO (Projetos)" : "papel da área"}</td>
               </tr>
             );
           })}

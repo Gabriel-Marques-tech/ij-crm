@@ -139,9 +139,14 @@ export function derivadoDe(base: BaseOrg, membroId: string): Derivado {
   return derivarDoOrganograma(
     postosDe(base, membroId).map((p) => {
       const cargo = base.cargos.find((c) => c.id === p.cargoId)!;
-      return { ladoCrm: raizDe(base.areas, p.areaId)?.ladoCrm ?? null, categoria: cargo.categoria, ehGp: cargo.ehGp, principal: p.ocupacao.principal };
+      return { ladoCrm: raizDe(base.areas, p.areaId)?.ladoCrm ?? null, categoria: cargo.categoria, ehGp: cargo.ehGp, ehPo: ehCargoPo(cargo), principal: p.ocupacao.principal };
     }),
   );
+}
+
+/** O cargo PO do catálogo (semeado como `cargo_po`; importado, pelo nome). */
+export function ehCargoPo(cargo: { id: string; nome: string }): boolean {
+  return cargo.id === "cargo_po" || normalizar(cargo.nome) === "po";
 }
 
 /** Ids das áreas de G&G (a área marcada e as frentes). */

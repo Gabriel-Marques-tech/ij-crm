@@ -5,7 +5,7 @@ import { z } from "zod";
 import type { CategoriaEvento, DirecaoKpi, PapelRaci, StatusMembro, TipoDemanda } from "@prisma/client";
 import { exigirUsuario } from "@/lib/auth/atual";
 import { criarConvite, atualizarUsuario } from "@/lib/auth/usuarios";
-import { resolverAreaCargos } from "@/lib/auth/areas";
+import { resolverAreaCargos, ROTULO_CARGO } from "@/lib/auth/areas";
 import { db } from "@/lib/db";
 import { comTratamento, type Inesperado } from "@/lib/erros/registrar";
 import { contaDifere, STATUS_MEMBRO, validarImportacao } from "@/lib/gg/modelo";
@@ -108,10 +108,11 @@ export async function aplicarNoCrmAction(membroId: string): Promise<EstadoGG> {
     const d = org.derivadoDe(base, membroId);
     // Mesma regra da ficha (`contaDifere`), no servidor: sem sugestão, conflito ou conta ADMIN, nada a aplicar.
     const conta = m?.usuarioId ? await db.usuario.findUnique({ where: { id: m.usuarioId }, select: { papel: true, area: true, cargos: true } }) : null;
-    if (!m?.usuarioId || !d.papel || !conta || !contaDifere({ papel: conta.papel, area: conta.area, gp: conta.cargos.includes("GP") }, d)) return { erro: "Nada a aplicar para este membro." };
-    const r = await atualizarUsuario(m.usuarioId, { papel: d.papel, area: d.area, cargos: d.gp ? ["GP"] : [] }, a);
+    if (!m?.usuarioId || !d.papel || !conta || !contaDifere(conta, d)) return { erro: "Nada a aplicar para este membro." };
+    const r = await atualizarUsuario(m.usuarioId, { papel: d.papel, area: d.area, cargos: d.cargos }, a);
     if (!r.ok) return { erro: r.erro === "PAPEL_NAO_PERMITIDO" ? "Só a gestão muda o papel de uma conta." : r.erro === "NAO_PODE_ALTERAR_A_SI" ? "Você não pode mudar o próprio papel." : "Não foi possível atualizar a conta." };
-    await db.historicoOrg.create({ data: { membroId, evento: `Conta do CRM ajustada pelo organograma: ${d.papel}${d.area ? ` · ${d.area}` : ""}${d.gp ? " · GP" : ""}`, autorId: a.id } });
+    const cargos = d.cargos.map((c) => ROTULO_CARGO[c]).join(", ");
+    await db.historicoOrg.create({ data: { membroId, evento: `Conta do CRM ajustada pelo organograma: ${d.papel}${d.area ? ` · ${d.area}` : ""}${cargos ? ` · ${cargos}` : ""}`, autorId: a.id } });
     return { ok: true };
   });
 }
@@ -124,7 +125,7 @@ export async function convidarParaCrmAction(membroId: string): Promise<EstadoGG>
     if (!m?.email || m.usuarioId) return { erro: "Membro sem e-mail ou já com conta." };
     const d = org.derivadoDe(base, membroId);
     const papel = d.papel ?? "VISUALIZADOR";
-    const lado = resolverAreaCargos(papel, d.area, d.gp ? ["GP"] : []);
+    const lado = resolverAreaCargos(papel, d.area, d.cargos);
     const r = await criarConvite({ nome: m.nome, email: m.email, papel, area: lado.area, cargos: lado.cargos }, a);
     if (!r.ok) return { erro: r.erro === "PAPEL_NAO_PERMITIDO" ? "Só a gestão convida para o CRM." : r.erro === "EMAIL_EM_USO" ? "Já existe uma conta com esse e-mail: use Ligar contas pelo e-mail." : "Não foi possível convidar." };
     await db.membro.update({ where: { id: membroId }, data: { usuarioId: r.usuarioId } });

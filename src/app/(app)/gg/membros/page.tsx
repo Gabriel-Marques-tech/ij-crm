@@ -4,7 +4,8 @@ import { CAMPO, Chip, Painel, Tabela, Tile, Tiles } from "@/components/gg/ui";
 import { PageHeader } from "@/components/shell/page-header";
 import { exigirUsuario } from "@/lib/auth/atual";
 import { db } from "@/lib/db";
-import { descendentes, normalizar, ROTULO_STATUS_MEMBRO, STATUS_MEMBRO } from "@/lib/gg/modelo";
+import { ROTULO_CARGO } from "@/lib/auth/areas";
+import { contaDifere, descendentes, normalizar, ROTULO_STATUS_MEMBRO, STATUS_MEMBRO } from "@/lib/gg/modelo";
 import { carregarBase, derivadoDe, ehEditorGG, postosDe } from "@/lib/gg/organizacao";
 import { cargaPorPessoa } from "@/lib/projetos/equipe";
 import { AcoesMembros } from "./acoes-membros";
@@ -31,8 +32,7 @@ export default async function MembrosPage({ searchParams }: { searchParams: Prom
   const comConta = base.membros.filter((m) => m.usuarioId).length;
   const difere = base.membros.filter((m) => {
     const c = m.usuarioId ? contaPorId.get(m.usuarioId) : null;
-    const d = derivadoDe(base, m.id);
-    return c && d.papel && !d.conflito && c.papel !== "ADMIN" && (c.papel !== d.papel || c.area !== d.area || c.cargos.includes("GP") !== d.gp);
+    return c && contaDifere(c, derivadoDe(base, m.id));
   }).length;
 
   return (
@@ -98,7 +98,7 @@ export default async function MembrosPage({ searchParams }: { searchParams: Prom
                   <span className="flex flex-wrap gap-1">{ps.length ? ps.map((p) => <Chip key={p.ocupacao.id}>{p.nome}</Chip>) : <span className="text-fg-faint">sem posição</span>}</span>
                 </td>
                 <td>
-                  {d.conflito ? <Chip tom="aviso">duas áreas</Chip> : d.area ? <Chip tom="coral">{d.area}{d.gp ? " · GP" : ""}</Chip> : null}{" "}
+                  {d.conflito ? <Chip tom="aviso">duas áreas</Chip> : d.area ? <Chip tom="coral">{d.area}{d.cargos.length ? ` · ${d.cargos.map((c) => ROTULO_CARGO[c]).join(", ")}` : ""}</Chip> : null}{" "}
                   {m.usuarioId ? <Chip tom="ok">conta</Chip> : <span className="text-xs text-fg-faint">sem conta</span>}
                 </td>
                 <td className="font-mono text-xs text-fg-mute">{c ? `${c.projetos} proj · ${c.tarefas} tarefas` : "—"}</td>

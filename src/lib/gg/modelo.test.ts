@@ -41,25 +41,49 @@ describe("validarImportacao", () => {
 });
 
 describe("derivarDoOrganograma (ponte com o CRM)", () => {
-  const posto = (ladoCrm: "PROJETOS" | "VENDAS" | null, categoria: "DIRETORIA" | "LIDERANCA" | "MEMBRO", ehGp = false, principal = true) => ({ ladoCrm, categoria, ehGp, principal });
-  it("diretoria vira GESTOR; PM vira GP de Projetos; membro de Vendas vira VENDEDOR", () => {
-    expect(derivarDoOrganograma([posto("PROJETOS", "DIRETORIA")])).toEqual({ area: "PROJETOS", papel: "GESTOR", gp: false, conflito: null });
-    expect(derivarDoOrganograma([posto("PROJETOS", "LIDERANCA", true)])).toEqual({ area: "PROJETOS", papel: "PROJETOS", gp: true, conflito: null });
-    expect(derivarDoOrganograma([posto("VENDAS", "MEMBRO")])).toMatchObject({ area: "VENDAS", papel: "VENDEDOR" });
+  const posto = (ladoCrm: "PROJETOS" | "VENDAS" | null, categoria: "DIRETORIA" | "LIDERANCA" | "MEMBRO", ehGp = false, principal = true, ehPo = false) => ({ ladoCrm, categoria, ehGp, ehPo, principal });
+  it("diretoria de Projetos vira GESTOR + Diretor; PM vira PM de Projetos; membro de Vendas vira VENDEDOR", () => {
+    expect(derivarDoOrganograma([posto("PROJETOS", "DIRETORIA")])).toEqual({ area: "PROJETOS", papel: "GESTOR", cargos: ["DIRETOR"], conflito: null });
+    expect(derivarDoOrganograma([posto("PROJETOS", "LIDERANCA", true)])).toEqual({ area: "PROJETOS", papel: "PROJETOS", cargos: ["PM"], conflito: null });
+    expect(derivarDoOrganograma([posto("VENDAS", "MEMBRO")])).toEqual({ area: "VENDAS", papel: "VENDEDOR", cargos: [], conflito: null });
+  });
+  it("cargo GP (eh_gp) em Vendas vira GP; PO vira PO; diretoria de Vendas é só GESTOR (Diretor é de Projetos)", () => {
+    expect(derivarDoOrganograma([posto("VENDAS", "LIDERANCA", true)])).toEqual({ area: "VENDAS", papel: "VENDEDOR", cargos: ["GP"], conflito: null });
+    expect(derivarDoOrganograma([posto("PROJETOS", "LIDERANCA", false, true, true)])).toEqual({ area: "PROJETOS", papel: "PROJETOS", cargos: ["PO"], conflito: null });
+    expect(derivarDoOrganograma([posto("VENDAS", "DIRETORIA")])).toEqual({ area: "VENDAS", papel: "GESTOR", cargos: [], conflito: null });
+    // PO só existe em Projetos: marcado numa área de Vendas, não vira nada.
+    expect(derivarDoOrganograma([posto("VENDAS", "LIDERANCA", false, true, true)])).toMatchObject({ cargos: [] });
+  });
+  it("vários postos no mesmo lado somam cargos, na ordem do catálogo (PM, PO, Diretor)", () => {
+    expect(derivarDoOrganograma([posto("PROJETOS", "LIDERANCA", false, false, true), posto("PROJETOS", "DIRETORIA", false, true), posto("PROJETOS", "LIDERANCA", true, false)])).toEqual({
+      area: "PROJETOS",
+      papel: "GESTOR",
+      cargos: ["PM", "PO", "DIRETOR"],
+      conflito: null,
+    });
+    // Diretor de G&G (sem lado) que também é PM em Projetos: gestor com PM, sem Diretor (a diretoria não é de Projetos).
+    expect(derivarDoOrganograma([posto(null, "DIRETORIA"), posto("PROJETOS", "LIDERANCA", true)])).toEqual({ area: "PROJETOS", papel: "GESTOR", cargos: ["PM"], conflito: null });
   });
   it("área sem lado (G&G, Marketing) vira VISUALIZADOR; sem posição, nada", () => {
-    expect(derivarDoOrganograma([posto(null, "MEMBRO")])).toMatchObject({ area: null, papel: "VISUALIZADOR" });
-    expect(derivarDoOrganograma([])).toEqual({ area: null, papel: null, gp: false, conflito: null });
+    expect(derivarDoOrganograma([posto(null, "MEMBRO")])).toMatchObject({ area: null, papel: "VISUALIZADOR", cargos: [] });
+    expect(derivarDoOrganograma([])).toEqual({ area: null, papel: null, cargos: [], conflito: null });
   });
   it("duas áreas: vale a principal; sem principal entre elas, conflito", () => {
-    expect(derivarDoOrganograma([posto("PROJETOS", "LIDERANCA", false, false), posto("VENDAS", "MEMBRO", false, true)])).toMatchObject({ area: "VENDAS", conflito: null });
-    expect(derivarDoOrganograma([posto("PROJETOS", "LIDERANCA", false, false), posto("VENDAS", "MEMBRO", false, false)])).toMatchObject({ area: null, conflito: ["PROJETOS", "VENDAS"] });
+    expect(derivarDoOrganograma([posto("PROJETOS", "LIDERANCA", true, false), posto("VENDAS", "MEMBRO", false, true)])).toMatchObject({ area: "VENDAS", cargos: [], conflito: null });
+    expect(derivarDoOrganograma([posto("PROJETOS", "LIDERANCA", false, false), posto("VENDAS", "MEMBRO", false, false)])).toMatchObject({ area: null, cargos: [], conflito: ["PROJETOS", "VENDAS"] });
   });
-  it("contaDifere ignora admin e conflito", () => {
-    const d = derivarDoOrganograma([posto("PROJETOS", "LIDERANCA", true)]);
-    expect(contaDifere({ papel: "PROJETOS", area: "PROJETOS", gp: false }, d)).toBe(true);
-    expect(contaDifere({ papel: "PROJETOS", area: "PROJETOS", gp: true }, d)).toBe(false);
-    expect(contaDifere({ papel: "ADMIN", area: null, gp: false }, d)).toBe(false);
+  it("contaDifere compara os cargos como conjunto, ignora admin e conflito", () => {
+    const d = derivarDoOrganograma([posto("PROJETOS", "LIDERANCA", true, true, true)]);
+    expect(contaDifere({ papel: "PROJETOS", area: "PROJETOS", cargos: [] }, d)).toBe(true);
+    expect(contaDifere({ papel: "PROJETOS", area: "PROJETOS", cargos: ["PM"] }, d)).toBe(true);
+    expect(contaDifere({ papel: "PROJETOS", area: "PROJETOS", cargos: ["PO", "PM"] }, d)).toBe(false);
+    expect(contaDifere({ papel: "ADMIN", area: null, cargos: [] }, d)).toBe(false);
+  });
+  it("contaDifere: GP legado em Projetos conta como PM (não fica 'difere' para sempre); Diretor aplicado não difere", () => {
+    expect(contaDifere({ papel: "PROJETOS", area: "PROJETOS", cargos: ["GP"] }, derivarDoOrganograma([posto("PROJETOS", "LIDERANCA", true)]))).toBe(false);
+    expect(contaDifere({ papel: "GESTOR", area: "PROJETOS", cargos: ["DIRETOR"] }, derivarDoOrganograma([posto("PROJETOS", "DIRETORIA")]))).toBe(false);
+    // Conta com sujeira (DIRETOR em papel PROJETOS) é lida sem o cargo: difere do que a diretoria sugere.
+    expect(contaDifere({ papel: "PROJETOS", area: "PROJETOS", cargos: ["DIRETOR"] }, derivarDoOrganograma([posto("PROJETOS", "DIRETORIA")]))).toBe(true);
   });
 });
 
