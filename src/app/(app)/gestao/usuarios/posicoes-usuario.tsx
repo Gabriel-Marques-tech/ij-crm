@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { ROTULO_AREA, ROTULO_CARGO } from "@/lib/auth/areas";
-import type { GrupoPosicoes, OcupacaoDaConta, OpcaoPosicao } from "@/lib/auth/cadastro";
+import type { AreaPosicoes, OcupacaoDaConta, OpcaoPosicao } from "@/lib/auth/cadastro";
 import { ROTULO_PAPEL } from "@/lib/auth/papeis";
 import { adicionarPosicaoUsuarioAction, encerrarOcupacaoUsuarioAction } from "./actions";
 import { CampoPosicao } from "./campo-posicao";
@@ -18,12 +18,12 @@ const fmtDia = (d: string) => d.split("-").reverse().join("/");
 export function PosicoesUsuario({
   usuarioId,
   ocupacoes,
-  grupos,
+  areas,
   temAreaGG,
 }: {
   usuarioId: string;
   ocupacoes: readonly OcupacaoDaConta[];
-  grupos: readonly GrupoPosicoes[];
+  areas: readonly AreaPosicoes[];
   temAreaGG: boolean;
 }) {
   const [escolhida, setEscolhida] = useState<OpcaoPosicao | null>(null);
@@ -88,7 +88,7 @@ export function PosicoesUsuario({
       ) : (
         <p className="text-sm text-fg-faint">Sem posição atual no organograma.</p>
       )}
-      <CampoPosicao key={versao} name="novaPosicao" rotulo="Adicionar posição" vazio="Escolha a posição" grupos={grupos} temAreaGG={temAreaGG} onEscolher={setEscolhida} />
+      <CampoPosicao key={versao} name="novaPosicao" rotulo="Adicionar posição" areas={areas} temAreaGG={temAreaGG} onEscolher={setEscolhida} />
       <Button type="button" variant="outline" size="sm" disabled={pendente || !escolhida} onClick={adicionar}>
         Adicionar posição
       </Button>

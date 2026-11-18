@@ -13,7 +13,7 @@
  */
 import type { Area, Cargo, Papel, Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { derivarDoOrganograma, pareceAreaGG } from "@/lib/gg/modelo";
+import { derivarDoOrganograma, descendentes, pareceAreaGG } from "@/lib/gg/modelo";
 import {
   areasGG,
   atribuirPosicaoTx,
@@ -129,48 +129,61 @@ export async function encerrarOcupacaoDoUsuario(usuarioId: string, ocupacaoId: s
 
 /** O que a posição sugere para a conta (`derivarDoOrganograma` com ela como única ocupação, principal). */
 export type SugestaoConta = { papel: Papel; area: Area | null; cargos: Cargo[] };
-export type OpcaoPosicao = { id: string; rotulo: string; ehGG: boolean; pareceGG: boolean; sugestao: SugestaoConta };
-export type GrupoPosicoes = { rotulo: string; opcoes: OpcaoPosicao[] };
+/** Uma posição ativa. `rotulo` = "Área · Cargo"; `cargo` = o que o select de cargo mostra. */
+export type OpcaoPosicao = { id: string; rotulo: string; cargo: string; ehGG: boolean; pareceGG: boolean; sugestao: SugestaoConta };
+/** Nó do organograma (área de topo ou frente) com as posições ativas que ficam nele. */
+export type NoPosicoes = { id: string; nome: string; posicoes: OpcaoPosicao[] };
+/** Área de topo, com as posições direto nela e as frentes (todas as abaixo dela, achatadas). */
+export type AreaPosicoes = NoPosicoes & { frentes: NoPosicoes[]; ehGG: boolean; pareceGG: boolean };
 export type OcupacaoDaConta = { ocupacaoId: string; rotulo: string; principal: boolean; inicio: string | null };
 
 const comparar = (a: string, b: string) => a.localeCompare(b, "pt-BR");
 
 /**
- * Posições ativas para o campo "Posição na IJ", agrupadas pela área ou frente da posição, com o
- * rótulo "Área · Cargo" (e o nome da posição quando há duas com a mesma área e cargo).
+ * Posições ativas para a seleção em cascata "Posição na IJ" (área de topo → frente → cargo).
+ * Só entram áreas de topo com alguma posição ativa nelas ou nas frentes. O cargo leva o nome da
+ * posição quando o mesmo nó tem duas posições com o mesmo cargo.
  * `temAreaGG`: há área marcada `ehGG` (sem ela, ninguém vira editor de G&G pela posição).
  */
-export function opcoesDePosicao(base: BaseOrg): { grupos: GrupoPosicoes[]; temAreaGG: boolean } {
+export function opcoesDePosicao(base: BaseOrg): { areas: AreaPosicoes[]; temAreaGG: boolean } {
   const gg = areasGG(base.areas);
-  const area = (id: string) => base.areas.find((a) => a.id === id);
   const cargo = (id: string) => base.cargos.find((c) => c.id === id);
-  const validas = base.posicoes.filter((p) => area(p.areaId) && cargo(p.cargoId));
-  const repetidas = new Set<string>();
-  const vistas = new Set<string>();
-  for (const p of validas) {
-    const k = `${p.areaId}|${p.cargoId}`;
-    if (vistas.has(k)) repetidas.add(k);
-    vistas.add(k);
-  }
-  const grupos = new Map<string, GrupoPosicoes & { ordem: string[] }>();
-  for (const p of validas) {
-    const a = area(p.areaId)!;
-    const c = cargo(p.cargoId)!;
+  const no = (areaId: string): OpcaoPosicao[] => {
+    const a = base.areas.find((x) => x.id === areaId)!;
     const raiz = raizDe(base.areas, a.id) ?? a;
-    const sugestao = derivarDoOrganograma([{ ladoCrm: raiz.ladoCrm, categoria: c.categoria, ehGp: c.ehGp, ehPo: ehCargoPo(c), principal: true }]);
-    const rotulo = `${a.nome} · ${c.nome}${repetidas.has(`${p.areaId}|${p.cargoId}`) ? ` (${p.nome})` : ""}`;
-    const g = grupos.get(a.id) ?? { rotulo: a.id === raiz.id ? a.nome : `${a.nome} · frente de ${raiz.nome}`, opcoes: [], ordem: [raiz.nome, a.id === raiz.id ? "0" : "1", a.nome] };
-    g.opcoes.push({
-      id: p.id,
-      rotulo,
-      ehGG: gg.has(a.id),
-      pareceGG: gg.has(a.id) || pareceAreaGG(a.nome) || pareceAreaGG(raiz.nome),
-      sugestao: { papel: sugestao.papel ?? "VISUALIZADOR", area: sugestao.area, cargos: sugestao.cargos },
-    });
-    grupos.set(a.id, g);
-  }
-  const lista = [...grupos.values()].sort((x, y) => comparar(x.ordem[0], y.ordem[0]) || comparar(x.ordem[1], y.ordem[1]) || comparar(x.ordem[2], y.ordem[2]));
-  return { grupos: lista.map(({ rotulo, opcoes }) => ({ rotulo, opcoes: opcoes.sort((x, y) => comparar(x.rotulo, y.rotulo)) })), temAreaGG: gg.size > 0 };
+    const ps = base.posicoes.filter((p) => p.areaId === areaId && cargo(p.cargoId));
+    const contagem = new Map<string, number>();
+    for (const p of ps) contagem.set(p.cargoId, (contagem.get(p.cargoId) ?? 0) + 1);
+    return ps
+      .map((p) => {
+        const c = cargo(p.cargoId)!;
+        const d = derivarDoOrganograma([{ ladoCrm: raiz.ladoCrm, categoria: c.categoria, ehGp: c.ehGp, ehPo: ehCargoPo(c), principal: true }]);
+        const nomeCargo = (contagem.get(p.cargoId) ?? 0) > 1 ? `${c.nome} (${p.nome})` : c.nome;
+        return {
+          id: p.id,
+          rotulo: `${a.nome} · ${nomeCargo}`,
+          cargo: nomeCargo,
+          ehGG: gg.has(a.id),
+          pareceGG: gg.has(a.id) || pareceAreaGG(a.nome) || pareceAreaGG(raiz.nome),
+          sugestao: { papel: d.papel ?? "VISUALIZADOR", area: d.area, cargos: d.cargos },
+        };
+      })
+      .sort((x, y) => comparar(x.cargo, y.cargo));
+  };
+  const areas = base.areas
+    .filter((a) => a.superiorId === null || !base.areas.some((x) => x.id === a.superiorId))
+    .map((a): AreaPosicoes => {
+      const frentes = [...descendentes(base.areas, a.id)]
+        .filter((id) => id !== a.id)
+        .map((id) => base.areas.find((x) => x.id === id)!)
+        .map((f) => ({ id: f.id, nome: f.nome, posicoes: no(f.id) }))
+        .filter((f) => f.posicoes.length > 0)
+        .sort((x, y) => comparar(x.nome, y.nome));
+      return { id: a.id, nome: a.nome, posicoes: no(a.id), frentes, ehGG: gg.has(a.id), pareceGG: gg.has(a.id) || pareceAreaGG(a.nome) };
+    })
+    .filter((a) => a.posicoes.length > 0 || a.frentes.length > 0)
+    .sort((x, y) => comparar(x.nome, y.nome));
+  return { areas, temAreaGG: gg.size > 0 };
 }
 
 /** Ocupações vigentes de cada conta ligada a membro (para a edição de usuário). */

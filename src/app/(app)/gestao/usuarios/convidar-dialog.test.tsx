@@ -1,46 +1,53 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { Papel } from "@prisma/client";
-import type { GrupoPosicoes } from "@/lib/auth/cadastro";
+import type { AreaPosicoes, OpcaoPosicao } from "@/lib/auth/cadastro";
 
 vi.mock("./actions", () => ({ criarConviteAction: vi.fn(async () => undefined) }));
 
 const { CorpoConvite } = await import("./convidar-dialog");
 const { AVISO_SEM_AREA_GG } = await import("./campo-posicao");
 
-/** GAB-105: "Posição na IJ" no cadastro pré-preenche papel/área/cargos e vai no FormData. */
-const GRUPOS: GrupoPosicoes[] = [
-  { rotulo: "Gente & Gestão", opcoes: [{ id: "p_agg", rotulo: "Gente & Gestão · Analista", ehGG: true, pareceGG: true, sugestao: { papel: "VISUALIZADOR", area: null, cargos: [] } }] },
+/** GAB-105: "Posição na IJ" em cascata (área → frente → cargo) pré-preenche papel/área/cargos e manda o id da posição. */
+const op = (id: string, rotulo: string, cargo: string, sugestao: OpcaoPosicao["sugestao"], gg = false): OpcaoPosicao => ({ id, rotulo, cargo, ehGG: gg, pareceGG: gg, sugestao });
+const VIS = { papel: "VISUALIZADOR" as const, area: null, cargos: [] };
+const AREAS: AreaPosicoes[] = [
   {
-    rotulo: "Projetos",
-    opcoes: [
-      { id: "p_dproj", rotulo: "Projetos · Diretor", ehGG: false, pareceGG: false, sugestao: { papel: "GESTOR", area: "PROJETOS", cargos: ["DIRETOR"] } },
-      { id: "p_pm", rotulo: "Projetos · PM", ehGG: false, pareceGG: false, sugestao: { papel: "PROJETOS", area: "PROJETOS", cargos: ["PM"] } },
-    ],
+    id: "gg",
+    nome: "Gente & Gestão",
+    ehGG: true,
+    pareceGG: true,
+    posicoes: [op("p_dgg", "Gente & Gestão · Diretor", "Diretor", { papel: "GESTOR", area: null, cargos: [] }, true)],
+    frentes: [{ id: "rh", nome: "RH", posicoes: [op("p_arh", "RH · Analista", "Analista", VIS, true), op("p_grh", "RH · Gerente", "Gerente", VIS, true)] }],
   },
-  { rotulo: "Vendas", opcoes: [{ id: "p_mv", rotulo: "Vendas · Membro", ehGG: false, pareceGG: false, sugestao: { papel: "VENDEDOR", area: "VENDAS", cargos: [] } }] },
+  {
+    id: "proj",
+    nome: "Projetos",
+    ehGG: false,
+    pareceGG: false,
+    posicoes: [op("p_dproj", "Projetos · Diretor", "Diretor", { papel: "GESTOR", area: "PROJETOS", cargos: ["DIRETOR"] }), op("p_pm", "Projetos · PM", "PM", { papel: "PROJETOS", area: "PROJETOS", cargos: ["PM"] })],
+    frentes: [],
+  },
+  { id: "vend", nome: "Vendas", ehGG: false, pareceGG: false, posicoes: [op("p_mv", "Vendas · Membro", "Membro", { papel: "VENDEDOR", area: "VENDAS", cargos: [] })], frentes: [] },
 ];
 
-function montar({ papelAtor = "GESTOR" as Papel, grupos = GRUPOS, temAreaGG = true } = {}) {
-  const r = render(<CorpoConvite papelAtor={papelAtor} googleAtivo posicoes={{ grupos, temAreaGG }} onFechar={() => {}} />);
+function montar({ papelAtor = "GESTOR" as Papel, areas = AREAS, temAreaGG = true } = {}) {
+  const r = render(<CorpoConvite papelAtor={papelAtor} googleAtivo posicoes={{ areas, temAreaGG }} onFechar={() => {}} />);
   const form = r.container.querySelector("form")!;
-  return {
-    form,
-    dados: () => new FormData(form),
-    escolher: (id: string) => fireEvent.change(screen.getByLabelText("Posição na IJ (opcional)"), { target: { value: id } }),
-  };
+  return { dados: () => new FormData(form) };
 }
-const papel = () => (screen.getByLabelText("Papel") as HTMLSelectElement).value;
+const sel = (rotulo: string) => screen.getByLabelText(rotulo) as HTMLSelectElement;
+const opcoes = (rotulo: string) => Array.from(sel(rotulo).options).map((o) => o.textContent);
+const escolher = (rotulo: string, value: string) => fireEvent.change(sel(rotulo), { target: { value } });
+const papel = () => sel("Papel").value;
 
-describe("cadastro: campo Posição na IJ", () => {
-  it("lista as posições agrupadas por área, com área e cargo", () => {
+describe("cadastro: Posição na IJ em cascata", () => {
+  it("só os três selects, sem caixa de busca; começa só com a área (áreas de topo + Sem posição)", () => {
     montar();
-    const grupos = Array.from(document.querySelectorAll("optgroup")).map((g) => [g.label, Array.from(g.querySelectorAll("option")).map((o) => o.textContent)]);
-    expect(grupos).toEqual([
-      ["Gente & Gestão", ["Gente & Gestão · Analista"]],
-      ["Projetos", ["Projetos · Diretor", "Projetos · PM"]],
-      ["Vendas", ["Vendas · Membro"]],
-    ]);
+    expect(screen.queryByRole("searchbox")).toBeNull();
+    expect(opcoes("Área da IJ")).toEqual(["Sem posição", "Gente & Gestão", "Projetos", "Vendas"]);
+    expect(screen.queryByLabelText("Subárea ou frente")).toBeNull();
+    expect(screen.queryByLabelText("Cargo na IJ")).toBeNull();
   });
 
   it("sem escolher: papel padrão e posicaoId vazio", () => {
@@ -49,66 +56,97 @@ describe("cadastro: campo Posição na IJ", () => {
     expect(dados().get("posicaoId")).toBe("");
   });
 
-  it("PM de Projetos preenche papel Projetos e cargo PM, e manda a posição", () => {
-    const { dados, escolher } = montar();
-    escolher("p_pm");
+  it("área sem frentes: vai direto para o cargo; PM preenche Projetos + PM e manda a posição", () => {
+    const { dados } = montar();
+    escolher("Área da IJ", "proj");
+    expect(screen.queryByLabelText("Subárea ou frente")).toBeNull();
+    expect(opcoes("Cargo na IJ")).toEqual(["Escolha o cargo", "Diretor", "PM"]);
+    expect(dados().get("posicaoId")).toBe("");
+    expect(papel()).toBe("VENDEDOR");
+    escolher("Cargo na IJ", "p_pm");
     expect(papel()).toBe("PROJETOS");
     expect(dados().get("area")).toBe("PROJETOS");
     expect(dados().getAll("cargos")).toEqual(["PM"]);
     expect(dados().get("posicaoId")).toBe("p_pm");
   });
 
-  it("quem cadastra ajusta depois de escolher (o servidor reaplica a régua)", () => {
-    const { dados, escolher } = montar();
-    escolher("p_pm");
-    fireEvent.click(screen.getByLabelText("PO de projetos"));
-    expect(dados().getAll("cargos")).toEqual(["PM", "PO"]);
-    fireEvent.change(screen.getByLabelText("Papel"), { target: { value: "VISUALIZADOR" } });
-    expect(dados().getAll("cargos")).toEqual([]);
-    expect(dados().get("posicaoId")).toBe("p_pm");
-  });
-
-  it("diretoria preenche Gestor + Diretor; Vendas preenche Vendedor", () => {
-    const { dados, escolher } = montar();
-    escolher("p_dproj");
-    expect(papel()).toBe("GESTOR");
-    expect(dados().getAll("cargos")).toEqual(["DIRETOR"]);
-    escolher("p_mv");
+  it("cargo único no nó vem escolhido sozinho", () => {
+    const { dados } = montar();
+    escolher("Área da IJ", "vend");
+    expect(sel("Cargo na IJ").value).toBe("p_mv");
+    expect(opcoes("Cargo na IJ")).toEqual(["Membro"]);
+    expect(dados().get("posicaoId")).toBe("p_mv");
     expect(papel()).toBe("VENDEDOR");
     expect(dados().get("area")).toBe("VENDAS");
   });
 
+  it("área com frentes: frente opcional com 'A própria área'; trocar a frente limpa o cargo", () => {
+    const { dados } = montar();
+    escolher("Área da IJ", "gg");
+    expect(opcoes("Subárea ou frente")).toEqual(["A própria área", "RH"]);
+    // A própria área tem um cargo só (Diretor): já vem escolhido.
+    expect(dados().get("posicaoId")).toBe("p_dgg");
+    expect(papel()).toBe("GESTOR");
+    escolher("Subárea ou frente", "rh");
+    expect(opcoes("Cargo na IJ")).toEqual(["Escolha o cargo", "Analista", "Gerente"]);
+    expect(dados().get("posicaoId")).toBe("");
+    escolher("Cargo na IJ", "p_arh");
+    expect(dados().get("posicaoId")).toBe("p_arh");
+    expect(papel()).toBe("VISUALIZADOR");
+    expect(screen.getByText(/passa a editar o G&G/)).toBeTruthy();
+    escolher("Subárea ou frente", "");
+    expect(dados().get("posicaoId")).toBe("p_dgg");
+  });
+
+  it("trocar a área limpa frente e cargo", () => {
+    const { dados } = montar();
+    escolher("Área da IJ", "gg");
+    escolher("Subárea ou frente", "rh");
+    escolher("Cargo na IJ", "p_grh");
+    escolher("Área da IJ", "proj");
+    expect(screen.queryByLabelText("Subárea ou frente")).toBeNull();
+    expect(sel("Cargo na IJ").value).toBe("");
+    expect(dados().get("posicaoId")).toBe("");
+    escolher("Área da IJ", "gg");
+    expect(sel("Subárea ou frente").value).toBe("");
+    escolher("Área da IJ", "");
+    expect(screen.queryByLabelText("Cargo na IJ")).toBeNull();
+    expect(dados().get("posicaoId")).toBe("");
+  });
+
+  it("quem cadastra ajusta depois de escolher (o servidor reaplica a régua)", () => {
+    const { dados } = montar();
+    escolher("Área da IJ", "proj");
+    escolher("Cargo na IJ", "p_pm");
+    fireEvent.click(screen.getByLabelText("PO de projetos"));
+    expect(dados().getAll("cargos")).toEqual(["PM", "PO"]);
+    fireEvent.change(sel("Papel"), { target: { value: "VISUALIZADOR" } });
+    expect(dados().getAll("cargos")).toEqual([]);
+    expect(dados().get("posicaoId")).toBe("p_pm");
+  });
+
+  it("diretoria de Projetos preenche Gestor + Diretor", () => {
+    const { dados } = montar();
+    escolher("Área da IJ", "proj");
+    escolher("Cargo na IJ", "p_dproj");
+    expect(papel()).toBe("GESTOR");
+    expect(dados().getAll("cargos")).toEqual(["DIRETOR"]);
+  });
+
   it("sugestão de papel que o ator não pode atribuir não é aplicada", () => {
-    const grupos: GrupoPosicoes[] = [{ rotulo: "X", opcoes: [{ id: "p_x", rotulo: "X · Admin", ehGG: false, pareceGG: false, sugestao: { papel: "ADMIN", area: null, cargos: [] } }] }];
-    const { escolher } = montar({ grupos });
-    escolher("p_x");
+    const areas: AreaPosicoes[] = [{ id: "x", nome: "X", ehGG: false, pareceGG: false, posicoes: [op("p_x", "X · Admin", "Admin", { papel: "ADMIN", area: null, cargos: [] })], frentes: [] }];
+    montar({ areas });
+    escolher("Área da IJ", "x");
     expect(papel()).toBe("VENDEDOR");
     expect(screen.getByText(/não pode atribuir/)).toBeTruthy();
   });
 
-  it("posição de G&G avisa que a pessoa passa a editar o G&G", () => {
-    const { escolher } = montar();
-    escolher("p_agg");
-    expect(screen.getByText(/passa a editar o G&G/)).toBeTruthy();
+  it("sem área marcada ehGG: aviso ao escolher a área de G&G, e some ao trocar", () => {
+    montar({ temAreaGG: false });
     expect(screen.queryByText(AVISO_SEM_AREA_GG)).toBeNull();
-  });
-
-  it("sem área marcada ehGG: aviso ao escolher posição de G&G e ao procurar por ela", () => {
-    const um = montar({ temAreaGG: false });
-    expect(screen.queryByText(AVISO_SEM_AREA_GG)).toBeNull();
-    um.escolher("p_agg");
+    escolher("Área da IJ", "gg");
     expect(screen.getByText(AVISO_SEM_AREA_GG)).toBeTruthy();
-    um.escolher("p_pm");
+    escolher("Área da IJ", "proj");
     expect(screen.queryByText(AVISO_SEM_AREA_GG)).toBeNull();
-    fireEvent.change(screen.getByLabelText("Procurar posição"), { target: { value: "gente" } });
-    expect(screen.getByText(AVISO_SEM_AREA_GG)).toBeTruthy();
-  });
-
-  it("a busca filtra as opções sem perder a escolhida", () => {
-    const { escolher } = montar();
-    escolher("p_pm");
-    fireEvent.change(screen.getByLabelText("Procurar posição"), { target: { value: "vendas" } });
-    const opcoes = Array.from(document.querySelectorAll("optgroup option")).map((o) => o.getAttribute("value"));
-    expect(opcoes).toEqual(["p_pm", "p_mv"]);
   });
 });

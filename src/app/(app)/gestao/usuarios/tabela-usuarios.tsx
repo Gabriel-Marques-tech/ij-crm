@@ -17,7 +17,7 @@ import { alternarAtivoAction, desligarGoogleAction, editarUsuarioAction, gerarLi
 import { LinkGerado } from "./convidar-dialog";
 import { CamposPapelLado } from "./campos-lado";
 import { PosicoesUsuario } from "./posicoes-usuario";
-import type { GrupoPosicoes, OcupacaoDaConta } from "@/lib/auth/cadastro";
+import type { AreaPosicoes, OcupacaoDaConta } from "@/lib/auth/cadastro";
 
 type Usuario = {
   id: string;
@@ -39,8 +39,8 @@ type Usuario = {
 };
 
 type Ator = { id: string; papel: Papel };
-type Posicoes = { grupos: readonly GrupoPosicoes[]; temAreaGG: boolean };
-const SEM_POSICOES: Posicoes = { grupos: [], temAreaGG: false };
+type Posicoes = { areas: readonly AreaPosicoes[]; temAreaGG: boolean };
+const SEM_POSICOES: Posicoes = { areas: [], temAreaGG: false };
 
 export function TabelaUsuarios({
   usuarios,
@@ -304,7 +304,7 @@ function EditarForm({
         <p className="text-xs text-fg-faint">Deixe vazio para remover. É este número que liga a pessoa às mensagens do grupo.</p>
       </div>
       {/* Posição dá poder como o cargo: na própria conta, só o admin (o servidor reaplica). */}
-      {!souEu || ator.papel === "ADMIN" ? <PosicoesUsuario usuarioId={usuario.id} ocupacoes={ocupacoes} grupos={posicoes.grupos} temAreaGG={posicoes.temAreaGG} /> : null}
+      {!souEu || ator.papel === "ADMIN" ? <PosicoesUsuario usuarioId={usuario.id} ocupacoes={ocupacoes} areas={posicoes.areas} temAreaGG={posicoes.temAreaGG} /> : null}
       {!souEu ? (
         <CamposPapelLado papelAtor={ator.papel} papel={usuario.papel} area={usuario.area} cargos={usuario.cargos} areaEntrada={usuario.areaEntrada} />
       ) : ator.papel === "ADMIN" ? (

@@ -49,8 +49,9 @@ beforeEach(async () => {
   await limparBanco(["historico_org", "ocupacao", "vinculo_ij", "membro", "posicao", "cargo_org", "area_org", "sessao", "usuario"]);
 });
 
+const todas = (areas: ReturnType<typeof opcoesDePosicao>["areas"]) => areas.flatMap((a) => [...a.posicoes, ...a.frentes.flatMap((f) => f.posicoes)]);
 async function opcao(id: string): Promise<OpcaoPosicao> {
-  const o = opcoesDePosicao(await carregarBase()).grupos.flatMap((g) => g.opcoes).find((x) => x.id === id);
+  const o = todas(opcoesDePosicao(await carregarBase()).areas).find((x) => x.id === id);
   if (!o) throw new Error(`sem opção ${id}`);
   return o;
 }
@@ -75,10 +76,14 @@ describe("cadastrarPessoa com posição", () => {
     expect(await ehEditorGG(u!)).toBe(true);
   });
 
-  it("frente de G&G também dá a caneta; o grupo diz de que área é a frente", async () => {
+  it("cascata: só áreas de topo, com as frentes dentro; frente de G&G também dá a caneta", async () => {
     const { gestor } = await semear();
-    const { grupos } = opcoesDePosicao(await carregarBase());
-    expect(grupos.find((g) => g.opcoes.some((x) => x.id === "p_arh"))?.rotulo).toBe("RH · frente de Gente & Gestão");
+    const { areas } = opcoesDePosicao(await carregarBase());
+    expect(areas.map((a) => [a.nome, a.posicoes.map((p) => p.cargo), a.frentes.map((f) => [f.nome, f.posicoes.map((p) => p.cargo)])])).toEqual([
+      ["Gente & Gestão", ["Analista"], [["RH", ["Analista"]]]],
+      ["Projetos", ["Diretor", "PM"], []],
+      ["Vendas", ["GP", "Membro regular"], []],
+    ]);
     const o = await opcao("p_arh");
     await cadastrarPessoa({ nome: "Rui", email: "rui@ij.test", ...o.sugestao, posicaoId: o.id }, gestor);
     expect(await ehEditorGG((await conta("rui@ij.test"))!)).toBe(true);
@@ -181,11 +186,11 @@ describe("cadastrarPessoa com posição", () => {
 describe("pré-requisito do G&G", () => {
   it("sem área marcada ehGG: temAreaGG falso e a posição ainda parece de G&G (para o aviso)", async () => {
     await semear({ comGG: false });
-    const { temAreaGG, grupos } = opcoesDePosicao(await carregarBase());
+    const { temAreaGG, areas } = opcoesDePosicao(await carregarBase());
     expect(temAreaGG).toBe(false);
-    const o = grupos.flatMap((g) => g.opcoes).find((x) => x.id === "p_agg")!;
-    expect(o).toMatchObject({ ehGG: false, pareceGG: true });
-    expect(grupos.flatMap((g) => g.opcoes).find((x) => x.id === "p_pm")!.pareceGG).toBe(false);
+    expect(areas.find((a) => a.id === "gg")).toMatchObject({ ehGG: false, pareceGG: true });
+    expect(todas(areas).find((x) => x.id === "p_agg")).toMatchObject({ ehGG: false, pareceGG: true });
+    expect(areas.find((a) => a.id === "proj")!.pareceGG).toBe(false);
   });
 });
 

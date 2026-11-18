@@ -7,14 +7,14 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import type { GrupoPosicoes, OpcaoPosicao } from "@/lib/auth/cadastro";
+import type { AreaPosicoes, OpcaoPosicao } from "@/lib/auth/cadastro";
 import { podeAtribuirPapel } from "@/lib/auth/papeis";
 import { criarConviteAction } from "./actions";
 import { CampoPosicao } from "./campo-posicao";
 import { CamposPapelLado } from "./campos-lado";
 
-type Posicoes = { grupos: readonly GrupoPosicoes[]; temAreaGG: boolean };
-const SEM_POSICOES: Posicoes = { grupos: [], temAreaGG: false };
+type Posicoes = { areas: readonly AreaPosicoes[]; temAreaGG: boolean };
+const SEM_POSICOES: Posicoes = { areas: [], temAreaGG: false };
 
 export function ConvidarDialog({ papelAtor, googleAtivo = false, posicoes = SEM_POSICOES }: { papelAtor: Papel; googleAtivo?: boolean; posicoes?: Posicoes }) {
   const [aberto, setAberto] = useState(false);
@@ -60,6 +60,7 @@ export function CorpoConvite({ papelAtor, googleAtivo, posicoes = SEM_POSICOES, 
   const [nota, setNota] = useState<string | null>(null);
 
   function escolherPosicao(o: OpcaoPosicao | null) {
+    // Sem posição (ou cargo ainda por escolher): o que já está nos campos fica como está.
     if (!o) return setNota(null);
     if (!podeAtribuirPapel(papelAtor, o.sugestao.papel)) {
       setNota("O organograma sugere um papel que você não pode atribuir: escolha o papel abaixo.");
@@ -87,7 +88,7 @@ export function CorpoConvite({ papelAtor, googleAtivo, posicoes = SEM_POSICOES, 
         <Label htmlFor="telefone">WhatsApp (DDD + número)</Label>
         <Input id="telefone" name="telefone" placeholder="11 99999-8888" inputMode="tel" />
       </div>
-      <CampoPosicao grupos={posicoes.grupos} temAreaGG={posicoes.temAreaGG} onEscolher={escolherPosicao} />
+      <CampoPosicao areas={posicoes.areas} temAreaGG={posicoes.temAreaGG} onEscolher={escolherPosicao} />
       {nota ? <p className="-mt-2 text-xs text-fg-faint">{nota}</p> : null}
       <CamposPapelLado key={versao} papelAtor={papelAtor} papel={lado.papel} area={lado.area} cargos={lado.cargos} />
       {estado?.erro ? (
