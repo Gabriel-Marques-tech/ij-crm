@@ -207,13 +207,29 @@ describe("importação (importar_membros)", () => {
     expect(await db.membro.count()).toBe(1);
   });
 
-  it("membro já cadastrado pelo e-mail (sem caixa) recusa o lote; _ e % não são curinga", async () => {
+  it("membro já cadastrado pelo e-mail (sem caixa) e com posição recusa o lote; _ e % não são curinga", async () => {
     const { admin } = await semear();
-    await novo("Joao", admin, "Joao.Silva@ij.test");
+    const joao = await novo("Joao", admin, "Joao.Silva@ij.test");
+    await adicionarOcupante("p_sm", joao, null, admin);
     const repetido = validarImportacao([{ nome: "Outro", email: "joao.silva@IJ.test" }], HOJE);
-    expect(await importarMembros(repetido, "00000000-0000-0000-0000-000000000004", admin)).toMatchObject({ ok: false, erro: "IMPORTACAO", detalhe: "Linha 1: membro já cadastrado." });
+    expect(await importarMembros(repetido, "00000000-0000-0000-0000-000000000004", admin)).toMatchObject({ ok: false, erro: "IMPORTACAO", detalhe: "Linha 1: membro já cadastrado, com posição." });
     const parecidos = validarImportacao([{ nome: "Jo1", email: "jo_o.silva@ij.test" }, { nome: "Jo2", email: "jo%@ij.test" }], HOJE);
     expect(await importarMembros(parecidos, "00000000-0000-0000-0000-000000000005", admin)).toEqual({ ok: true, quantidade: 2 });
+  });
+});
+
+describe("importação × cadastro pela Gestão (GAB-105)", () => {
+  it("membro com o mesmo e-mail e sem ocupação é completado pela linha, sem derrubar o lote nem duplicar", async () => {
+    const { admin } = await semear();
+    const conta = await db.usuario.create({ data: { nome: "Lia", email: "lia@ij.test" } });
+    const lia = await db.membro.create({ data: { nome: "Lia", email: "Lia@ij.test", status: "NAO_INFORMADO" } });
+    const lote = validarImportacao([{ nome: "Lia Souza", email: "lia@IJ.test", status: "ativo", area: "Projetos", cargo: "PM", entrada: "2026-03-02" }, { nome: "Novo" }], HOJE);
+    expect(await importarMembros(lote, "00000000-0000-0000-0000-000000000006", admin)).toEqual({ ok: true, quantidade: 2 });
+    expect(await db.membro.count()).toBe(2);
+    const m = await db.membro.findUniqueOrThrow({ where: { id: lia.id }, include: { ocupacoes: true, vinculos: true } });
+    expect(m).toMatchObject({ nome: "Lia", status: "ATIVO", usuarioId: conta.id });
+    expect(m.ocupacoes.map((o) => [o.posicaoId, o.principal])).toEqual([["p_pm", true]]);
+    expect(m.vinculos.map((v) => v.entrada?.toISOString().slice(0, 10))).toEqual(["2026-03-02"]);
   });
 });
 

@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AreaPosicoes } from "@/lib/auth/cadastro";
 
 const acoes = vi.hoisted(() => ({
-  adicionarPosicaoUsuarioAction: vi.fn(async (): Promise<{ ok?: true; erro?: string }> => ({ ok: true })),
+  adicionarPosicaoUsuarioAction: vi.fn<(...a: unknown[]) => Promise<{ ok?: true; erro?: string; homonimo?: { id: string; nome: string } }>>(async () => ({ ok: true })),
   encerrarOcupacaoUsuarioAction: vi.fn(async (): Promise<{ ok?: true; erro?: string }> => ({ ok: true })),
 }));
 vi.mock("./actions", () => acoes);
@@ -50,7 +50,7 @@ describe("edição: Posição na IJ", () => {
     expect(botao.disabled).toBe(true);
     fireEvent.change(screen.getByLabelText("Cargo na IJ"), { target: { value: "p_pm" } });
     fireEvent.click(botao);
-    await waitFor(() => expect(acoes.adicionarPosicaoUsuarioAction).toHaveBeenCalledWith("u1", "p_pm"));
+    await waitFor(() => expect(acoes.adicionarPosicaoUsuarioAction).toHaveBeenCalledWith("u1", "p_pm", {}));
     expect(await screen.findByText(/sugere: Projetos · Projetos · PM/)).toBeTruthy();
   });
 
@@ -60,5 +60,15 @@ describe("edição: Posição na IJ", () => {
     escolherPm();
     fireEvent.click(screen.getByRole("button", { name: "Adicionar posição" }));
     expect((await screen.findByRole("alert")).textContent).toContain("ref: abcd1234");
+  });
+
+  it("homônimo sem e-mail: pergunta e 'Ligar a ele' reenvia com o membro", async () => {
+    acoes.adicionarPosicaoUsuarioAction.mockResolvedValueOnce({ erro: "x", homonimo: { id: "m1", nome: "Edu Lima" } });
+    render(<PosicoesUsuario usuarioId="u1" ocupacoes={[]} areas={AREAS} temAreaGG />);
+    escolherPm();
+    fireEvent.click(screen.getByRole("button", { name: "Adicionar posição" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Ligar a ele" }));
+    await waitFor(() => expect(acoes.adicionarPosicaoUsuarioAction).toHaveBeenLastCalledWith("u1", "p_pm", { ligarMembroId: "m1" }));
+    expect(await screen.findByText(/Posição atribuída/)).toBeTruthy();
   });
 });

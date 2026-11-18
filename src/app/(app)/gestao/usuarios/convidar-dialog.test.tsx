@@ -1,9 +1,10 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { Papel } from "@prisma/client";
 import type { AreaPosicoes, OpcaoPosicao } from "@/lib/auth/cadastro";
 
-vi.mock("./actions", () => ({ criarConviteAction: vi.fn(async () => undefined) }));
+const acoes = vi.hoisted(() => ({ criarConviteAction: vi.fn<(...a: unknown[]) => Promise<unknown>>(async () => undefined) }));
+vi.mock("./actions", () => acoes);
 
 const { CorpoConvite } = await import("./convidar-dialog");
 const { AVISO_SEM_AREA_GG } = await import("./campo-posicao");
@@ -148,5 +149,42 @@ describe("cadastro: Posição na IJ em cascata", () => {
     expect(screen.getByText(AVISO_SEM_AREA_GG)).toBeTruthy();
     escolher("Área da IJ", "proj");
     expect(screen.queryByText(AVISO_SEM_AREA_GG)).toBeNull();
+  });
+});
+
+describe("cadastro: homônimo e ficha ligada", () => {
+  it("homônimo sem e-mail: pergunta, e 'Ligar a ele e salvar' reenvia os mesmos dados com o membro; o resultado mostra a ficha", async () => {
+    acoes.criarConviteAction
+      .mockResolvedValueOnce({ erro: 'Já existe "Ana Souza" sem e-mail no G&G. É a mesma pessoa?', homonimo: { id: "m1", nome: "Ana Souza" } })
+      .mockResolvedValueOnce({ link: "https://crm/convite/x", expiraEm: new Date().toISOString(), email: "ana@ij.test", fichaLigada: { nome: "Ana Souza", posicoes: ["Vendas · Membro"] } });
+    montar();
+    fireEvent.change(screen.getByLabelText("Nome"), { target: { value: "Ana Souza" } });
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "ana@ij.test" } });
+    escolher("Área da IJ", "vend");
+    fireEvent.submit(screen.getByRole("button", { name: "Cadastrar" }).closest("form")!);
+    expect(await screen.findByText(/sem e-mail no G&G. Ligar a ele\?/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Ligar a ele e salvar" }));
+    await waitFor(() => expect(acoes.criarConviteAction).toHaveBeenCalledTimes(2));
+    const enviado = acoes.criarConviteAction.mock.calls[1][1] as FormData;
+    expect(enviado.get("ligarMembroId")).toBe("m1");
+    expect(enviado.get("nome")).toBe("Ana Souza");
+    expect(enviado.get("posicaoId")).toBe("p_mv");
+    expect(await screen.findByText(/Ficha existente no G&G ligada/)).toBeTruthy();
+    expect(screen.getByText(/Vendas · Membro/)).toBeTruthy();
+  });
+
+  it("'É outra pessoa' reenvia com criarMembroNovo", async () => {
+    acoes.criarConviteAction.mockReset();
+    acoes.criarConviteAction.mockResolvedValueOnce({ erro: "x", homonimo: { id: "m1", nome: "Ana Souza" } }).mockResolvedValueOnce({ erro: "outra coisa" });
+    montar();
+    fireEvent.change(screen.getByLabelText("Nome"), { target: { value: "Ana Souza" } });
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "ana@ij.test" } });
+    fireEvent.submit(screen.getByRole("button", { name: "Cadastrar" }).closest("form")!);
+    fireEvent.click(await screen.findByRole("button", { name: "É outra pessoa: criar membro novo" }));
+    await waitFor(() => expect(acoes.criarConviteAction).toHaveBeenCalledTimes(2));
+    const enviado = acoes.criarConviteAction.mock.calls[1][1] as FormData;
+    expect(enviado.get("criarMembroNovo")).toBe("1");
+    expect(enviado.get("ligarMembroId")).toBeNull();
+    expect(await screen.findByText("outra coisa")).toBeTruthy();
   });
 });

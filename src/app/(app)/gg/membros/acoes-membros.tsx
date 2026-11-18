@@ -4,17 +4,21 @@ import { useState } from "react";
 import Link from "next/link";
 import { UserPlus } from "lucide-react";
 import { MensagemErro } from "@/components/erros/mensagem-erro";
+import { CAMPO } from "@/components/gg/ui";
 import { useAcao } from "@/components/gg/use-acao";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { ligarContasAction } from "../actions";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ROTULO_STATUS_MEMBRO, STATUS_MEMBRO } from "@/lib/gg/modelo";
+import { criarMembroAction, ligarContasAction } from "../actions";
 
 /**
- * Cadastro de pessoa nova mora em Gestão → Usuários (GAB-105): lá a conta do CRM, o membro e a
- * posição saem juntos. Aqui fica o atalho (gestor/admin) ou o texto (editor de G&G que não é
- * gestor), e o "ligar contas pelo e-mail" para quem edita G&G.
+ * Ações da lista de membros. GAB-105: pessoa que vai usar o CRM é cadastrada em Gestão → Usuários
+ * (conta, membro e posição juntos); o "Novo membro" daqui segue para quem edita G&G, para membro
+ * sem conta do CRM, com o atalho para a Gestão ao lado. "Ligar contas pelo e-mail" também é do editor.
  */
 export function AcoesMembros({ editor, gestao }: { editor: boolean; gestao: boolean }) {
-  const { pendente, erro, rodar } = useAcao();
+  const [aberto, setAberto] = useState(false);
+  const { pendente, erro, setErro, rodar } = useAcao();
   const [aviso, setAviso] = useState<string | null>(null);
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -23,20 +27,90 @@ export function AcoesMembros({ editor, gestao }: { editor: boolean; gestao: bool
           Ligar contas pelo e-mail
         </Button>
       ) : null}
+      {editor ? (
+        <Button
+          variant={gestao ? "outline" : "default"}
+          onClick={() => {
+            setErro(null);
+            setAberto(true);
+          }}
+        >
+          Novo membro
+        </Button>
+      ) : null}
       {gestao ? (
         <Link href="/gestao/usuarios" className={buttonVariants()}>
           <UserPlus className="h-4 w-4" />
           Cadastrar em Gestão → Usuários
         </Link>
       ) : (
-        <span className="text-xs text-fg-faint">Pessoa nova: a gestão cadastra em Gestão → Usuários (conta, membro e posição juntos).</span>
+        <span className="text-xs text-fg-faint">
+          Novo membro é sem conta do CRM; para criar conta use{" "}
+          <Link href="/gestao/usuarios" className="underline">
+            Gestão → Usuários
+          </Link>{" "}
+          (gestor ou admin).
+        </span>
       )}
       {aviso || erro ? (
         <div className="self-center text-sm text-fg-mute" aria-live="polite">
           {aviso}
-          <MensagemErro falha={erro} />
+          {aberto ? null : <MensagemErro falha={erro} />}
         </div>
       ) : null}
+      <Dialog open={aberto} onOpenChange={setAberto}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Novo membro</DialogTitle>
+            <DialogDescription>
+              Sem conta do CRM; para criar conta use{" "}
+              <Link href="/gestao/usuarios" className="underline">
+                Gestão → Usuários
+              </Link>
+              .
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            className="grid gap-3"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const f = new FormData(e.currentTarget);
+              rodar(
+                () => criarMembroAction({ nome: String(f.get("nome")), email: String(f.get("email") || "") || null, status: String(f.get("status")), entrada: String(f.get("entrada") || "") || null }),
+                "cadastrar o membro",
+                () => setAberto(false),
+              );
+            }}
+          >
+            <label className="grid gap-1.5 text-xs text-fg-mute">
+              Nome
+              <input name="nome" required maxLength={200} className={CAMPO} />
+            </label>
+            <label className="grid gap-1.5 text-xs text-fg-mute">
+              E-mail (opcional; liga a conta do CRM se existir)
+              <input name="email" type="email" maxLength={254} className={CAMPO} />
+            </label>
+            <label className="grid gap-1.5 text-xs text-fg-mute">
+              Status
+              <select name="status" defaultValue="ATIVO" className={CAMPO}>
+                {STATUS_MEMBRO.map((s) => (
+                  <option key={s} value={s}>
+                    {ROTULO_STATUS_MEMBRO[s]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="grid gap-1.5 text-xs text-fg-mute">
+              Entrada na IJ (vazio = não informada)
+              <input name="entrada" type="date" className={CAMPO} />
+            </label>
+            <MensagemErro falha={erro} className="text-sm" />
+            <Button type="submit" disabled={pendente}>
+              Cadastrar
+            </Button>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

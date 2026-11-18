@@ -246,14 +246,14 @@ describe("cadastro único pela action (GAB-105)", () => {
     return g;
   }
 
-  it("FormData com posicaoId cria conta, membro e ocupação; sem posição (campo vazio) cria só conta e membro", async () => {
+  it("FormData com posicaoId cria conta, membro e ocupação; sem posição (campo vazio) cria só a conta", async () => {
     await gestor();
     expect(await criarConviteAction(undefined, form({ nome: "Gabi", email: "gabi@ij.test", papel: "VISUALIZADOR", ladoNoForm: "1", area: "", posicaoId: "p_agg" }))).toHaveProperty("link");
     const u = await db.usuario.findUniqueOrThrow({ where: { email: "gabi@ij.test" }, include: { membro: { include: { ocupacoes: true } } } });
     expect(u.membro?.ocupacoes.map((o) => o.posicaoId)).toEqual(["p_agg"]);
     expect(await criarConviteAction(undefined, form({ nome: "Nina", email: "nina@ij.test", papel: "VENDEDOR", ladoNoForm: "1", area: "VENDAS", posicaoId: "" }))).toHaveProperty("link");
-    const n = await db.usuario.findUniqueOrThrow({ where: { email: "nina@ij.test" }, include: { membro: { include: { ocupacoes: true } } } });
-    expect(n.membro?.ocupacoes).toEqual([]);
+    const n = await db.usuario.findUniqueOrThrow({ where: { email: "nina@ij.test" }, include: { membro: true } });
+    expect(n.membro).toBeNull();
   });
 
   it("membro ligado a outra conta: mensagem clara e nada criado", async () => {
@@ -262,6 +262,16 @@ describe("cadastro único pela action (GAB-105)", () => {
     const r = await criarConviteAction(undefined, form({ nome: "Ana", email: "ana@ij.test", papel: "VENDEDOR", posicaoId: "p_agg" }));
     expect(r?.erro).toMatch(/ligado a outra conta/);
     expect(await db.usuario.findUnique({ where: { email: "ana@ij.test" } })).toBeNull();
+  });
+
+  it("homônimo sem e-mail: a action pede confirmação e, com ligarMembroId no form, liga e mostra a ficha", async () => {
+    await gestor();
+    const ana = await db.membro.create({ data: { nome: "Ana Souza" } });
+    const campos = { nome: "Ana Souza", email: "ana@ij.test", papel: "VISUALIZADOR", ladoNoForm: "1", area: "", posicaoId: "p_agg" };
+    expect(await criarConviteAction(undefined, form(campos))).toEqual({ erro: 'Já existe "Ana Souza" sem e-mail no G&G. É a mesma pessoa?', homonimo: { id: ana.id, nome: "Ana Souza" } });
+    const r = await criarConviteAction(undefined, form({ ...campos, ligarMembroId: ana.id }));
+    expect(r).toMatchObject({ fichaLigada: { nome: "Ana Souza", posicoes: ["Gente & Gestão · Analista"] } });
+    expect(r).toHaveProperty("link");
   });
 
   it("edição: adiciona e encerra posição pela action", async () => {

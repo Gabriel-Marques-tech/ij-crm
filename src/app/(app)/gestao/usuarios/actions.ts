@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { exigirPapel } from "@/lib/auth/atual";
 import { atualizarUsuario, reemitirConvite, type ErroUsuario } from "@/lib/auth/usuarios";
-import { adicionarPosicaoAoUsuario, cadastrarPessoa, encerrarOcupacaoDoUsuario, type ErroCadastro } from "@/lib/auth/cadastro";
+import { adicionarPosicaoAoUsuario, cadastrarPessoa, encerrarOcupacaoDoUsuario, type ErroCadastro, type FalhaCadastro, type FichaLigada } from "@/lib/auth/cadastro";
 import { MENSAGEM_ERRO_ORG } from "@/lib/gg/organizacao";
 import { MENSAGEM_REDEFINICAO, gerarLinkRedefinicao } from "@/lib/auth/redefinicao";
 import { desligarGoogle, type ErroDesligarGoogle } from "@/lib/auth/google-login";
@@ -33,7 +33,21 @@ const MENSAGEM_CADASTRO: Record<ErroCadastro, string> = {
   JA_OCUPA: "Essa pessoa já ocupa essa posição.",
 };
 
-export type EstadoConvite = { erro?: string; link?: string; expiraEm?: string; email?: string } | undefined;
+/** Membro sem e-mail e sem conta com o mesmo nome no G&G: a tela pergunta se é a mesma pessoa. */
+export type Homonimo = { id: string; nome: string };
+
+export type EstadoConvite = { erro?: string; link?: string; expiraEm?: string; email?: string; homonimo?: Homonimo; fichaLigada?: FichaLigada } | undefined;
+
+function falha(r: FalhaCadastro): { erro: string; homonimo?: Homonimo } {
+  if (r.homonimo) return { erro: `Já existe "${r.homonimo.nome}" sem e-mail no G&G. É a mesma pessoa?`, homonimo: r.homonimo };
+  return { erro: r.detalhe ?? MENSAGEM_CADASTRO[r.erro] };
+}
+
+/** Resposta da tela ao homônimo: `ligarMembroId` (é a mesma pessoa) ou `criarMembroNovo=1` (é outra). */
+function confirmacaoDoForm(form: FormData) {
+  const ligar = form.get("ligarMembroId");
+  return { ligarMembroId: typeof ligar === "string" && ligar && ligar.length <= 64 ? ligar : null, criarMembroNovo: form.get("criarMembroNovo") === "1" };
+}
 
 const papelSchema = z.enum(["ADMIN", "GESTOR", "VENDEDOR", "PROJETOS", "VISUALIZADOR"]);
 // "" = nenhuma área. Coerência com o papel é resolvida no serviço (lib/auth/areas).
@@ -100,13 +114,18 @@ export async function criarConviteAction(_prev: EstadoConvite, form: FormData): 
       ...ladoDoForm(form),
     });
     if (!parsed.success) return { erro: parsed.error.issues[0]?.message ?? "Dados inválidos." };
-    // Conta + membro do G&G (criado ou ligado pelo e-mail) + posição, numa transação só.
-    const r = await cadastrarPessoa(parsed.data, ator);
-    if (!r.ok) return { erro: MENSAGEM_CADASTRO[r.erro] };
+    // Conta (+ membro do G&G e posição, quando há posição), numa transação só.
+    const r = await cadastrarPessoa(parsed.data, ator, confirmacaoDoForm(form));
+    if (!r.ok) return falha(r);
     revalidatePath("/gestao/usuarios");
     revalidatePath("/gg", "layout");
     // Com o Google configurado a pessoa já entra com este email; o link fica como alternativa.
-    return { link: linkConvite(r.token), expiraEm: r.expiraEm.toISOString(), email: normalizarEmail(parsed.data.email) ?? parsed.data.email };
+    return {
+      link: linkConvite(r.token),
+      expiraEm: r.expiraEm.toISOString(),
+      email: normalizarEmail(parsed.data.email) ?? parsed.data.email,
+      ...(r.fichaLigada ? { fichaLigada: r.fichaLigada } : {}),
+    };
   });
 }
 
@@ -183,12 +202,18 @@ export async function desligarGoogleAction(usuarioId: string): Promise<EstadoEdi
 const idSchema = z.string().min(1).max(64);
 
 /** Edição de usuário (GAB-105): atribui uma posição do organograma (início hoje). */
-export async function adicionarPosicaoUsuarioAction(usuarioId: string, posicaoId: string): Promise<EstadoEdicao> {
-  return comTratamentoForm("gestao.usuarios.adicionarPosicao", async (): Promise<EstadoEdicao> => {
+export async function adicionarPosicaoUsuarioAction(
+  usuarioId: string,
+  posicaoId: string,
+  confirmacao: { ligarMembroId?: string | null; criarMembroNovo?: boolean } = {},
+): Promise<EstadoEdicao & { homonimo?: Homonimo }> {
+  return comTratamentoForm("gestao.usuarios.adicionarPosicao", async (): Promise<EstadoEdicao & { homonimo?: Homonimo }> => {
     const ator = await exigirPapel("GESTOR");
     if (!idSchema.safeParse(usuarioId).success || !idSchema.safeParse(posicaoId).success) return { erro: "Escolha uma posição." };
-    const r = await adicionarPosicaoAoUsuario(usuarioId, posicaoId, ator);
-    if (!r.ok) return { erro: MENSAGEM_CADASTRO[r.erro] };
+    const ligar = confirmacao?.ligarMembroId;
+    if (ligar != null && !idSchema.safeParse(ligar).success) return { erro: "Dados inválidos." };
+    const r = await adicionarPosicaoAoUsuario(usuarioId, posicaoId, ator, { ligarMembroId: ligar ?? null, criarMembroNovo: confirmacao?.criarMembroNovo === true });
+    if (!r.ok) return falha(r);
     revalidatePath("/gestao/usuarios");
     revalidatePath("/gg", "layout");
     return { ok: true };

@@ -31,14 +31,18 @@ export function PosicoesUsuario({
   const [erro, setErro] = useState<string | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
   const [pendente, startTransition] = useTransition();
+  // Homônimo sem e-mail no G&G (só quando a conta ainda não tem membro): pergunta antes de criar outro.
+  const [homonimo, setHomonimo] = useState<{ id: string; nome: string; posicao: OpcaoPosicao } | null>(null);
 
-  function rodar(chamar: () => Promise<{ erro?: string; ok?: true } | undefined>, depois: () => void) {
+  function rodar(chamar: () => Promise<{ erro?: string; ok?: true; homonimo?: { id: string; nome: string } } | undefined>, depois: () => void, posicao?: OpcaoPosicao) {
     setErro(null);
     setAviso(null);
+    setHomonimo(null);
     startTransition(async () => {
       try {
         const r = await chamar();
-        if (r?.erro) setErro(r.erro);
+        if (r?.homonimo && posicao) setHomonimo({ ...r.homonimo, posicao });
+        else if (r?.erro) setErro(r.erro);
         else depois();
       } catch {
         setErro("Sem conexão com o servidor. Verifique a rede e tente de novo.");
@@ -46,11 +50,10 @@ export function PosicoesUsuario({
     });
   }
 
-  function adicionar() {
-    if (!escolhida) return setErro("Escolha uma posição.");
-    const o = escolhida;
+  function adicionar(o: OpcaoPosicao | null = escolhida, confirmacao: { ligarMembroId?: string; criarMembroNovo?: boolean } = {}) {
+    if (!o) return setErro("Escolha uma posição.");
     rodar(
-      () => adicionarPosicaoUsuarioAction(usuarioId, o.id),
+      () => adicionarPosicaoUsuarioAction(usuarioId, o.id, confirmacao),
       () => {
         const s = o.sugestao;
         setAviso(
@@ -59,6 +62,7 @@ export function PosicoesUsuario({
         setEscolhida(null);
         setVersao((v) => v + 1);
       },
+      o,
     );
   }
 
@@ -89,9 +93,24 @@ export function PosicoesUsuario({
         <p className="text-sm text-fg-faint">Sem posição atual no organograma.</p>
       )}
       <CampoPosicao key={versao} name="novaPosicao" rotulo="Adicionar posição" areas={areas} temAreaGG={temAreaGG} onEscolher={setEscolhida} />
-      <Button type="button" variant="outline" size="sm" disabled={pendente || !escolhida} onClick={adicionar}>
+      <Button type="button" variant="outline" size="sm" disabled={pendente || !escolhida} onClick={() => adicionar()}>
         Adicionar posição
       </Button>
+      {homonimo ? (
+        <div role="alert" className="space-y-2 rounded-lg border border-warn/50 bg-surface p-3 text-sm">
+          <p>
+            Já existe <strong>&quot;{homonimo.nome}&quot;</strong> sem e-mail no G&G. Ligar a ele?
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" size="sm" disabled={pendente} onClick={() => adicionar(homonimo.posicao, { ligarMembroId: homonimo.id })}>
+              Ligar a ele
+            </Button>
+            <Button type="button" size="sm" variant="outline" disabled={pendente} onClick={() => adicionar(homonimo.posicao, { criarMembroNovo: true })}>
+              É outra pessoa: criar membro novo
+            </Button>
+          </div>
+        </div>
+      ) : null}
       {aviso ? (
         <p role="status" className="text-xs text-fg-soft">
           {aviso}

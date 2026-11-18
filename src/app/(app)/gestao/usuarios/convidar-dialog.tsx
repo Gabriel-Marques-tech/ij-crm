@@ -1,13 +1,13 @@
 "use client";
 
-import { useActionState, useRef, useState } from "react";
+import { startTransition, useActionState, useRef, useState } from "react";
 import type { Area, Cargo, Papel } from "@prisma/client";
 import { Copy, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import type { AreaPosicoes, OpcaoPosicao } from "@/lib/auth/cadastro";
+import type { AreaPosicoes, FichaLigada, OpcaoPosicao } from "@/lib/auth/cadastro";
 import { podeAtribuirPapel } from "@/lib/auth/papeis";
 import { criarConviteAction } from "./actions";
 import { CampoPosicao } from "./campo-posicao";
@@ -52,7 +52,24 @@ type Lado = { papel: Papel; area: Area | null; cargos: readonly Cargo[] };
 const LADO_PADRAO: Lado = { papel: "VENDEDOR", area: null, cargos: [] };
 
 export function CorpoConvite({ papelAtor, googleAtivo, posicoes = SEM_POSICOES, onFechar }: { papelAtor: Papel; googleAtivo: boolean; posicoes?: Posicoes; onFechar: () => void }) {
-  const [estado, action, pendente] = useActionState(criarConviteAction, undefined);
+  // O último envio fica guardado: a confirmação do homônimo reenvia os mesmos dados, e os campos
+  // de texto voltam preenchidos depois de um erro (o React limpa o form após a action).
+  const ultimo = useRef<FormData | null>(null);
+  const [textos, setTextos] = useState<Record<string, string>>({});
+  const [estado, action, pendente] = useActionState(async (prev: Parameters<typeof criarConviteAction>[0], form: FormData) => {
+    ultimo.current = form;
+    setTextos(Object.fromEntries(["nome", "email", "telefone"].map((k) => [k, String(form.get(k) ?? "")])));
+    return criarConviteAction(prev, form);
+  }, undefined);
+  const valor = (campo: string) => textos[campo];
+
+  function confirmarHomonimo(campo: "ligarMembroId" | "criarMembroNovo", v: string) {
+    if (!ultimo.current) return;
+    const f = new FormData();
+    for (const [k, x] of ultimo.current) if (k !== "ligarMembroId" && k !== "criarMembroNovo") f.append(k, x);
+    f.set(campo, v);
+    startTransition(() => action(f));
+  }
   // A posição pré-preenche papel/área/cargos (`derivarDoOrganograma`, calculado no servidor); quem
   // cadastra ajusta depois. Remontar os campos (key) aplica o novo valor inicial; o servidor reaplica a régua.
   const [lado, setLado] = useState<Lado>(LADO_PADRAO);
@@ -71,27 +88,48 @@ export function CorpoConvite({ papelAtor, googleAtivo, posicoes = SEM_POSICOES, 
     setNota("Papel, área e cargo preenchidos pela posição. Ajuste se precisar.");
   }
 
-  if (estado?.link && googleAtivo) return <CadastroComGoogle email={estado.email} link={estado.link} expiraEm={estado.expiraEm} onFechar={onFechar} />;
-  if (estado?.link) return <LinkGerado link={estado.link} expiraEm={estado.expiraEm} onFechar={onFechar} />;
+  if (estado?.link && googleAtivo) return <CadastroComGoogle email={estado.email} link={estado.link} expiraEm={estado.expiraEm} fichaLigada={estado.fichaLigada} onFechar={onFechar} />;
+  if (estado?.link)
+    return (
+      <div className="space-y-4">
+        {estado.fichaLigada ? <NotaFichaLigada ficha={estado.fichaLigada} /> : null}
+        <LinkGerado link={estado.link} expiraEm={estado.expiraEm} onFechar={onFechar} />
+      </div>
+    );
 
   return (
     <form action={action} className="space-y-4">
       <div className="space-y-1.5">
         <Label htmlFor="nome">Nome</Label>
-        <Input id="nome" name="nome" required autoFocus />
+        <Input id="nome" name="nome" required autoFocus defaultValue={valor("nome")} />
       </div>
       <div className="space-y-1.5">
         <Label htmlFor="email">Email</Label>
-        <Input id="email" name="email" type="email" required />
+        <Input id="email" name="email" type="email" required defaultValue={valor("email")} />
       </div>
       <div className="space-y-1.5">
         <Label htmlFor="telefone">WhatsApp (DDD + número)</Label>
-        <Input id="telefone" name="telefone" placeholder="11 99999-8888" inputMode="tel" />
+        <Input id="telefone" name="telefone" placeholder="11 99999-8888" inputMode="tel" defaultValue={valor("telefone")} />
       </div>
       <CampoPosicao areas={posicoes.areas} temAreaGG={posicoes.temAreaGG} onEscolher={escolherPosicao} />
       {nota ? <p className="-mt-2 text-xs text-fg-faint">{nota}</p> : null}
       <CamposPapelLado key={versao} papelAtor={papelAtor} papel={lado.papel} area={lado.area} cargos={lado.cargos} />
-      {estado?.erro ? (
+      {estado?.homonimo ? (
+        <div role="alert" className="space-y-2 rounded-lg border border-warn/50 bg-muted p-3 text-sm">
+          <p>
+            Já existe <strong>&quot;{estado.homonimo.nome}&quot;</strong> sem e-mail no G&G. Ligar a ele?
+          </p>
+          <p className="text-xs text-fg-faint">Ligar grava este e-mail na ficha dele e registra no histórico. Se for outra pessoa, um membro novo é criado.</p>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" size="sm" disabled={pendente} onClick={() => confirmarHomonimo("ligarMembroId", estado.homonimo!.id)}>
+              Ligar a ele e salvar
+            </Button>
+            <Button type="button" size="sm" variant="outline" disabled={pendente} onClick={() => confirmarHomonimo("criarMembroNovo", "1")}>
+              É outra pessoa: criar membro novo
+            </Button>
+          </div>
+        </div>
+      ) : estado?.erro ? (
         <p role="alert" className="text-sm text-danger">
           {estado.erro}
         </p>
@@ -104,11 +142,21 @@ export function CorpoConvite({ papelAtor, googleAtivo, posicoes = SEM_POSICOES, 
 }
 
 /** Com o Google configurado: a pessoa já pode entrar; o link de convite (senha) fica opcional. */
-function CadastroComGoogle({ email, link, expiraEm, onFechar }: { email?: string; link: string; expiraEm?: string; onFechar: () => void }) {
+/** Ficha do G&G que já existia e foi ligada à conta (GAB-105), com as posições abertas dela. */
+function NotaFichaLigada({ ficha }: { ficha: FichaLigada }) {
+  return (
+    <p className="rounded-lg border border-border bg-muted p-3 text-sm">
+      Ficha existente no G&G ligada: <strong>{ficha.nome}</strong>. Posições: {ficha.posicoes.length ? ficha.posicoes.join(", ") : "nenhuma"}.
+    </p>
+  );
+}
+
+function CadastroComGoogle({ email, link, expiraEm, fichaLigada, onFechar }: { email?: string; link: string; expiraEm?: string; fichaLigada?: FichaLigada; onFechar: () => void }) {
   const [mostrarLink, setMostrarLink] = useState(false);
   if (mostrarLink) return <LinkGerado link={link} expiraEm={expiraEm} onFechar={onFechar} aviso="Mostrado só uma vez. Deixa de valer depois do primeiro login com Google." />;
   return (
     <div className="space-y-4">
+      {fichaLigada ? <NotaFichaLigada ficha={fichaLigada} /> : null}
       <div className="rounded-lg border border-border bg-muted p-3 text-sm">
         <p className="eyebrow mb-1">cadastrado</p>
         <p>

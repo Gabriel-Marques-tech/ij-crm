@@ -39,7 +39,7 @@ export default async function MembrosPage({ searchParams }: { searchParams: Prom
 
   return (
     <div className="space-y-5">
-      <PageHeader eyebrow="gente & gestão · membros" title="Membros" description="Toda pessoa da IJ, com ou sem conta no CRM. A área e o papel no CRM saem do organograma. Pessoa nova é cadastrada em Gestão → Usuários, que cria a conta, o membro e a posição juntos."
+      <PageHeader eyebrow="gente & gestão · membros" title="Membros" description="Toda pessoa da IJ, com ou sem conta no CRM. A área e o papel no CRM saem do organograma. Quem vai usar o CRM é cadastrado em Gestão → Usuários, que cria a conta, o membro e a posição juntos."
         actions={editor || gestao ? <AcoesMembros editor={editor} gestao={gestao} /> : null}
       />
       <Tiles>

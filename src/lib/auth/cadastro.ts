@@ -1,8 +1,8 @@
 /**
  * Cadastro único (GAB-105): Gestão → Usuários cadastra a pessoa num lugar só. Numa transação:
- * a conta do CRM (`criarConvite`), o membro do G&G com o mesmo e-mail (criado, ou o existente
- * ligado) e, se escolhida, a ocupação da posição no organograma (início hoje, principal).
- * Qualquer recusa no meio desfaz tudo.
+ * a conta do CRM (`criarConvite`) e, quando há posição escolhida, o membro do G&G (o mesmo
+ * e-mail ligado, o homônimo sem e-mail confirmado na tela, ou um novo) e a ocupação da posição
+ * (início hoje, principal). Sem posição, só a conta. Qualquer recusa no meio desfaz tudo.
  *
  * Permissão: quem cadastra usuário na Gestão (gestor e admin), com a régua de sempre
  * (`podeAtribuirPapel`: gestor não cria nem mexe em admin; ninguém mexe na própria posição,
@@ -23,6 +23,7 @@ import {
   postosDe,
   raizDe,
   Recusa,
+  RecusaHomonimo,
   type AtorGG,
   type BaseOrg,
   type ErroOrg,
@@ -32,7 +33,13 @@ import { podeAtribuirPapel } from "./papeis";
 import { criarConvite, formatarLado, type DadosConvite, type ErroUsuario } from "./usuarios";
 
 export type ErroCadastro = ErroUsuario | ErroOrg;
-export type ResultadoCadastro<T = object> = ({ ok: true } & T) | { ok: false; erro: ErroCadastro };
+/** Falha; `homonimo` = membro sem e-mail e sem conta com o mesmo nome, para a tela pedir confirmação. */
+export type FalhaCadastro = { ok: false; erro: ErroCadastro; detalhe?: string; homonimo?: { id: string; nome: string } };
+export type ResultadoCadastro<T = object> = ({ ok: true } & T) | FalhaCadastro;
+/** Confirmação da tela quando há homônimo: ligar a ele (`ligarMembroId`) ou é outra pessoa (`criarMembroNovo`). */
+export type ConfirmacaoMembro = { ligarMembroId?: string | null; criarMembroNovo?: boolean };
+/** Ficha do G&G que já existia e foi ligada à conta, com as posições abertas dela (para o resultado do cadastro). */
+export type FichaLigada = { nome: string; posicoes: string[] };
 
 type Ator = { id: string; papel: Papel; nome?: string };
 
@@ -49,29 +56,50 @@ class RecusaConta extends Desfaz {}
 const atorGG = (a: Ator): AtorGG => ({ id: a.id, nome: a.nome ?? "", papel: a.papel });
 const hoje = () => diaEmFuso(new Date());
 
-function traduzir(e: unknown): { ok: false; erro: ErroCadastro } {
+function traduzir(e: unknown): FalhaCadastro {
   if (e instanceof Desfaz) return { ok: false, erro: e.erro };
-  if (e instanceof Recusa) return { ok: false, erro: e.erro };
+  if (e instanceof RecusaHomonimo) return { ok: false, erro: e.erro, homonimo: e.membro };
+  if (e instanceof Recusa) return { ok: false, erro: e.erro, ...(e.detalhe ? { detalhe: e.detalhe } : {}) };
+  // Índice `membro_email_unico` (lower(trim(email))): outro membro com o e-mail em outra grafia.
+  const err = e as { code?: string; meta?: { target?: unknown } };
+  if (err?.code === "P2002" && String(err.meta?.target ?? "").includes("membro_email")) return { ok: false, erro: "MEMBRO_EMAIL_EM_USO" };
   throw e;
 }
 
+async function fichaLigada(tx: Prisma.TransactionClient, membroId: string): Promise<FichaLigada> {
+  const m = await tx.membro.findUniqueOrThrow({
+    where: { id: membroId },
+    select: { nome: true, ocupacoes: { where: { fim: null, invalidadoEm: null }, select: { posicao: { select: { area: { select: { nome: true } }, cargo: { select: { nome: true } } } } } } },
+  });
+  return { nome: m.nome, posicoes: m.ocupacoes.map((o) => `${o.posicao.area.nome} · ${o.posicao.cargo.nome}`) };
+}
+
+/**
+ * Sem posição, só a conta (como antes do cadastro único); com posição, também o membro e a
+ * ocupação. Homônimo sem e-mail no G&G: falha com `homonimo` até a tela confirmar (`confirmacao`).
+ */
 export async function cadastrarPessoa(
   dados: DadosConvite & { posicaoId?: string | null },
   por: Ator,
-): Promise<ResultadoCadastro<{ usuarioId: string; membroId: string; membro: "criado" | "ligado"; token: string; expiraEm: Date }>> {
+  confirmacao: ConfirmacaoMembro = {},
+): Promise<ResultadoCadastro<{ usuarioId: string; membroId: string | null; fichaLigada: FichaLigada | null; token: string; expiraEm: Date }>> {
   const posicaoId = dados.posicaoId || null;
   try {
     const r = await db.$transaction(async (tx) => {
       const c = await criarConvite(dados, por, tx);
       if (!c.ok) throw new Desfaz(c.erro);
-      const m = await membroDaContaTx(tx, { usuarioId: c.usuarioId, nome: dados.nome, email: dados.email }, atorGG(por));
-      if (posicaoId) await atribuirPosicaoTx(tx, posicaoId, m.id, hoje(), atorGG(por), { principal: true });
-      return { ...c, membroId: m.id, membro: m.criado ? ("criado" as const) : ("ligado" as const) };
+      if (!posicaoId) return { ...c, membroId: null, fichaLigada: null };
+      const m = await membroDaContaTx(tx, { usuarioId: c.usuarioId, nome: dados.nome, email: dados.email }, atorGG(por), {
+        ligarMembroId: confirmacao.ligarMembroId,
+        criarNovo: confirmacao.criarMembroNovo,
+      });
+      await atribuirPosicaoTx(tx, posicaoId, m.id, hoje(), atorGG(por), { principal: true });
+      return { ...c, membroId: m.id, fichaLigada: m.ligado ? await fichaLigada(tx, m.id) : null };
     });
     console.info(
-      `[auditoria] usuario.convidado usuario=${r.usuarioId} por=${por.id} papel=${r.papel} lado=${formatarLado(r)} entrada=${r.areaEntrada ?? "nenhuma"} membro=${r.membroId} membro_${r.membro}=1 posicao=${posicaoId ?? "nenhuma"}`,
+      `[auditoria] usuario.convidado usuario=${r.usuarioId} por=${por.id} papel=${r.papel} lado=${formatarLado(r)} entrada=${r.areaEntrada ?? "nenhuma"} membro=${r.membroId ?? "nenhum"}${r.fichaLigada ? " membro_ligado=1" : ""} posicao=${posicaoId ?? "nenhuma"}`,
     );
-    return { ok: true, usuarioId: r.usuarioId, membroId: r.membroId, membro: r.membro, token: r.token, expiraEm: r.expiraEm };
+    return { ok: true, usuarioId: r.usuarioId, membroId: r.membroId, fichaLigada: r.fichaLigada, token: r.token, expiraEm: r.expiraEm };
   } catch (e) {
     return traduzir(e);
   }
@@ -93,12 +121,12 @@ async function papelMantido(tx: Prisma.TransactionClient, alvo: { id: string; pa
 }
 
 /** Edição de usuário: atribui uma posição (início hoje). Sem membro ligado, liga ou cria como no cadastro. */
-export async function adicionarPosicaoAoUsuario(usuarioId: string, posicaoId: string, por: Ator): Promise<ResultadoCadastro> {
+export async function adicionarPosicaoAoUsuario(usuarioId: string, posicaoId: string, por: Ator, confirmacao: ConfirmacaoMembro = {}): Promise<ResultadoCadastro> {
   try {
     const alvo = await alvoDaGestao(usuarioId, por);
     await db.$transaction(async (tx) => {
       await papelMantido(tx, alvo);
-      const m = await membroDaContaTx(tx, { usuarioId: alvo.id, nome: alvo.nome, email: alvo.email }, atorGG(por));
+      const m = await membroDaContaTx(tx, { usuarioId: alvo.id, nome: alvo.nome, email: alvo.email }, atorGG(por), { ligarMembroId: confirmacao.ligarMembroId, criarNovo: confirmacao.criarMembroNovo });
       await atribuirPosicaoTx(tx, posicaoId, m.id, hoje(), atorGG(por));
     });
     console.info(`[auditoria] usuario.posicao_atribuida usuario=${alvo.id} por=${por.id} posicao=${posicaoId}`);
