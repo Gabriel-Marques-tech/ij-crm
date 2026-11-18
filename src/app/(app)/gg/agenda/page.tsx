@@ -17,7 +17,8 @@ const COR = { RG: "border-primary/50 text-primary", REUNIAO: "border-chart-5/50 
 export default async function AgendaPage({ searchParams }: { searchParams: Promise<{ mes?: string; aba?: string }> }) {
   const ator = await exigirUsuario();
   const f = await searchParams;
-  const [base, editor] = await Promise.all([carregarBase(), ehEditorGG(ator)]);
+  const base = await carregarBase();
+  const editor = await ehEditorGG(ator, base);
   const mes = /^\d{4}-\d{2}$/.test(f.mes ?? "") ? f.mes! : base.hoje.slice(0, 7);
   const primeiro = `${mes}-01`;
   const [a, m] = mes.split("-").map(Number);

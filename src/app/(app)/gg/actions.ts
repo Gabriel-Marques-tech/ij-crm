@@ -34,6 +34,7 @@ async function rodar(contexto: string, corpo: (ator: org.AtorGG) => Promise<Res 
     const r = await corpo({ id: u.id, nome: u.nome, papel: u.papel });
     if ("ok" in r && r.ok === false && "erro" in r && typeof r.erro === "string" && r.erro !== "INESPERADO") return { erro: (r as { detalhe?: string }).detalhe ?? MENSAGENS[r.erro] ?? "Não foi possível concluir." };
     revalidatePath("/gg", "layout");
+    revalidatePath("/membros", "layout");
     return r as EstadoGG;
   });
 }

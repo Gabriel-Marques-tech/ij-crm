@@ -1,10 +1,8 @@
 import type { Area } from "@prisma/client";
 import {
-  BadgeCheck,
   Building2,
   CalendarRange,
   ClipboardList,
-  Network,
   Target,
   Upload,
   Users,
@@ -59,6 +57,8 @@ const ITENS: Record<Exclude<ItemDeArea, "kanban">, NavItem> = {
 
 const ITENS_GERAIS: Record<ItemGeral, NavItem> = {
   painel: { href: "/painel", label: "Painel", icon: ChartColumn },
+  // GAB-106: o mesmo `HREF_MEMBROS` de lib/gg/membros (que é do servidor; aqui o literal).
+  membros: { href: "/membros", label: "Membros", icon: Users },
   gestao: { href: "/gestao", label: "Gestão", icon: Settings2 },
   perfil: { href: "/perfil", label: "Meu perfil", icon: UserRound },
 };
@@ -73,11 +73,12 @@ export function itensDoMenu(p: PessoaComLado, area: Area): NavItem[] {
  * que decide caneta e cards): é uma área do hub com menu próprio nas rotas `/gg`.
  * Todo usuário ativo lê; quem edita é decidido pelo organograma (`lib/gg/organizacao`).
  */
-export const HREF_GG = "/gg/membros";
+/**
+ * GAB-106: membros, organograma e estrutura (áreas e cargos) são da IJ inteira e foram para
+ * `/membros` (bloco Geral da gaveta); as rotas antigas redirecionam. G&G fica com o que é dela.
+ */
+export const HREF_GG = "/gg/demandas";
 export const ITENS_GG: NavItem[] = [
-  { href: "/gg/membros", label: "Membros", icon: Users },
-  { href: "/gg/organograma", label: "Organograma", icon: Network },
-  { href: "/gg/estrutura", label: "Áreas e cargos", icon: BadgeCheck },
   { href: "/gg/demandas", label: "Demandas", icon: ClipboardList },
   { href: "/gg/agenda", label: "Agenda", icon: CalendarRange },
   { href: "/gg/metas", label: "Metas", icon: Target },

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { areaDaRota, isActive, itemAtivo, itensDaGaveta, itensDoMenu } from "./nav-config";
+import { areaDaRota, ehRotaGG, HREF_GG, isActive, itemAtivo, itensDaGaveta, itensDoMenu, ITENS_GG } from "./nav-config";
 
 const pessoa = (papel: "ADMIN" | "GESTOR" | "VENDEDOR" | "PROJETOS" | "VISUALIZADOR", area: "VENDAS" | "PROJETOS" | null = null) => ({ papel, area, cargos: [], areaEntrada: null });
 const ADMIN = pessoa("ADMIN");
@@ -33,10 +33,20 @@ describe("itensDoMenu", () => {
 });
 
 describe("itensDaGaveta", () => {
-  it("Gestão só para gestor e admin", () => {
-    expect(rotulos(itensDaGaveta(VENDEDOR))).toEqual(["Painel", "Meu perfil"]);
-    expect(rotulos(itensDaGaveta(pessoa("GESTOR", "VENDAS")))).toEqual(["Painel", "Gestão", "Meu perfil"]);
-    expect(rotulos(itensDaGaveta(ADMIN))).toEqual(["Painel", "Gestão", "Meu perfil"]);
+  it("Gestão só para gestor e admin; Membros para todos (GAB-106)", () => {
+    expect(rotulos(itensDaGaveta(VENDEDOR))).toEqual(["Painel", "Membros", "Meu perfil"]);
+    expect(rotulos(itensDaGaveta(pessoa("GESTOR", "VENDAS")))).toEqual(["Painel", "Membros", "Gestão", "Meu perfil"]);
+    expect(rotulos(itensDaGaveta(ADMIN))).toEqual(["Painel", "Membros", "Gestão", "Meu perfil"]);
+    expect(itensDaGaveta(VENDEDOR).find((i) => i.label === "Membros")?.href).toBe("/membros");
+  });
+
+  it("Gente & Gestão fica só com o que é dela; Membros, organograma e estrutura saíram (GAB-106)", () => {
+    const hrefs = ITENS_GG.map((i) => i.href);
+    expect(hrefs).not.toContain("/gg/membros");
+    expect(hrefs).not.toContain("/gg/organograma");
+    expect(hrefs).not.toContain("/gg/estrutura");
+    expect(hrefs).toContain(HREF_GG);
+    expect(ehRotaGG("/membros")).toBe(false);
   });
 });
 
@@ -80,7 +90,7 @@ describe("areaDaRota", () => {
     expect(areaDaRota("/kanban", null, ADMIN, "PROJETOS")).toBe("VENDAS");
   });
 
-  it.each(["/contatos", "/empresas/x", "/calendario", "/propostas", "/painel", "/perfil", "/gestao/ranking"])("%s não define área", (rota) => {
+  it.each(["/contatos", "/empresas/x", "/calendario", "/propostas", "/painel", "/perfil", "/membros", "/membros/x", "/gestao/ranking"])("%s não define área", (rota) => {
     expect(areaDaRota(rota, null, VENDEDOR)).toBeNull();
   });
 });

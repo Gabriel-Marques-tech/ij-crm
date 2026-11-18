@@ -235,3 +235,40 @@ describe("cadastro: homônimo e ficha ligada", () => {
     expect(screen.getByRole("button", { name: 'Ligar a "ana souza" (2)' })).toBeTruthy();
   });
 });
+
+/** GAB-106: o cargo vago clicado no organograma abre o mesmo formulário já com a posição na cascata. */
+describe("cadastro aberto por um cargo vago (posicaoInicial)", () => {
+  function abrirEm(posicaoInicial: string, papelAtor: Papel = "GESTOR") {
+    const r = render(<CorpoConvite papelAtor={papelAtor} googleAtivo posicoes={{ areas: AREAS, temAreaGG: true }} posicaoInicial={posicaoInicial} onFechar={() => {}} />);
+    return { dados: () => new FormData(r.container.querySelector("form")!) };
+  }
+
+  it("posição numa frente: área, frente e cargo preenchidos e a posição vai no envio", () => {
+    const { dados } = abrirEm("p_grh");
+    expect(sel("Área da IJ").value).toBe("gg");
+    expect(sel("Subárea ou frente").value).toBe("rh");
+    expect(sel("Cargo na IJ").value).toBe("p_grh");
+    expect(dados().get("posicaoId")).toBe("p_grh");
+  });
+
+  it("posição direto na área: aplica a sugestão de papel, área e cargo como se tivesse sido escolhida", () => {
+    const { dados } = abrirEm("p_pm");
+    expect(sel("Área da IJ").value).toBe("proj");
+    expect(sel("Cargo na IJ").value).toBe("p_pm");
+    expect(papel()).toBe("PROJETOS");
+    expect(dados().getAll("cargos")).toEqual(["PM"]);
+    expect(screen.getByText(/preenchidos pela posição/)).toBeTruthy();
+  });
+
+  it("sugestão que o ator não pode dar: mantém a posição, avisa e não troca o papel", () => {
+    const { dados } = abrirEm("p_dgg", "VENDEDOR");
+    expect(dados().get("posicaoId")).toBe("p_dgg");
+    expect(screen.getByText(/não pode atribuir/)).toBeTruthy();
+  });
+
+  it("posição que não está na lista (desativada): cascata vazia, sem posição", () => {
+    const { dados } = abrirEm("p_sumiu");
+    expect(sel("Área da IJ").value).toBe("");
+    expect(dados().get("posicaoId")).toBe("");
+  });
+});

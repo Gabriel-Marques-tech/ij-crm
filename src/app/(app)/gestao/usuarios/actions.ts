@@ -123,6 +123,7 @@ export async function criarConviteAction(_prev: EstadoConvite, form: FormData): 
     if (!r.ok) return falha(r);
     revalidatePath("/gestao/usuarios");
     revalidatePath("/gg", "layout");
+    revalidatePath("/membros", "layout");
     // Com o Google configurado a pessoa já entra com este email; o link fica como alternativa.
     return {
       link: linkConvite(r.token),
@@ -220,6 +221,7 @@ export async function adicionarPosicaoUsuarioAction(
     if (!r.ok) return falha(r);
     revalidatePath("/gestao/usuarios");
     revalidatePath("/gg", "layout");
+    revalidatePath("/membros", "layout");
     return { ok: true };
   });
 }
@@ -233,6 +235,7 @@ export async function encerrarOcupacaoUsuarioAction(usuarioId: string, ocupacaoI
     if (!r.ok) return { erro: MENSAGEM_CADASTRO[r.erro] };
     revalidatePath("/gestao/usuarios");
     revalidatePath("/gg", "layout");
+    revalidatePath("/membros", "layout");
     return { ok: true };
   });
 }

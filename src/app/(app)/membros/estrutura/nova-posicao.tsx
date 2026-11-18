@@ -7,7 +7,7 @@ import { CAMPO } from "@/components/gg/ui";
 import { useAcao } from "@/components/gg/use-acao";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { salvarPosicaoAction } from "../actions";
+import { salvarPosicaoAction } from "@/app/(app)/gg/actions";
 
 export function NovaPosicao({ areas, cargos, posicoes }: { areas: Opcao[]; cargos: Opcao[]; posicoes: Opcao[] }) {
   const [aberto, setAberto] = useState(false);

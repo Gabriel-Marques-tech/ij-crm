@@ -181,12 +181,20 @@ export function areasGG(areas: AreaB[]): Set<string> {
  * Vale pelo organograma, não pelo papel do CRM: quem é só de G&G deriva VISUALIZADOR
  * (G&G não é lado de vendas/projetos) e continua só lendo o comercial, mas edita G&G.
  */
-export async function ehEditorGG(u: { id: string; papel: Papel }): Promise<boolean> {
+export async function ehEditorGG(u: { id: string; papel: Papel }, baseCarregada?: BaseOrg): Promise<boolean> {
   if (u.papel === "ADMIN") return true;
+  // Página que já leu a base (GAB-106) passa a mesma: decide sem ir ao banco de novo.
+  if (baseCarregada) return editorNaBase(baseCarregada, u.id);
   // Quem saiu da IJ (INATIVO) perde a caneta já: a saída não fecha as ocupações.
   const m = await db.membro.findFirst({ where: { usuarioId: u.id, status: { not: "INATIVO" } }, select: { id: true } });
   if (!m) return false;
-  const base = await carregarBase();
+  return editorNaBase(await carregarBase(), u.id);
+}
+
+/** Na base: membro ativo (não INATIVO) desta conta ocupando hoje posição em G&G. */
+function editorNaBase(base: BaseOrg, usuarioId: string): boolean {
+  const m = base.membros.find((x) => x.usuarioId === usuarioId && x.status !== "INATIVO");
+  if (!m) return false;
   const gg = areasGG(base.areas);
   return postosDe(base, m.id).some((p) => gg.has(p.areaId));
 }
@@ -306,8 +314,10 @@ async function reingressarSeInativo(tx: Tx, membroId: string, ator: AtorGG) {
 }
 
 async function ligarConta(tx: Tx, membroId: string, usuarioId: string, ator: AtorGG, evento: string, email?: string) {
-  // usuarioId: null no where: se outro cadastro ligou no meio, não rouba o membro.
-  const r = await tx.membro.updateMany({ where: { id: membroId, usuarioId: null }, data: { usuarioId, ...(email ? { email } : {}) } });
+  // usuarioId: null no where: se outro cadastro ligou no meio, não rouba o membro. Com `email` (homônimo
+  // escolhido na tela, que era sem e-mail), `email: null` também: se ganhou um e-mail no meio, recusa em vez
+  // de sobrescrever (GAB-106, M2).
+  const r = await tx.membro.updateMany({ where: { id: membroId, usuarioId: null, ...(email ? { email: null } : {}) }, data: { usuarioId, ...(email ? { email } : {}) } });
   if (r.count === 0) throw new Recusa("MEMBRO_DE_OUTRA_CONTA");
   await historico(tx, membroId, evento, ator);
   await reingressarSeInativo(tx, membroId, ator);
@@ -620,6 +630,17 @@ export async function importarMembros(linhas: LinhaImportacao[], chave: string, 
       // E-mails já cadastrados, comparados em memória pela forma normalizada (sem ILIKE: `_`/`%` são literais).
       const porEmail = new Map((await tx.membro.findMany({ where: { email: { not: null } }, select: { id: true, email: true, usuarioId: true } })).map((m) => [chaveEmail(m.email!), m]));
       const doLote = new Set<string>();
+      // GAB-106 (M1): linha "inativo" não deixa período aberto. Fecha como `registrarSaida` (saída + histórico);
+      // a planilha não traz a data de saída, então vale a da importação. Ocupações ficam, como na saída do G&G.
+      // Linha inativa com área e cargo: a ocupação entra já encerrada na mesma data (histórico, não vaga ocupada).
+      const ocuparDaLinha = (membroId: string, posicaoId: string, entrada: Date | null, status: StatusMembro) =>
+        tx.ocupacao.create({ data: { membroId, posicaoId, inicio: entrada, ...(status === "INATIVO" ? { fim: instanteDoPrazo(hoje()), principal: false } : { principal: true }) } });
+      const fecharSeInativo = async (membroId: string, status: StatusMembro) => {
+        if (status !== "INATIVO") return;
+        const saida = hoje();
+        const r = await tx.vinculoIj.updateMany({ where: { membroId, saida: null }, data: { saida: instanteDoPrazo(saida) } });
+        if (r.count) await historico(tx, membroId, "Saída da IJ registrada pela importação (data da importação)", ator, { saida });
+      };
       for (const [i, l] of linhas.entries()) {
         const linha = `Linha ${i + 1}`;
         const area = l.area ? areas.find((a) => normalizar(a.nome) === normalizar(l.area!)) : null;
@@ -656,8 +677,9 @@ export async function importarMembros(linhas: LinhaImportacao[], chave: string, 
           });
           if (!(await tx.vinculoIj.count({ where: { membroId: existente.id } }))) await tx.vinculoIj.create({ data: { membroId: existente.id, entrada } });
           else if (entrada) await tx.vinculoIj.updateMany({ where: { membroId: existente.id, saida: null, entrada: null }, data: { entrada } });
+          await fecharSeInativo(existente.id, l.status);
           const posicao = await posicaoDaLinha();
-          if (posicao) await tx.ocupacao.create({ data: { membroId: existente.id, posicaoId: posicao.id, inicio: entrada, principal: true } });
+          if (posicao) await ocuparDaLinha(existente.id, posicao.id, entrada, l.status);
           await historico(tx, existente.id, "Atualizado pela importação em lote", ator);
           continue;
         }
@@ -665,8 +687,9 @@ export async function importarMembros(linhas: LinhaImportacao[], chave: string, 
         if (await tx.membro.count({ where: { nome: { equals: l.nome, mode: "insensitive" } } })) throw new Recusa("IMPORTACAO", `${linha}: membro já cadastrado.`);
         const m = await tx.membro.create({ data: { nome: l.nome, email: l.email, status: l.status, usuarioId: await contaPorEmail(tx, l.email) } });
         await tx.vinculoIj.create({ data: { membroId: m.id, entrada } });
+        await fecharSeInativo(m.id, l.status);
         const posicao = await posicaoDaLinha();
-        if (posicao) await tx.ocupacao.create({ data: { membroId: m.id, posicaoId: posicao.id, inicio: entrada, principal: true } });
+        if (posicao) await ocuparDaLinha(m.id, posicao.id, entrada, l.status);
         await historico(tx, m.id, "Importado em lote", ator);
       }
       await tx.importacaoMembros.create({ data: { id: chave, autorId: ator.id, quantidade: linhas.length } });

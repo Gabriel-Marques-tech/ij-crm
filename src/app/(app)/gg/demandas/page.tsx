@@ -12,7 +12,8 @@ export const metadata = { title: "Demandas · G&G" };
 export default async function DemandasPage({ searchParams }: { searchParams: Promise<{ q?: string; tipo?: string; semestre?: string }> }) {
   const ator = await exigirUsuario();
   const f = await searchParams;
-  const [base, editor, todas] = await Promise.all([carregarBase(), ehEditorGG(ator), listarDemandas()]);
+  const [base, todas] = await Promise.all([carregarBase(), listarDemandas()]);
+  const editor = await ehEditorGG(ator, base);
   const semestre = semestreDe(base.hoje);
   const sem = f.semestre ?? semestre;
   const q = normalizar(f.q ?? "");

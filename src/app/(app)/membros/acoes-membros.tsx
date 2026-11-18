@@ -1,20 +1,19 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
-import { UserPlus } from "lucide-react";
 import { MensagemErro } from "@/components/erros/mensagem-erro";
 import { CAMPO } from "@/components/gg/ui";
 import { useAcao } from "@/components/gg/use-acao";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ROTULO_STATUS_MEMBRO, STATUS_MEMBRO } from "@/lib/gg/modelo";
-import { criarMembroAction, ligarContasAction } from "../actions";
+import { criarMembroAction, ligarContasAction } from "@/app/(app)/gg/actions";
 
 /**
- * Ações da lista de membros. GAB-105: pessoa que vai usar o CRM é cadastrada em Gestão → Usuários
- * (conta, membro e posição juntos); o "Novo membro" daqui segue para quem edita G&G, para membro
- * sem conta do CRM, com o atalho para a Gestão ao lado. "Ligar contas pelo e-mail" também é do editor.
+ * Ações do editor de G&G na página Membros. GAB-105/106: pessoa que vai usar o CRM é cadastrada pelo
+ * formulário único ("Cadastrar pessoa", gestor e admin; conta, membro e posição juntos), que a página
+ * mostra ao lado. O "Novo membro" daqui é o membro sem conta do CRM, para quem edita G&G.
+ * "Ligar contas pelo e-mail" também é do editor.
  */
 export function AcoesMembros({ editor, gestao }: { editor: boolean; gestao: boolean }) {
   const [aberto, setAberto] = useState(false);
@@ -38,20 +37,7 @@ export function AcoesMembros({ editor, gestao }: { editor: boolean; gestao: bool
           Novo membro
         </Button>
       ) : null}
-      {gestao ? (
-        <Link href="/gestao/usuarios" className={buttonVariants()}>
-          <UserPlus className="h-4 w-4" />
-          Cadastrar em Gestão → Usuários
-        </Link>
-      ) : (
-        <span className="text-xs text-fg-faint">
-          Novo membro é sem conta do CRM; para criar conta use{" "}
-          <Link href="/gestao/usuarios" className="underline">
-            Gestão → Usuários
-          </Link>{" "}
-          (gestor ou admin).
-        </span>
-      )}
+      {editor && !gestao ? <span className="text-xs text-fg-faint">Novo membro é sem conta do CRM; a conta é criada por gestor ou admin (Cadastrar pessoa).</span> : null}
       {aviso || erro ? (
         <div className="self-center text-sm text-fg-mute" aria-live="polite">
           {aviso}
@@ -62,13 +48,7 @@ export function AcoesMembros({ editor, gestao }: { editor: boolean; gestao: bool
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Novo membro</DialogTitle>
-            <DialogDescription>
-              Sem conta do CRM; para criar conta use{" "}
-              <Link href="/gestao/usuarios" className="underline">
-                Gestão → Usuários
-              </Link>
-              .
-            </DialogDescription>
+            <DialogDescription>Sem conta do CRM. Para quem vai usar o CRM, gestor ou admin usa Cadastrar pessoa.</DialogDescription>
           </DialogHeader>
           <form
             className="grid gap-3"

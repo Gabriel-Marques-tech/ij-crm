@@ -8,10 +8,28 @@ const CLASSE_CAMPO =
   "h-9 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:opacity-60";
 
 export const AVISO_SEM_AREA_GG =
-  "Nenhuma área do organograma está marcada como Gente & Gestão. Quem ocupar uma posição de G&G não vai conseguir editar o G&G até um admin marcar a área (G&G → Estrutura).";
+  "Nenhuma área do organograma está marcada como Gente & Gestão. Quem ocupar uma posição de G&G não vai conseguir editar o G&G até um admin marcar a área (Membros → Áreas e cargos).";
 
 /** "" no select de frente = as posições direto na área. */
 const PROPRIA_AREA = "";
+
+/**
+ * Onde a posição está na cascata (área de topo, frente ou "a própria área", e a opção), para abrir
+ * o campo já preenchido (GAB-106: cargo vago clicado no organograma). Posição fora da lista
+ * (desativada, sem cargo ativo): null, e a cascata abre vazia.
+ */
+export function localizarPosicao(areas: readonly AreaPosicoes[], posicaoId: string | null | undefined): { areaId: string; frenteId: string; opcao: OpcaoPosicao } | null {
+  if (!posicaoId) return null;
+  for (const a of areas) {
+    const direta = a.posicoes.find((p) => p.id === posicaoId);
+    if (direta) return { areaId: a.id, frenteId: PROPRIA_AREA, opcao: direta };
+    for (const f of a.frentes) {
+      const naFrente = f.posicoes.find((p) => p.id === posicaoId);
+      if (naFrente) return { areaId: a.id, frenteId: f.id, opcao: naFrente };
+    }
+  }
+  return null;
+}
 
 /**
  * "Posição na IJ" em cascata (GAB-105): Área de topo → Subárea/frente (só se a área tiver
@@ -20,6 +38,7 @@ const PROPRIA_AREA = "";
  * cargo. O formulário recebe só o id da posição (`name`, hidden; vazio = sem posição) e o pai é
  * avisado a cada mudança (`onEscolher`), para pré-preencher papel, área e cargos do CRM.
  * Sem área marcada `ehGG`, escolher uma área que parece de G&G mostra o aviso do pré-requisito.
+ * `posicaoInicial` abre a cascata já nessa posição (o pai aplica a sugestão dela por conta própria).
  */
 export function CampoPosicao({
   areas,
@@ -27,16 +46,19 @@ export function CampoPosicao({
   name = "posicaoId",
   rotulo = "Posição na IJ (opcional)",
   onEscolher,
+  posicaoInicial,
 }: {
   areas: readonly AreaPosicoes[];
   temAreaGG: boolean;
   name?: string;
   rotulo?: string;
   onEscolher?: (opcao: OpcaoPosicao | null) => void;
+  posicaoInicial?: string | null;
 }) {
-  const [areaId, setAreaId] = useState("");
-  const [frenteId, setFrenteId] = useState(PROPRIA_AREA);
-  const [posicaoId, setPosicaoId] = useState("");
+  const [inicial] = useState(() => localizarPosicao(areas, posicaoInicial));
+  const [areaId, setAreaId] = useState(inicial?.areaId ?? "");
+  const [frenteId, setFrenteId] = useState(inicial?.frenteId ?? PROPRIA_AREA);
+  const [posicaoId, setPosicaoId] = useState(inicial?.opcao.id ?? "");
 
   const area = areas.find((a) => a.id === areaId);
   const temFrentes = (area?.frentes.length ?? 0) > 0;
