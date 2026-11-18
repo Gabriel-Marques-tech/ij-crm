@@ -1165,3 +1165,112 @@ incrementa a revisão).
   uma subfase com cards sem aceite para depois do marco → `FASE_CRUZA_CONTRATO`. **Card legado parado antes do marco** que já fechou: não há atalho —
   crie a proposta, leve-a a Pronta, marque enviada e registre o aceite.
 - **Erros:** `[proposta.enviada|resposta|concluirRevisao] ref=<ref>`, `[api.proposta.pdf] ref=<ref>`.
+
+## 14. Entrar com Google
+
+Login com a conta Google para quem a gestão já cadastrou em **Gestão → Usuários**
+(sem link de convite). A senha continua funcionando: se o Google falhar, o admin
+entra por email e senha. Código: `src/lib/auth/google.ts` (OIDC + PKCE),
+`src/lib/auth/google-login.ts` (casar email, amarrar `sub`) e
+`src/lib/auth/google-rotas.ts` (rotas `/api/auth/google` e `/callback`). Não tem
+relação com o conector MCP (§12), onde o CRM é o provedor OAuth.
+
+### Variáveis
+
+| variável | valor |
+|---|---|
+| `GOOGLE_CLIENT_ID` | ID do cliente OAuth (termina em `.apps.googleusercontent.com`) |
+| `GOOGLE_CLIENT_SECRET` | segredo do mesmo cliente |
+| `GOOGLE_DOMINIOS_PERMITIDOS` | **produção: `sou.inteli.edu.br`** (decisão do dono). Lista separada por vírgula; vazio ou `*` = qualquer domínio |
+
+Sem `GOOGLE_CLIENT_ID` **ou** `GOOGLE_CLIENT_SECRET` o botão some e as rotas dão
+404 (só senha, como antes). Nos dois compose de produção
+`GOOGLE_DOMINIOS_PERMITIDOS` vazio ou ausente vira `sou.inteli.edu.br`; para abrir a
+qualquer domínio use `*`. Com a lista preenchida, o domínio do email tem de estar
+nela e, se o Google mandar `hd` (conta Workspace), ele também. Email de outro
+domínio é recusado mesmo cadastrado no CRM ("Use sua conta Google
+@sou.inteli.edu.br.").
+
+### Criar o cliente OAuth no Google Cloud
+
+1. Entre em <https://console.cloud.google.com/> **com uma conta
+   `@sou.inteli.edu.br`** se der (ver passo 3) e crie um projeto (ex.: `ij-crm`)
+   ou use um existente.
+2. **APIs e serviços → Tela de consentimento OAuth** (no console novo: **Google
+   Auth Platform → Branding/Público**). Nome do app: `CRM Inteli Júnior`; email de
+   suporte: o seu. Escopos: só os padrão `openid` e `email` (não precisa pedir
+   nenhum escopo sensível, então não há verificação do Google).
+3. **Tipo de público (User type)**:
+   - **Interno**: só aparece se o projeto pertence a uma organização Google
+     Workspace (aqui, a da Inteli, `sou.inteli.edu.br`). Só contas dessa
+     organização conseguem entrar e não há tela de "app não verificado". É a
+     opção recomendada se a conta que cria o projeto for do Workspace da Inteli.
+   - **Externo**: use se o projeto foi criado com uma conta pessoal (gmail) ou de
+     outra organização. Publique o app (**Publicar app** → "Em produção"); em modo
+     "Teste" só os usuários de teste cadastrados entram e o login expira em 7 dias.
+     Com só `openid`/`email` não precisa de verificação. O filtro de domínio fica
+     com o CRM (`GOOGLE_DOMINIOS_PERMITIDOS=sou.inteli.edu.br`).
+4. **Credenciais → Criar credenciais → ID do cliente OAuth** (ou **Clientes →
+   Criar cliente**). Tipo: **Aplicativo da Web**. Nome: `ij-crm produção`.
+5. **URIs de redirecionamento autorizados**: exatamente
+   `<APP_URL>/api/auth/google/callback`, com o mesmo esquema e host de `APP_URL`,
+   sem barra no fim. Se `APP_URL=https://crm.intelijunior.com`, a URI é
+   `https://crm.intelijunior.com/api/auth/google/callback`. Diferença de um
+   caractere = `redirect_uri_mismatch` na tela do Google. "Origens JavaScript"
+   não são necessárias. Para testar em dev, crie outro cliente (ou adicione a
+   URI) com `http://localhost:3000/api/auth/google/callback`.
+6. Copie o **ID do cliente** e a **Chave secreta**.
+
+### Ligar no Coolify
+
+1. Recurso do CRM → **Environment Variables**: adicione `GOOGLE_CLIENT_ID`,
+   `GOOGLE_CLIENT_SECRET` (marque como segredo) e
+   `GOOGLE_DOMINIOS_PERMITIDOS=sou.inteli.edu.br`. Confira que `APP_URL` é a URL
+   pública usada no passo 5.
+2. **Redeploy** (o merge traz a migration aditiva `20261118120000_login_google`,
+   que só adiciona a coluna nula `usuario.google_sub`; o `migrate` roda antes do
+   app). Backup do Postgres antes, como em todo deploy com migration.
+3. Abra `/login`: o botão **Entrar com Google** aparece acima do formulário.
+   Teste com uma conta cadastrada e outra não cadastrada.
+
+Standalone (`compose.prod.yml`): as mesmas três variáveis no `.env`
+(`.env.prod.example` já traz o domínio), URI
+`https://<APP_DOMAIN>/api/auth/google/callback`, e `scripts/deploy.sh`.
+
+### Regras e operação
+
+- **Cadastro**: a gestão cadastra nome, email, papel, área e cargos (botão
+  **Cadastrar**). Com o Google ligado, o diálogo diz que a pessoa já pode entrar e
+  o link de convite fica opcional ("Mostrar link de convite"), para quem preferir
+  senha.
+- **Conta amarrada**: o 1º login grava o `sub` do Google (`usuario.google_sub`) e
+  a etiqueta **Google** aparece na Gestão. Depois só essa conta Google entra
+  naquele usuário ("Esta conta Google não é a que está ligada ao seu usuário").
+  Trocar o email (Perfil → Email) limpa o `sub`; o próximo login com Google amarra
+  de novo. Para desamarrar à mão (pessoa recriou a conta Google):
+  `UPDATE usuario SET google_sub = NULL WHERE email = '<email>';`
+- **Convite pendente** de quem entra pelo Google é resolvido (token apagado);
+  quem nunca entrou aparece como "ainda não entrou".
+- **Desativar** o usuário bloqueia o Google também (e derruba as sessões, como
+  antes).
+- **Sessão**: igual à do login por senha (30 dias, tabela `sessao`), com
+  auditoria `[auditoria] usuario.login_google usuario=<id>`, e
+  `usuario.google_vinculado` / `usuario.convite_resolvido_google` no 1º login.
+- **Limite**: 20 inícios ou recusas por IP em 15 min (`limitadorGoogle`, em
+  memória, depende do IP do Caddy/Coolify como no §9).
+- **state/nonce/PKCE**: guardados na memória do processo por 10 min (o
+  navegador só leva o `state` num cookie httpOnly `ij_google_state`, path
+  `/api/auth/google`) e consumidos no callback (uso único). Redeploy no meio de
+  um login = "O login com Google expirou", basta clicar de novo. Exige um
+  processo só do app (é o caso hoje); com réplicas, mova isso para o banco.
+- **Erros**: a tela mostra `ref: <8 hex>`. No log:
+  - `[auth.google] ref=<ref> recusado erro=<código> motivo=<causa>` (recusa
+    esperada; email mascarado `a***@dominio`). Motivos: `desconhecido`,
+    `inativo`, `id_token_email_nao_verificado`, `sub_diferente`,
+    `sub_de_outro_usuario`, `dominio_nao_permitido hd=…`,
+    `state_invalido_ou_reutilizado`, `google_access_denied`, `limitador_*`,
+    `id_token_<erro>` (assinatura, audiência, nonce…).
+  - `[auth.google.callback] ref=<ref> ErroGoogle: token endpoint respondeu 400 (invalid_grant)`
+    (falha falando com o Google). `invalid_client` = ID/segredo errados;
+    `redirect_uri_mismatch` aparece na tela do Google, não aqui.
+  - Nunca são logados código, tokens ou o segredo.

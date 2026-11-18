@@ -116,6 +116,12 @@ services:
       ALERTA_OPS_JID: ${ALERTA_OPS_JID:-}
       # Único controle de acesso a /api/cron/* (header x-cron-secret, GAB-41).
       CRON_SECRET: ${CRON_SECRET:?defina CRON_SECRET no .env}
+      # Entrar com Google (runbook §14). Sem ID/segredo o botão some e /api/auth/google dá 404.
+      # Redirect URI no Google Cloud: https://${APP_DOMAIN}/api/auth/google/callback.
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      # Só contas Google destes domínios (vírgula). Vazio cai no padrão; "*" = qualquer domínio.
+      GOOGLE_DOMINIOS_PERMITIDOS: ${GOOGLE_DOMINIOS_PERMITIDOS:-sou.inteli.edu.br}
       # GAB-84: onde o app grava os anexos. Tem de ser o ponto de montagem do volume abaixo.
       ANEXOS_DIR: /data/anexos
     networks: [edge, rede-app, rede-whatsapp]

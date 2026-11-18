@@ -48,10 +48,34 @@ Como rede de segurança, o container de dev esconde `.claude/` (tmpfs) e
 ADMIN_NOME="Seu Nome" ADMIN_EMAIL=voce@ij.com ADMIN_SENHA='min 8 chars' pnpm admin:criar
 ```
 
-Entre em `/login`. Em **Gestão → Usuários** gere convites: o link é mostrado uma vez,
-vale 7 dias, e quem abre define a própria senha. Papéis: `VISUALIZADOR` (só lê), `VENDEDOR` e
+Entre em `/login`. Em **Gestão → Usuários** cadastre as pessoas (nome, email, papel, área,
+cargos). Com o Google configurado ([Entrar com Google](#entrar-com-google)) a pessoa já entra
+com a conta Google do email cadastrado, sem link. Sem ele, ou se ela preferir senha, use o link
+de convite: aparece uma vez, vale 7 dias, e quem abre define a própria senha. Papéis: `VISUALIZADOR` (só lê), `VENDEDOR` e
 `PROJETOS` (operam, cada um no seu lado), `GESTOR` (+ usuários, fases, import), `ADMIN` (+ config
 técnica). Sessões vivem no banco (`sessao`): desativar alguém derruba o acesso na hora.
+
+### Entrar com Google
+
+Botão **Entrar com Google** acima do formulário de senha (OIDC authorization code + PKCE,
+sem dependência nova: `src/lib/auth/google.ts`, rotas `/api/auth/google` e
+`/api/auth/google/callback`). Não confundir com `/oauth` e `src/lib/mcp/oauth.ts`, onde o CRM
+é o *provedor* OAuth do conector MCP.
+
+- **Só entra quem a gestão cadastrou**: mesmo email (sem diferenciar maiúsculas), usuário
+  ativo, email verificado pelo Google. Não há cadastro automático. Email desconhecido, inativo
+  ou não verificado volta ao `/login` com "Seu email não está cadastrado no CRM. Peça a um
+  gestor." e uma ref; o log tem a causa com a mesma ref (`grep 'ref=<ref>'`).
+- **Domínio**: `GOOGLE_DOMINIOS_PERMITIDOS` (vírgula; vazio ou `*` = qualquer domínio).
+  Confere o domínio do email e o claim `hd` quando vem. Produção: `sou.inteli.edu.br`.
+- **Conta amarrada**: o 1º login grava o `sub` do Google em `usuario.google_sub`; depois só
+  essa conta Google entra naquele usuário. Trocar o email (Perfil → email) limpa o `sub`.
+- **Convite pendente** de quem entra pelo Google é resolvido (token apagado). Na Gestão a
+  pessoa aparece com a etiqueta "Google".
+- A senha continua funcionando (saída do admin se o Google falhar).
+- Variáveis: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` (sem elas o botão some e as rotas dão
+  404) e `GOOGLE_DOMINIOS_PERMITIDOS`. Passo a passo no Google Cloud: runbook §14. URI de
+  redirecionamento: `<APP_URL>/api/auth/google/callback` (dev: `http://localhost:3000/api/auth/google/callback`).
 
 ### Papéis, áreas e cargos
 
