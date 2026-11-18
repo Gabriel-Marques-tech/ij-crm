@@ -99,10 +99,10 @@ describe("ehDaArea", () => {
 });
 
 describe("itensGerais", () => {
-  it("Gestão só para gestor e admin", () => {
-    expect(itensGerais(ADMIN)).toEqual(["painel", "gestao", "perfil"]);
-    expect(itensGerais(GESTOR_VENDAS)).toEqual(["painel", "gestao", "perfil"]);
-    for (const p of [VENDEDOR, MEMBRO_PROJETOS, VISUALIZADOR]) expect(itensGerais(p)).toEqual(["painel", "perfil"]);
+  it("Gestão só para gestor e admin; Membros para todos, visualizador inclusive (GAB-106)", () => {
+    expect(itensGerais(ADMIN)).toEqual(["painel", "membros", "gestao", "perfil"]);
+    expect(itensGerais(GESTOR_VENDAS)).toEqual(["painel", "membros", "gestao", "perfil"]);
+    for (const p of [VENDEDOR, MEMBRO_PROJETOS, VISUALIZADOR]) expect(itensGerais(p)).toEqual(["painel", "membros", "perfil"]);
   });
 });
 

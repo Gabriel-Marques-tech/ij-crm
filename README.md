@@ -118,7 +118,8 @@ tem lado; gestor e admin só têm lado se a gestão der (ex.: o diretor que tamb
   confirmar (ligar a ele e gravar o e-mail, ou criar outro); senão um novo. O resultado mostra a
   ficha ligada e as posições dela. A edição de usuário mostra as ocupações abertas e permite
   adicionar e encerrar posição. A importação do G&G completa (em vez de recusar o lote) o membro
-  com o mesmo e-mail que ainda não tem ocupação.
+  com o mesmo e-mail que ainda não tem ocupação. Linha `inativo` não deixa período aberto: fecha
+  na data da importação, como a saída do G&G (GAB-106).
 - **Permissão da posição pela Gestão**: os serviços do G&G exigem `ehEditorGG`, mas gestor e admin
   atribuem e encerram posição **pela Gestão** (variantes `*Tx` de `lib/gg/organizacao`, chamadas só
   de `lib/auth/cadastro`), com a régua da Gestão: gestor não mexe em admin (`podeAtribuirPapel`).
@@ -126,6 +127,19 @@ tem lado; gestor e admin só têm lado se a gestão der (ex.: o diretor que tamb
   G&G, como já pode dar o papel Gestor. A trava de "a si mesmo" vale só para a **própria conta**:
   ninguém atribui ou encerra posição em si mesmo pela Gestão, exceto o admin. Editor de G&G que não
   é gestor segue editando pelo G&G (inclusive "Novo membro", para quem não terá conta do CRM).
+- **Página Membros (GAB-106)**: organograma, lista de membros, ficha e estrutura são da IJ inteira e
+  saíram de Gente & Gestão para `/membros` (bloco Geral da gaveta, para todo usuário logado,
+  visualizador inclusive). Duas visões da mesma base, na URL: `?visao=organograma` (padrão; vaga
+  aparece como "Vago") e `?visao=lista` (filtros de área com as frentes, cargo, status e busca pelo
+  nome). "Cadastrar pessoa" é o formulário único acima (gestor e admin); no organograma, clicar numa
+  vaga abre esse formulário já na posição (`?cadastrar=<posição>`). "Novo membro" sem conta, menu ⋯
+  das posições, edição da ficha e **Áreas e cargos** (`/membros/estrutura`, que foi junto: a estrutura
+  é da IJ inteira; o atalho aparece só para quem edita) seguem com o editor de G&G e o admin. A ficha
+  (`/membros/[id]`) inteira, com e-mail, conta do CRM, períodos, projetos, demandas, faltas e
+  histórico, é de quem edita G&G, da gestão e da própria pessoa; os demais veem nome, área, cargo,
+  liderança e status, e a busca da lista não olha o e-mail para eles. `/gg/membros`,
+  `/gg/membros/[id]`, `/gg/organograma` e `/gg/estrutura` redirecionam (levando filtros); G&G fica
+  com demandas, agenda, metas, processos e importação.
 
 ## Como funciona a conexão com o WhatsApp
 

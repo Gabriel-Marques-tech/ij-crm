@@ -160,7 +160,7 @@ describe("Gaveta", () => {
     expect(within(areas).getByRole("link", { name: /Vendas/ })).toHaveAttribute("aria-current", "true");
     expect(within(areas).getByRole("link", { name: "Projetos" })).toHaveAttribute("href", "/kanban?quadro=projetos");
     const geral = within(d).getByRole("navigation", { name: "Geral" });
-    expect(within(geral).getAllByRole("link").map((l) => l.textContent)).toEqual(["Painel", "Meu perfil"]);
+    expect(within(geral).getAllByRole("link").map((l) => l.textContent)).toEqual(["Painel", "Membros", "Meu perfil"]);
   });
 
   it("gestor e admin veem Gestão", async () => {

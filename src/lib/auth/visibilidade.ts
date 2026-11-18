@@ -14,7 +14,7 @@ import { podeEscrever, temPapelMinimo } from "./papeis";
  */
 
 export type ItemDeArea = "semana" | "kanban" | "propostas" | "tabela" | "ranking" | "contatos" | "empresas" | "calendario";
-export type ItemGeral = "painel" | "gestao" | "perfil";
+export type ItemGeral = "painel" | "membros" | "gestao" | "perfil";
 
 const ITENS_PROPRIOS: Record<Area, readonly ItemDeArea[]> = {
   VENDAS: ["semana", "kanban", "propostas", "tabela", "ranking"],
@@ -51,9 +51,9 @@ export function podeVerItemEmAlgumaArea(p: PessoaComLado, item: ItemDeArea): boo
   return AREAS.some((area) => podeVerItem(p, area, item));
 }
 
-/** Bloco Geral da gaveta. */
+/** Bloco Geral da gaveta. Membros (GAB-106) é da IJ inteira: todo usuário logado vê, inclusive o visualizador. */
 export function itensGerais(p: Pick<PessoaComLado, "papel">): ItemGeral[] {
-  return temPapelMinimo(p.papel, "GESTOR") ? ["painel", "gestao", "perfil"] : ["painel", "perfil"];
+  return temPapelMinimo(p.papel, "GESTOR") ? ["painel", "membros", "gestao", "perfil"] : ["painel", "membros", "perfil"];
 }
 
 export type PessoaComEntrada = PessoaComLado & { areaEntrada: AreaEntrada | null };

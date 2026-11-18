@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import type { Derivado } from "@/lib/gg/modelo";
 import { cargosDe, ROTULO_AREA, ROTULO_CARGO } from "@/lib/auth/areas";
 import { ROTULO_STATUS_MEMBRO, STATUS_MEMBRO } from "@/lib/gg/modelo";
-import { aplicarNoCrmAction, editarMembroAction, registrarEntradaAction, registrarSaidaAction } from "../../actions";
+import { aplicarNoCrmAction, editarMembroAction, registrarEntradaAction, registrarSaidaAction } from "@/app/(app)/gg/actions";
 
 export function EditarMembro({ membro }: { membro: { id: string; nome: string; email: string | null; status: StatusMembro } }) {
   const [aberto, setAberto] = useState(false);

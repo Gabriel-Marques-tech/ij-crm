@@ -10,20 +10,43 @@ import { Label } from "@/components/ui/label";
 import type { AreaPosicoes, FichaLigada, OpcaoPosicao } from "@/lib/auth/cadastro";
 import { podeAtribuirPapel } from "@/lib/auth/papeis";
 import { criarConviteAction } from "./actions";
-import { CampoPosicao } from "./campo-posicao";
+import { CampoPosicao, localizarPosicao } from "./campo-posicao";
 import { CamposPapelLado } from "./campos-lado";
 
 type Posicoes = { areas: readonly AreaPosicoes[]; temAreaGG: boolean };
 const SEM_POSICOES: Posicoes = { areas: [], temAreaGG: false };
 
-export function ConvidarDialog({ papelAtor, googleAtivo = false, posicoes = SEM_POSICOES }: { papelAtor: Papel; googleAtivo?: boolean; posicoes?: Posicoes }) {
-  const [aberto, setAberto] = useState(false);
+/**
+ * Formulário único de cadastro (GAB-105), usado na Gestão → Usuários e na página Membros (GAB-106).
+ * Sem `aberto`, o diálogo tem o próprio botão e estado. Com `aberto`/`onAbertoChange`, quem chama
+ * controla (o organograma abre pelo cargo vago, com `posicaoInicial`).
+ */
+export function ConvidarDialog({
+  papelAtor,
+  googleAtivo = false,
+  posicoes = SEM_POSICOES,
+  posicaoInicial = null,
+  aberto: abertoControlado,
+  onAbertoChange,
+  rotuloGatilho,
+}: {
+  papelAtor: Papel;
+  googleAtivo?: boolean;
+  posicoes?: Posicoes;
+  posicaoInicial?: string | null;
+  aberto?: boolean;
+  onAbertoChange?: (aberto: boolean) => void;
+  rotuloGatilho?: string;
+}) {
+  const [abertoProprio, setAbertoProprio] = useState(false);
+  const aberto = abertoControlado ?? abertoProprio;
   // Remonta o corpo a cada abertura: o estado do useActionState (link gerado,
   // erro) não vaza para o próximo convite.
   const [iteracao, setIteracao] = useState(0);
 
   function mudarAberto(v: boolean) {
-    setAberto(v);
+    setAbertoProprio(v);
+    onAbertoChange?.(v);
     if (!v) setIteracao((i) => i + 1);
   }
 
@@ -31,7 +54,7 @@ export function ConvidarDialog({ papelAtor, googleAtivo = false, posicoes = SEM_
     <Dialog open={aberto} onOpenChange={mudarAberto}>
       <DialogTrigger render={<Button />}>
         <UserPlus className="h-4 w-4" />
-        {googleAtivo ? "Cadastrar" : "Convidar"}
+        {rotuloGatilho ?? (googleAtivo ? "Cadastrar" : "Convidar")}
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
@@ -42,7 +65,7 @@ export function ConvidarDialog({ papelAtor, googleAtivo = false, posicoes = SEM_
               : "Você recebe um link para mandar por WhatsApp ou email. Vale 7 dias."}
           </DialogDescription>
         </DialogHeader>
-        <CorpoConvite key={iteracao} papelAtor={papelAtor} googleAtivo={googleAtivo} posicoes={posicoes} onFechar={() => mudarAberto(false)} />
+        <CorpoConvite key={`${iteracao}-${posicaoInicial ?? ""}`} papelAtor={papelAtor} googleAtivo={googleAtivo} posicoes={posicoes} posicaoInicial={posicaoInicial} onFechar={() => mudarAberto(false)} />
       </DialogContent>
     </Dialog>
   );
@@ -51,16 +74,39 @@ export function ConvidarDialog({ papelAtor, googleAtivo = false, posicoes = SEM_
 type Lado = { papel: Papel; area: Area | null; cargos: readonly Cargo[] };
 const LADO_PADRAO: Lado = { papel: "VENDEDOR", area: null, cargos: [] };
 
-export function CorpoConvite({ papelAtor, googleAtivo, posicoes = SEM_POSICOES, onFechar }: { papelAtor: Papel; googleAtivo: boolean; posicoes?: Posicoes; onFechar: () => void }) {
+/** Papel/área/cargos que a posição sugere, se quem cadastra pode dar esse papel; senão a nota explica. */
+function sugestaoDaPosicao(papelAtor: Papel, o: OpcaoPosicao): { lado: Lado | null; nota: string } {
+  if (!podeAtribuirPapel(papelAtor, o.sugestao.papel)) return { lado: null, nota: "O organograma sugere um papel que você não pode atribuir: escolha o papel abaixo." };
+  return { lado: o.sugestao, nota: "Papel, área e cargo preenchidos pela posição. Ajuste se precisar." };
+}
+
+export function CorpoConvite({
+  papelAtor,
+  googleAtivo,
+  posicoes = SEM_POSICOES,
+  posicaoInicial = null,
+  onFechar,
+}: {
+  papelAtor: Papel;
+  googleAtivo: boolean;
+  posicoes?: Posicoes;
+  posicaoInicial?: string | null;
+  onFechar: () => void;
+}) {
   const [estado, action, pendente] = useActionState(criarConviteAction, undefined);
   // Envio por onSubmit (não `<form action>`): o React não limpa o form depois da action, então o que a
   // tela mostra (cascata, papel, campos) é sempre o que vai no próximo envio, inclusive na confirmação.
   const formRef = useRef<HTMLFormElement>(null);
   // A posição pré-preenche papel/área/cargos (`derivarDoOrganograma`, calculado no servidor); quem
   // cadastra ajusta depois. Remontar os campos (key) aplica o novo valor inicial; o servidor reaplica a régua.
-  const [lado, setLado] = useState<Lado>(LADO_PADRAO);
+  // Aberto por um cargo vago (GAB-106): a posição já vem na cascata e aplica a sugestão como se tivesse sido escolhida.
+  const [inicial] = useState(() => {
+    const o = localizarPosicao(posicoes.areas, posicaoInicial)?.opcao;
+    return o ? sugestaoDaPosicao(papelAtor, o) : null;
+  });
+  const [lado, setLado] = useState<Lado>(inicial?.lado ?? LADO_PADRAO);
   const [versao, setVersao] = useState(0);
-  const [nota, setNota] = useState<string | null>(null);
+  const [nota, setNota] = useState<string | null>(inicial?.nota ?? null);
 
   function enviar(extra?: [campo: "ligarMembroId" | "criarMembroNovo", valor: string]) {
     const form = formRef.current;
@@ -75,13 +121,11 @@ export function CorpoConvite({ papelAtor, googleAtivo, posicoes = SEM_POSICOES, 
   function escolherPosicao(o: OpcaoPosicao | null) {
     // Sem posição (ou cargo ainda por escolher): o que já está nos campos fica como está.
     if (!o) return setNota(null);
-    if (!podeAtribuirPapel(papelAtor, o.sugestao.papel)) {
-      setNota("O organograma sugere um papel que você não pode atribuir: escolha o papel abaixo.");
-      return;
-    }
-    setLado(o.sugestao);
+    const s = sugestaoDaPosicao(papelAtor, o);
+    setNota(s.nota);
+    if (!s.lado) return;
+    setLado(s.lado);
     setVersao((v) => v + 1);
-    setNota("Papel, área e cargo preenchidos pela posição. Ajuste se precisar.");
   }
 
   if (estado?.link && googleAtivo) return <CadastroComGoogle email={estado.email} link={estado.link} expiraEm={estado.expiraEm} fichaLigada={estado.fichaLigada} onFechar={onFechar} />;
@@ -115,7 +159,7 @@ export function CorpoConvite({ papelAtor, googleAtivo, posicoes = SEM_POSICOES, 
         <Label htmlFor="telefone">WhatsApp (DDD + número)</Label>
         <Input id="telefone" name="telefone" placeholder="11 99999-8888" inputMode="tel" />
       </div>
-      <CampoPosicao areas={posicoes.areas} temAreaGG={posicoes.temAreaGG} onEscolher={escolherPosicao} />
+      <CampoPosicao areas={posicoes.areas} temAreaGG={posicoes.temAreaGG} onEscolher={escolherPosicao} posicaoInicial={posicaoInicial} />
       {nota ? <p className="-mt-2 text-xs text-fg-faint">{nota}</p> : null}
       <CamposPapelLado key={versao} papelAtor={papelAtor} papel={lado.papel} area={lado.area} cargos={lado.cargos} />
       {homonimos.length ? (
