@@ -11,7 +11,7 @@ const { exigirPapel } = vi.hoisted(() => ({ exigirPapel: vi.fn() }));
 vi.mock("@/lib/auth/atual", () => ({ exigirPapel }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
-const { alternarAtivoAction, criarConviteAction, editarUsuarioAction } = await import("./actions");
+const { adicionarPosicaoUsuarioAction, alternarAtivoAction, criarConviteAction, editarUsuarioAction, encerrarOcupacaoUsuarioAction } = await import("./actions");
 
 const db = dbTeste();
 
@@ -229,5 +229,69 @@ describe("área de entrada (GAB-97)", () => {
       expect(logs[1]).toContain("entrada=nenhuma");
       info.mockRestore();
     });
+  });
+});
+
+describe("cadastro único pela action (GAB-105)", () => {
+  beforeEach(async () => {
+    await limparBanco(["historico_org", "ocupacao", "vinculo_ij", "membro", "posicao", "cargo_org", "area_org"]);
+    await db.areaOrg.create({ data: { id: "gg", nome: "Gente & Gestão", ehGG: true } });
+    await db.cargoOrg.create({ data: { id: "ana", nome: "Analista", categoria: "MEMBRO" } });
+    await db.posicao.create({ data: { id: "p_agg", nome: "Analista de G&G", areaId: "gg", cargoId: "ana" } });
+  });
+
+  async function gestor() {
+    const g = await db.usuario.create({ data: { nome: "Gestor", email: "gestor@ij.test", papel: "GESTOR" } });
+    exigirPapel.mockResolvedValue({ id: g.id, nome: g.nome, papel: "GESTOR" });
+    return g;
+  }
+
+  it("FormData com posicaoId cria conta, membro e ocupação; sem posição (campo vazio) cria só a conta", async () => {
+    await gestor();
+    expect(await criarConviteAction(undefined, form({ nome: "Gabi", email: "gabi@ij.test", papel: "VISUALIZADOR", ladoNoForm: "1", area: "", posicaoId: "p_agg" }))).toHaveProperty("link");
+    const u = await db.usuario.findUniqueOrThrow({ where: { email: "gabi@ij.test" }, include: { membro: { include: { ocupacoes: true } } } });
+    expect(u.membro?.ocupacoes.map((o) => o.posicaoId)).toEqual(["p_agg"]);
+    expect(await criarConviteAction(undefined, form({ nome: "Nina", email: "nina@ij.test", papel: "VENDEDOR", ladoNoForm: "1", area: "VENDAS", posicaoId: "" }))).toHaveProperty("link");
+    const n = await db.usuario.findUniqueOrThrow({ where: { email: "nina@ij.test" }, include: { membro: true } });
+    expect(n.membro).toBeNull();
+  });
+
+  it("membro ligado a outra conta: mensagem clara e nada criado", async () => {
+    const g = await gestor();
+    await db.membro.create({ data: { nome: "Ana", email: "ana@ij.test", usuarioId: g.id } });
+    const r = await criarConviteAction(undefined, form({ nome: "Ana", email: "ana@ij.test", papel: "VENDEDOR", posicaoId: "p_agg" }));
+    expect(r?.erro).toMatch(/ligado a outra conta/);
+    expect(await db.usuario.findUnique({ where: { email: "ana@ij.test" } })).toBeNull();
+  });
+
+  it("homônimo sem e-mail: a action pede confirmação e, com ligarMembroId no form, liga e mostra a ficha", async () => {
+    await gestor();
+    const ana = await db.membro.create({ data: { nome: "Ana Souza" } });
+    const campos = { nome: "Ana Souza", email: "ana@ij.test", papel: "VISUALIZADOR", ladoNoForm: "1", area: "", posicaoId: "p_agg" };
+    expect(await criarConviteAction(undefined, form(campos))).toEqual({ erro: 'Já existe "Ana Souza" sem e-mail no G&G. É a mesma pessoa?', homonimos: [{ id: ana.id, nome: "Ana Souza" }] });
+    const r = await criarConviteAction(undefined, form({ ...campos, ligarMembroId: ana.id }));
+    expect(r).toMatchObject({ fichaLigada: { nome: "Ana Souza", posicoes: ["Gente & Gestão · Analista"] } });
+    expect(r).toHaveProperty("link");
+  });
+
+  it("ligarMembroId forjado (membro que não é homônimo) é recusado no cadastro e na edição", async () => {
+    await gestor();
+    const carlos = await db.membro.create({ data: { nome: "Carlos Diretor" } });
+    const r = await criarConviteAction(undefined, form({ nome: "Zé", email: "ze@ij.test", papel: "VISUALIZADOR", ladoNoForm: "1", area: "", posicaoId: "p_agg", ligarMembroId: carlos.id }));
+    expect(r?.erro).toMatch(/não é um homônimo/);
+    expect(await db.usuario.findUnique({ where: { email: "ze@ij.test" } })).toBeNull();
+    const u = await db.usuario.create({ data: { nome: "Edu", email: "edu@ij.test", papel: "VISUALIZADOR" } });
+    expect((await adicionarPosicaoUsuarioAction(u.id, "p_agg", { ligarMembroId: carlos.id }))?.erro).toMatch(/não é um homônimo/);
+    expect(await db.membro.findUniqueOrThrow({ where: { id: carlos.id } })).toMatchObject({ usuarioId: null, email: null });
+  });
+
+  it("edição: adiciona e encerra posição pela action", async () => {
+    await gestor();
+    const u = await db.usuario.create({ data: { nome: "Edu", email: "edu@ij.test", papel: "VISUALIZADOR" } });
+    expect(await adicionarPosicaoUsuarioAction(u.id, "p_agg")).toEqual({ ok: true });
+    const o = await db.ocupacao.findFirstOrThrow({ where: { membro: { usuarioId: u.id } } });
+    expect(await encerrarOcupacaoUsuarioAction(u.id, o.id)).toEqual({ ok: true });
+    expect((await db.ocupacao.findUniqueOrThrow({ where: { id: o.id } })).fim).not.toBeNull();
+    expect(await encerrarOcupacaoUsuarioAction(u.id, o.id)).toEqual({ erro: expect.stringMatching(/não encontrada/) });
   });
 });

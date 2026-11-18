@@ -107,6 +107,25 @@ tem lado; gestor e admin só têm lado se a gestão der (ex.: o diretor que tamb
 - A ponte Gente & Gestão → conta (`derivarDoOrganograma`) sugere os cargos pelo organograma: cargo
   com `eh_gp` em área de Projetos → PM, em Vendas → GP; cargo PO → PO; diretoria em área de Projetos
   → Gestor + Diretor.
+- **Cadastro único (GAB-105)**: quem vai usar o CRM é cadastrado em Gestão → Usuários. O campo
+  opcional "Posição na IJ" é uma cascata (área de topo → subárea/frente → cargo) das posições ativas
+  do organograma e pré-preenche papel, área e cargos com `derivarDoOrganograma` (quem cadastra
+  ajusta; o servidor reaplica `podeAtribuirPapel` e `resolverAreaCargos`). Sem posição, o cadastro
+  cria só a conta. Com posição, cria numa transação a conta, o membro do G&G e a ocupação (início
+  hoje, principal; a troca de principal vai para o histórico). O membro é o que tem o mesmo e-mail
+  (igualdade exata do e-mail normalizado; ligado a outra conta = recusa; INATIVO = reingresso na
+  mesma transação) ou, havendo membro sem e-mail e sem conta com o mesmo nome, o que a tela
+  confirmar (ligar a ele e gravar o e-mail, ou criar outro); senão um novo. O resultado mostra a
+  ficha ligada e as posições dela. A edição de usuário mostra as ocupações abertas e permite
+  adicionar e encerrar posição. A importação do G&G completa (em vez de recusar o lote) o membro
+  com o mesmo e-mail que ainda não tem ocupação.
+- **Permissão da posição pela Gestão**: os serviços do G&G exigem `ehEditorGG`, mas gestor e admin
+  atribuem e encerram posição **pela Gestão** (variantes `*Tx` de `lib/gg/organizacao`, chamadas só
+  de `lib/auth/cadastro`), com a régua da Gestão: gestor não mexe em admin (`podeAtribuirPapel`).
+  Isso inclui posição de G&G: um gestor pode dar a outra pessoa uma posição que a torna editora de
+  G&G, como já pode dar o papel Gestor. A trava de "a si mesmo" vale só para a **própria conta**:
+  ninguém atribui ou encerra posição em si mesmo pela Gestão, exceto o admin. Editor de G&G que não
+  é gestor segue editando pelo G&G (inclusive "Novo membro", para quem não terá conta do CRM).
 
 ## Como funciona a conexão com o WhatsApp
 

@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import type { Derivado } from "@/lib/gg/modelo";
 import { cargosDe, ROTULO_AREA, ROTULO_CARGO } from "@/lib/auth/areas";
 import { ROTULO_STATUS_MEMBRO, STATUS_MEMBRO } from "@/lib/gg/modelo";
-import { aplicarNoCrmAction, convidarParaCrmAction, editarMembroAction, registrarEntradaAction, registrarSaidaAction } from "../../actions";
+import { aplicarNoCrmAction, editarMembroAction, registrarEntradaAction, registrarSaidaAction } from "../../actions";
 
 export function EditarMembro({ membro }: { membro: { id: string; nome: string; email: string | null; status: StatusMembro } }) {
   const [aberto, setAberto] = useState(false);
@@ -108,7 +108,6 @@ export function PonteCrm({
   desligado: { cards: number; tarefas: number } | null;
 }) {
   const { pendente, erro, rodar } = useAcao();
-  const [link, setLink] = useState<{ url: string; google: boolean } | null>(null);
   // A conta é descrita pelos cargos efetivos (`cargosDe`): GP legado em Projetos aparece como PM, igual à tabela de usuários.
   const descrever = (papel: Papel, area: Area | null, cargos: readonly Cargo[]) => `papel ${papel} · ${area ? `área ${ROTULO_AREA[area]}` : "sem área"}${cargos.length ? ` · ${cargos.map((c) => ROTULO_CARGO[c]).join(", ")}` : ""}`;
   const sugestao = d.conflito ? `duas áreas (${d.conflito.map((a) => ROTULO_AREA[a]).join(" e ")}): marque a posição principal` : d.papel ? descrever(d.papel, d.area, d.cargos) : "sem posição: nada a sugerir";
@@ -135,26 +134,15 @@ export function PonteCrm({
             Aplicar o que o organograma diz
           </Button>
         ) : null}
-        {!conta && temEmail && podeMudarConta ? (
-          <Button size="sm" disabled={pendente} onClick={() => rodar(() => convidarParaCrmAction(membroId), "convidar para o CRM", (r) => setLink(r && "link" in r && r.link ? { url: r.link, google: r.google === true } : null))}>
-            Convidar para o CRM
-          </Button>
+        {!conta && podeMudarConta ? (
+          // GAB-105: a conta nasce em Gestão → Usuários; com o mesmo e-mail, o cadastro liga este membro.
+          <Link href="/gestao/usuarios" className="text-xs underline">
+            {temEmail ? "Cadastrar a conta em Gestão → Usuários com este e-mail (o membro é ligado sozinho)" : "Ponha o e-mail neste membro e cadastre a conta em Gestão → Usuários com ele (sem e-mail, o cadastro cria outro membro)"}
+          </Link>
         ) : null}
-        {(difere || (!conta && temEmail)) && !podeMudarConta ? <span className="text-xs text-fg-faint">Quem é da gestão aplica na conta.</span> : null}
+        {difere && !podeMudarConta ? <span className="text-xs text-fg-faint">Quem é da gestão aplica na conta.</span> : null}
+        {!conta && !podeMudarConta ? <span className="text-xs text-fg-faint">A conta do CRM é cadastrada pela gestão em Gestão → Usuários, com o mesmo e-mail.</span> : null}
       </div>
-      {link ? (
-        <p className="text-xs">
-          {link.google ? (
-            <>
-              Conta criada: a pessoa já pode entrar com <b>Entrar com Google</b> usando este e-mail, sem link. Se preferir senha, o link do convite (mostrado uma vez; deixa de valer depois do
-              primeiro login com Google):{" "}
-            </>
-          ) : (
-            "Link do convite (mostrado uma vez): "
-          )}
-          <code className="select-all break-all font-mono">{link.url}</code>
-        </p>
-      ) : null}
       {desligado && conta?.ativo ? (
         <p className="text-xs text-warn">
           Desligado com conta ativa: responsável por {desligado.cards} card(s) e {desligado.tarefas} tarefa(s) abertas. Repasse e desative em{" "}

@@ -9,6 +9,8 @@ const acoes = vi.hoisted(() => ({
   alternarAtivoAction: vi.fn(),
   editarUsuarioAction: vi.fn(),
   criarConviteAction: vi.fn(),
+  adicionarPosicaoUsuarioAction: vi.fn(),
+  encerrarOcupacaoUsuarioAction: vi.fn(),
 }));
 vi.mock("./actions", () => acoes);
 vi.mock("@/components/avatar", () => ({ Avatar: () => null }));

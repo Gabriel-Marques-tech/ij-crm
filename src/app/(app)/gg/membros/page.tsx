@@ -5,6 +5,7 @@ import { PageHeader } from "@/components/shell/page-header";
 import { exigirUsuario } from "@/lib/auth/atual";
 import { db } from "@/lib/db";
 import { ROTULO_CARGO } from "@/lib/auth/areas";
+import { temPapelMinimo } from "@/lib/auth/papeis";
 import { contaDifere, descendentes, normalizar, ROTULO_STATUS_MEMBRO, STATUS_MEMBRO } from "@/lib/gg/modelo";
 import { carregarBase, derivadoDe, ehEditorGG, postosDe } from "@/lib/gg/organizacao";
 import { cargaPorPessoa } from "@/lib/projetos/equipe";
@@ -19,6 +20,7 @@ export default async function MembrosPage({ searchParams }: { searchParams: Prom
   const ator = await exigirUsuario();
   const f = await searchParams;
   const [base, editor, contas] = await Promise.all([carregarBase(), ehEditorGG(ator), db.usuario.findMany({ select: { id: true, papel: true, area: true, cargos: true, ativo: true } })]);
+  const gestao = temPapelMinimo(ator.papel, "GESTOR");
   const contaPorId = new Map(contas.map((c) => [c.id, c]));
   const carga = await cargaPorPessoa(base.membros.flatMap((m) => (m.usuarioId ? [m.usuarioId] : [])));
   const alcance = f.area ? descendentes(base.areas, f.area) : null;
@@ -37,7 +39,9 @@ export default async function MembrosPage({ searchParams }: { searchParams: Prom
 
   return (
     <div className="space-y-5">
-      <PageHeader eyebrow="gente & gestão · membros" title="Membros" description="Toda pessoa da IJ, com ou sem conta no CRM. A área e o papel no CRM saem do organograma." actions={editor ? <AcoesMembros /> : null} />
+      <PageHeader eyebrow="gente & gestão · membros" title="Membros" description="Toda pessoa da IJ, com ou sem conta no CRM. A área e o papel no CRM saem do organograma. Quem vai usar o CRM é cadastrado em Gestão → Usuários, que cria a conta, o membro e a posição juntos."
+        actions={editor || gestao ? <AcoesMembros editor={editor} gestao={gestao} /> : null}
+      />
       <Tiles>
         <Tile rotulo="Membros ativos" valor={ativos.length} />
         <Tile rotulo="Com conta no CRM" valor={comConta} nota={`${base.membros.length - comConta} sem conta`} />

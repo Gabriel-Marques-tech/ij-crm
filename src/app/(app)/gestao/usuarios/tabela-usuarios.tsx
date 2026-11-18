@@ -16,6 +16,8 @@ import { ROTULO_PAPEL, podeAtribuirPapel, podeGerarRedefinicao } from "@/lib/aut
 import { alternarAtivoAction, desligarGoogleAction, editarUsuarioAction, gerarLinkRedefinicaoAction, reemitirConviteAction, type EstadoConvite } from "./actions";
 import { LinkGerado } from "./convidar-dialog";
 import { CamposPapelLado } from "./campos-lado";
+import { PosicoesUsuario } from "./posicoes-usuario";
+import type { AreaPosicoes, OcupacaoDaConta } from "@/lib/auth/cadastro";
 
 type Usuario = {
   id: string;
@@ -37,10 +39,26 @@ type Usuario = {
 };
 
 type Ator = { id: string; papel: Papel };
+type Posicoes = { areas: readonly AreaPosicoes[]; temAreaGG: boolean };
+const SEM_POSICOES: Posicoes = { areas: [], temAreaGG: false };
 
-
-export function TabelaUsuarios({ usuarios, ator, googleAtivo = false }: { usuarios: Usuario[]; ator: Ator; googleAtivo?: boolean }) {
-  const [editando, setEditando] = useState<Usuario | null>(null);
+export function TabelaUsuarios({
+  usuarios,
+  ator,
+  googleAtivo = false,
+  posicoes = SEM_POSICOES,
+  ocupacoes = {},
+}: {
+  usuarios: Usuario[];
+  ator: Ator;
+  googleAtivo?: boolean;
+  posicoes?: Posicoes;
+  ocupacoes?: Record<string, readonly OcupacaoDaConta[]>;
+}) {
+  // Pelo id: depois de atribuir/encerrar posição a página revalida e o diálogo mostra os dados novos.
+  const [editandoId, setEditandoId] = useState<string | null>(null);
+  const editando = editandoId ? (usuarios.find((u) => u.id === editandoId) ?? null) : null;
+  const setEditando = (u: Usuario | null) => setEditandoId(u?.id ?? null);
   const [reemitido, setReemitido] = useState<EstadoConvite>(undefined);
   const [redefinicao, setRedefinicao] = useState<(EstadoConvite & { nome?: string }) | undefined>(undefined);
   const [erroLinha, setErroLinha] = useState<string | null>(null);
@@ -246,14 +264,26 @@ export function TabelaUsuarios({ usuarios, ator, googleAtivo = false }: { usuari
           <DialogHeader>
             <DialogTitle>Editar {editando?.nome}</DialogTitle>
           </DialogHeader>
-          {editando ? <EditarForm usuario={editando} ator={ator} onSalvo={() => setEditando(null)} /> : null}
+          {editando ? <EditarForm usuario={editando} ator={ator} posicoes={posicoes} ocupacoes={ocupacoes[editando.id] ?? []} onSalvo={() => setEditando(null)} /> : null}
         </DialogContent>
       </Dialog>
     </>
   );
 }
 
-function EditarForm({ usuario, ator, onSalvo }: { usuario: Usuario; ator: Ator; onSalvo: () => void }) {
+function EditarForm({
+  usuario,
+  ator,
+  posicoes,
+  ocupacoes,
+  onSalvo,
+}: {
+  usuario: Usuario;
+  ator: Ator;
+  posicoes: Posicoes;
+  ocupacoes: readonly OcupacaoDaConta[];
+  onSalvo: () => void;
+}) {
   const [estado, action, pendente] = useActionState(async (prev: Parameters<typeof editarUsuarioAction>[0], form: FormData) => {
     const r = await editarUsuarioAction(prev, form);
     if (r?.ok) onSalvo();
@@ -273,6 +303,8 @@ function EditarForm({ usuario, ator, onSalvo }: { usuario: Usuario; ator: Ator; 
         <Input id="telefone" name="telefone" defaultValue={usuario.telefoneWhatsapp ?? ""} placeholder="11 99999-8888" inputMode="tel" />
         <p className="text-xs text-fg-faint">Deixe vazio para remover. É este número que liga a pessoa às mensagens do grupo.</p>
       </div>
+      {/* Posição dá poder como o cargo: na própria conta, só o admin (o servidor reaplica). */}
+      {!souEu || ator.papel === "ADMIN" ? <PosicoesUsuario usuarioId={usuario.id} ocupacoes={ocupacoes} areas={posicoes.areas} temAreaGG={posicoes.temAreaGG} /> : null}
       {!souEu ? (
         <CamposPapelLado papelAtor={ator.papel} papel={usuario.papel} area={usuario.area} cargos={usuario.cargos} areaEntrada={usuario.areaEntrada} />
       ) : ator.papel === "ADMIN" ? (

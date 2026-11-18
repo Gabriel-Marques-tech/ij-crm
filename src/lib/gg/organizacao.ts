@@ -7,6 +7,12 @@
  * Quem edita: admin e quem ocupa hoje uma posição na área G&G (ou nas frentes dela).
  * Quem lê: todo usuário ativo do CRM (decisão §3.1). Mudar a conta do CRM (convidar,
  * aplicar papel) segue as regras de Gestão (`auth/usuarios`): só gestor/admin.
+ *
+ * Cadastro único (GAB-105): Gestão → Usuários cria a conta, o membro e a ocupação numa
+ * transação só (`auth/cadastro`), pelas variantes `*Tx` daqui, que NÃO conferem `ehEditorGG`.
+ * Regra: gestor e admin atribuem e encerram posição pela Gestão (com a régua de
+ * `podeAtribuirPapel` sobre a conta da pessoa), e só por lá; quem chama as `*Tx` é quem
+ * confere isso. Editor de G&G que não é gestor segue editando pelo G&G, como antes.
  */
 import type { Area, CategoriaCargo, Papel, Prisma, StatusMembro, TipoAreaOrg } from "@prisma/client";
 import { diaDoPrazo, instanteDoPrazo } from "@/lib/calendario/semana";
@@ -29,7 +35,11 @@ export type ErroOrg =
   | "MOTIVO_OBRIGATORIO"
   | "CICLO"
   | "COM_HISTORICO"
-  | "IMPORTACAO";
+  | "IMPORTACAO"
+  | "MEMBRO_DE_OUTRA_CONTA"
+  | "MEMBRO_AMBIGUO"
+  | "MEMBRO_MESMO_NOME"
+  | "MEMBRO_EMAIL_EM_USO";
 export const MENSAGEM_ERRO_ORG: Record<ErroOrg, string> = {
   SEM_PERMISSAO: "Só a área de Gente & Gestão e a administração editam a estrutura.",
   NAO_ENCONTRADO: "Registro não encontrado.",
@@ -42,10 +52,14 @@ export const MENSAGEM_ERRO_ORG: Record<ErroOrg, string> = {
   CICLO: "Essa liderança criaria um ciclo no organograma.",
   COM_HISTORICO: "Posição com histórico não muda de área nem de cargo: crie outra posição.",
   IMPORTACAO: "Importação recusada.",
+  MEMBRO_DE_OUTRA_CONTA: "Já existe um membro do G&G com esse e-mail ligado a outra conta do CRM. Confira o membro no G&G antes de cadastrar.",
+  MEMBRO_AMBIGUO: "Há mais de um membro do G&G com esse e-mail. Resolva a duplicidade no G&G antes de cadastrar.",
+  MEMBRO_MESMO_NOME: "Já existe um membro com esse nome e sem e-mail no G&G. Confirme se é a mesma pessoa.",
+  MEMBRO_EMAIL_EM_USO: "Já existe um membro do G&G com esse e-mail (em outra grafia). Confira o membro no G&G antes de cadastrar.",
 };
 export type ResultadoOrg<T = object> = ({ ok: true } & T) | { ok: false; erro: ErroOrg; detalhe?: string };
 
-class Recusa extends Error {
+export class Recusa extends Error {
   constructor(
     readonly erro: ErroOrg,
     readonly detalhe?: string,
@@ -245,6 +259,110 @@ export async function editarMembro(id: string, d: DadosMembro, ator: AtorGG): Pr
   }
 }
 
+/** Membros sem e-mail e sem conta com o mesmo nome de quem está sendo cadastrado: a tela pergunta qual (ou nenhum). */
+export class RecusaHomonimo extends Recusa {
+  constructor(readonly membros: { id: string; nome: string }[]) {
+    super("MEMBRO_MESMO_NOME");
+  }
+}
+
+/** Chave de homônimo: sem acento e caixa, espaços juntados. */
+const chaveNome = (nome: string) => normalizar(nome).replace(/\s+/g, " ");
+
+/** Membros sem e-mail e sem conta com o mesmo nome (candidatos a "é a mesma pessoa"). */
+async function homonimos(tx: Tx, nome: string) {
+  const chave = chaveNome(nome);
+  return (await tx.membro.findMany({ where: { email: null, usuarioId: null }, select: { id: true, nome: true }, orderBy: { nome: "asc" } })).filter((m) => chaveNome(m.nome) === chave);
+}
+
+/**
+ * Quem saiu da IJ e volta pela Gestão: reingresso na mesma transação, como `registrarEntrada`
+ * (novo período desde hoje, ATIVO). As ocupações que ficaram abertas e começaram antes da saída
+ * são encerradas na data da saída (a saída não fecha nada sozinha, como no G&G), com histórico.
+ */
+async function reingressarSeInativo(tx: Tx, membroId: string, ator: AtorGG) {
+  const m = await tx.membro.findUniqueOrThrow({ where: { id: membroId }, select: { status: true } });
+  if (m.status !== "INATIVO") return;
+  const dia = hoje();
+  const d = instanteDoPrazo(dia);
+  if (!(await tx.vinculoIj.findFirst({ where: { membroId, saida: null } }))) {
+    const ultimo = await tx.vinculoIj.findFirst({ where: { membroId, saida: { not: null } }, orderBy: { saida: "desc" } });
+    if (ultimo?.saida && d < ultimo.saida) throw new Recusa("DATA_ANTES_DO_INICIO");
+    if (ultimo?.saida) {
+      const saida = ultimo.saida;
+      const presas = await tx.ocupacao.findMany({
+        where: { membroId, fim: null, invalidadoEm: null, OR: [{ inicio: null }, { inicio: { lt: saida } }] },
+        include: { posicao: { select: { nome: true } } },
+      });
+      for (const o of presas) {
+        await tx.ocupacao.update({ where: { id: o.id }, data: { fim: saida, principal: false } });
+        await historico(tx, membroId, `Vínculo encerrado na saída da IJ: ${o.posicao.nome}`, ator, { fim: diaDoPrazo(saida) });
+      }
+    }
+    await tx.vinculoIj.create({ data: { membroId, entrada: d } });
+  }
+  await tx.membro.update({ where: { id: membroId }, data: { status: "ATIVO" } });
+  await historico(tx, membroId, "Reingresso na IJ (cadastro na Gestão)", ator, { entrada: dia });
+}
+
+async function ligarConta(tx: Tx, membroId: string, usuarioId: string, ator: AtorGG, evento: string, email?: string) {
+  // usuarioId: null no where: se outro cadastro ligou no meio, não rouba o membro.
+  const r = await tx.membro.updateMany({ where: { id: membroId, usuarioId: null }, data: { usuarioId, ...(email ? { email } : {}) } });
+  if (r.count === 0) throw new Recusa("MEMBRO_DE_OUTRA_CONTA");
+  await historico(tx, membroId, evento, ator);
+  await reingressarSeInativo(tx, membroId, ator);
+}
+
+/**
+ * Membro da conta `usuarioId` (cadastro e edição pela Gestão, GAB-105), na transação de quem
+ * chama e SEM conferir quem edita. Só é chamada quando há posição a atribuir. Ordem:
+ * 1. o membro já ligado a esta conta (INATIVO faz reingresso);
+ * 2. o membro com o mesmo e-mail, por igualdade EXATA da forma normalizada (`normalizarEmail`,
+ *    comparada em memória como em `importarMembros`, nada de ILIKE), que é ligado;
+ * 3. `opcoes.ligarMembroId`: um dos homônimos (sem e-mail, sem conta, mesmo nome normalizado),
+ *    conferido AQUI, que quem cadastra escolheu na tela (ganha o e-mail). Outro id: recusa;
+ * 4. sem escolha, havendo homônimos: `RecusaHomonimo` com todos (a tela pergunta), a não ser que
+ *    `opcoes.criarNovo` diga que é outra pessoa;
+ * 5. cria um membro ATIVO com período aberto (entrada não informada).
+ * Membro ligado (2 e 3) que estava INATIVO faz reingresso. Membro com o e-mail ligado a OUTRA
+ * conta ou dois com o mesmo e-mail: `Recusa` (quem chama desfaz tudo).
+ */
+export async function membroDaContaTx(
+  tx: Tx,
+  conta: { usuarioId: string; nome: string; email: string },
+  ator: AtorGG,
+  opcoes: { ligarMembroId?: string | null; criarNovo?: boolean } = {},
+): Promise<{ id: string; criado: boolean; ligado: boolean }> {
+  const proprio = await tx.membro.findUnique({ where: { usuarioId: conta.usuarioId }, select: { id: true } });
+  if (proprio) {
+    await reingressarSeInativo(tx, proprio.id, ator);
+    return { id: proprio.id, criado: false, ligado: false };
+  }
+  const email = normalizarEmail(conta.email);
+  if (!email) throw new Recusa("DADOS_INVALIDOS");
+  const comEmail = (await tx.membro.findMany({ where: { email: { not: null } }, select: { id: true, email: true, usuarioId: true } })).filter((m) => normalizarEmail(m.email!) === email);
+  if (comEmail.length > 1) throw new Recusa("MEMBRO_AMBIGUO");
+  const existente = comEmail[0];
+  if (existente) {
+    if (existente.usuarioId !== null) throw new Recusa("MEMBRO_DE_OUTRA_CONTA");
+    await ligarConta(tx, existente.id, conta.usuarioId, ator, "Conta do CRM ligada pelo cadastro na Gestão");
+    return { id: existente.id, criado: false, ligado: true };
+  }
+  const nome = conta.nome.trim();
+  const candidatos = await homonimos(tx, nome);
+  if (opcoes.ligarMembroId) {
+    // Só um dos homônimos detectados: um id forjado não liga a ficha de outra pessoa.
+    if (!candidatos.some((c) => c.id === opcoes.ligarMembroId)) throw new Recusa("NAO_ENCONTRADO", "Esse membro não é um homônimo sem e-mail e sem conta de quem está sendo cadastrado. Recarregue e tente de novo.");
+    await ligarConta(tx, opcoes.ligarMembroId, conta.usuarioId, ator, `Conta do CRM ligada e e-mail gravado pelo cadastro na Gestão (${email})`, email);
+    return { id: opcoes.ligarMembroId, criado: false, ligado: true };
+  }
+  if (candidatos.length && !opcoes.criarNovo) throw new RecusaHomonimo(candidatos);
+  const m = await tx.membro.create({ data: { nome, email, status: "ATIVO", usuarioId: conta.usuarioId } });
+  await tx.vinculoIj.create({ data: { membroId: m.id, entrada: null } });
+  await historico(tx, m.id, "Membro cadastrado pela Gestão (com a conta do CRM)", ator);
+  return { id: m.id, criado: true, ligado: false };
+}
+
 /** Liga, de uma vez, todo membro sem conta cujo e-mail bate com uma conta do CRM. */
 export async function ligarContasPorEmail(ator: AtorGG): Promise<ResultadoOrg<{ ligados: number }>> {
   try {
@@ -323,19 +441,30 @@ async function abrirOcupacao(tx: Tx, membroId: string, posicaoId: string, inicio
   await tx.ocupacao.create({ data: { membroId, posicaoId, inicio, principal: principal ?? temPrincipal === 0 } });
 }
 
+/**
+ * Corpo de `adicionarOcupante` dentro de uma transação de quem chama, SEM conferir quem edita
+ * (quem chama confere: o G&G com `ehEditorGG`, a Gestão com a régua dela). Lança `Recusa`.
+ * `principal: true` = vira a principal e tira a marca das outras abertas (cadastro pela Gestão).
+ */
+export async function atribuirPosicaoTx(tx: Tx, posicaoId: string, membroId: string, inicio: string | null, ator: AtorGG, opcoes: { principal?: boolean } = {}) {
+  const d = data(inicio);
+  await travarMembro(tx, membroId);
+  // Área ou cargo desativado tira a posição do organograma (carregarBase): não se atribui.
+  const p = await tx.posicao.findFirst({ where: { id: posicaoId, ativo: true, area: { ativo: true }, cargo: { ativo: true } } });
+  const m = await tx.membro.findUnique({ where: { id: membroId } });
+  if (!p || !m) throw new Recusa("NAO_ENCONTRADO");
+  if (await tx.ocupacao.count({ where: { membroId, posicaoId, fim: null, invalidadoEm: null } })) throw new Recusa("JA_OCUPA");
+  const antes = opcoes.principal ? await tx.ocupacao.findMany({ where: { membroId, fim: null, invalidadoEm: null, principal: true }, select: { id: true, posicao: { select: { nome: true } } } }) : [];
+  if (antes.length) await tx.ocupacao.updateMany({ where: { id: { in: antes.map((o) => o.id) } }, data: { principal: false } });
+  await abrirOcupacao(tx, membroId, posicaoId, d, opcoes.principal);
+  await historico(tx, membroId, `Atribuído a ${p.nome}`, ator, { inicio });
+  if (antes.length) await historico(tx, membroId, `Posição principal: ${p.nome} (antes: ${antes.map((o) => o.posicao.nome).join(", ")})`, ator);
+}
+
 export async function adicionarOcupante(posicaoId: string, membroId: string, inicio: string | null, ator: AtorGG): Promise<ResultadoOrg> {
   try {
     await exigirEditor(ator);
-    const d = data(inicio);
-    await db.$transaction(async (tx) => {
-      await travarMembro(tx, membroId);
-      const p = await tx.posicao.findFirst({ where: { id: posicaoId, ativo: true } });
-      const m = await tx.membro.findUnique({ where: { id: membroId } });
-      if (!p || !m) throw new Recusa("NAO_ENCONTRADO");
-      if (await tx.ocupacao.count({ where: { membroId, posicaoId, fim: null, invalidadoEm: null } })) throw new Recusa("JA_OCUPA");
-      await abrirOcupacao(tx, membroId, posicaoId, d);
-      await historico(tx, membroId, `Atribuído a ${p.nome}`, ator, { inicio });
-    });
+    await db.$transaction((tx) => atribuirPosicaoTx(tx, posicaoId, membroId, inicio, ator));
     return { ok: true };
   } catch (e) {
     return traduzir(e);
@@ -349,17 +478,24 @@ async function ocupacaoAberta(tx: Tx, ocupacaoId: string) {
   return o;
 }
 
+/**
+ * Corpo de `encerrarOcupacao` na transação de quem chama, SEM conferir quem edita (ver
+ * `atribuirPosicaoTx`). `doMembro`: recusa se a ocupação for de outro membro. Lança `Recusa`.
+ */
+export async function encerrarOcupacaoTx(tx: Tx, ocupacaoId: string, fim: string, ator: AtorGG, doMembro?: string) {
+  const d = data(fim, { obrigatoria: true })!;
+  const o = await ocupacaoAberta(tx, ocupacaoId);
+  if (doMembro !== undefined && o.membroId !== doMembro) throw new Recusa("NAO_ENCONTRADO");
+  if (o.inicio && d < o.inicio) throw new Recusa("DATA_ANTES_DO_INICIO");
+  await tx.ocupacao.update({ where: { id: o.id }, data: { fim: d, principal: false } });
+  await historico(tx, o.membroId, `Vínculo encerrado: ${o.posicao.nome}`, ator, { fim });
+}
+
 /** Fim = primeiro dia em que já não ocupa ([início, fim)). */
 export async function encerrarOcupacao(ocupacaoId: string, fim: string, ator: AtorGG): Promise<ResultadoOrg> {
   try {
     await exigirEditor(ator);
-    const d = data(fim, { obrigatoria: true })!;
-    await db.$transaction(async (tx) => {
-      const o = await ocupacaoAberta(tx, ocupacaoId);
-      if (o.inicio && d < o.inicio) throw new Recusa("DATA_ANTES_DO_INICIO");
-      await tx.ocupacao.update({ where: { id: o.id }, data: { fim: d, principal: false } });
-      await historico(tx, o.membroId, `Vínculo encerrado: ${o.posicao.nome}`, ator, { fim });
-    });
+    await db.$transaction((tx) => encerrarOcupacaoTx(tx, ocupacaoId, fim, ator));
     return { ok: true };
   } catch (e) {
     return traduzir(e);
@@ -482,7 +618,8 @@ export async function importarMembros(linhas: LinhaImportacao[], chave: string, 
       if (feita) return feita.quantidade;
       const [areas, cargos, posicoes] = await Promise.all([tx.areaOrg.findMany({ where: { ativo: true } }), tx.cargoOrg.findMany({ where: { ativo: true } }), tx.posicao.findMany({ where: { ativo: true } })]);
       // E-mails já cadastrados, comparados em memória pela forma normalizada (sem ILIKE: `_`/`%` são literais).
-      const emails = new Set((await tx.membro.findMany({ where: { email: { not: null } }, select: { email: true } })).map((m) => chaveEmail(m.email!)));
+      const porEmail = new Map((await tx.membro.findMany({ where: { email: { not: null } }, select: { id: true, email: true, usuarioId: true } })).map((m) => [chaveEmail(m.email!), m]));
+      const doLote = new Set<string>();
       for (const [i, l] of linhas.entries()) {
         const linha = `Linha ${i + 1}`;
         const area = l.area ? areas.find((a) => normalizar(a.nome) === normalizar(l.area!)) : null;
@@ -490,14 +627,8 @@ export async function importarMembros(linhas: LinhaImportacao[], chave: string, 
         if (l.area && !area) throw new Recusa("IMPORTACAO", `${linha}: área "${l.area}" não existe.`);
         if (l.cargo && !cargo) throw new Recusa("IMPORTACAO", `${linha}: cargo "${l.cargo}" não existe.`);
         if (!!area !== !!cargo) throw new Recusa("IMPORTACAO", `${linha}: informe área e cargo juntos.`);
-        // Como no importar_membros do G&G: já existe pelo nome ou pelo e-mail (sem caixa) → recusa o lote.
-        const jaExiste = (l.email && emails.has(chaveEmail(l.email))) || (await tx.membro.count({ where: { nome: { equals: l.nome, mode: "insensitive" } } }));
-        if (jaExiste) throw new Recusa("IMPORTACAO", `${linha}: membro já cadastrado.`);
-        if (l.email) emails.add(chaveEmail(l.email));
-        const m = await tx.membro.create({ data: { nome: l.nome, email: l.email, status: l.status, usuarioId: await contaPorEmail(tx, l.email) } });
-        const entrada = l.entrada ? instanteDoPrazo(l.entrada) : null;
-        await tx.vinculoIj.create({ data: { membroId: m.id, entrada } });
-        if (area && cargo) {
+        const posicaoDaLinha = async () => {
+          if (!area || !cargo) return null;
           const candidatas = posicoes.filter((p) => p.areaId === area.id && p.cargoId === cargo.id);
           if (candidatas.length > 1) throw new Recusa("IMPORTACAO", `${linha}: mais de uma posição para ${area.nome} + ${cargo.nome}; atribua pelo organograma.`);
           let posicao = candidatas[0];
@@ -505,8 +636,37 @@ export async function importarMembros(linhas: LinhaImportacao[], chave: string, 
             posicao = await tx.posicao.create({ data: { nome: `${cargo.nome} de ${area.nome}`, areaId: area.id, cargoId: cargo.id } });
             posicoes.push(posicao);
           }
-          await tx.ocupacao.create({ data: { membroId: m.id, posicaoId: posicao.id, inicio: entrada, principal: true } });
+          return posicao;
+        };
+        const entrada = l.entrada ? instanteDoPrazo(l.entrada) : null;
+        const chaveL = l.email ? chaveEmail(l.email) : null;
+        if (chaveL && doLote.has(chaveL)) throw new Recusa("IMPORTACAO", `${linha}: membro repetido na importação.`);
+        if (chaveL) doLote.add(chaveL);
+        const existente = chaveL ? porEmail.get(chaveL) : undefined;
+        if (existente) {
+          // GAB-105: membro com o mesmo e-mail ainda sem nada (sem ocupação; status não informado ou sem período) é
+          // completado pela linha (conta, status, período, posição), sem derrubar o lote.
+          // Só o membro "vazio": sem ocupação e (status não informado ou sem período nenhum). Os demais seguem a
+          // regra do G&G: recusa o lote.
+          const ficha = await tx.membro.findUniqueOrThrow({ where: { id: existente.id }, select: { status: true, _count: { select: { vinculos: true, ocupacoes: { where: { invalidadoEm: null } } } } } });
+          if (ficha._count.ocupacoes > 0 || (ficha.status !== "NAO_INFORMADO" && ficha._count.vinculos > 0)) throw new Recusa("IMPORTACAO", `${linha}: membro já cadastrado.`);
+          await tx.membro.update({
+            where: { id: existente.id },
+            data: { ...(l.status !== "NAO_INFORMADO" ? { status: l.status } : {}), ...(existente.usuarioId ? {} : { usuarioId: await contaPorEmail(tx, l.email) }) },
+          });
+          if (!(await tx.vinculoIj.count({ where: { membroId: existente.id } }))) await tx.vinculoIj.create({ data: { membroId: existente.id, entrada } });
+          else if (entrada) await tx.vinculoIj.updateMany({ where: { membroId: existente.id, saida: null, entrada: null }, data: { entrada } });
+          const posicao = await posicaoDaLinha();
+          if (posicao) await tx.ocupacao.create({ data: { membroId: existente.id, posicaoId: posicao.id, inicio: entrada, principal: true } });
+          await historico(tx, existente.id, "Atualizado pela importação em lote", ator);
+          continue;
         }
+        // Como no importar_membros do G&G: já existe pelo nome (sem caixa) → recusa o lote.
+        if (await tx.membro.count({ where: { nome: { equals: l.nome, mode: "insensitive" } } })) throw new Recusa("IMPORTACAO", `${linha}: membro já cadastrado.`);
+        const m = await tx.membro.create({ data: { nome: l.nome, email: l.email, status: l.status, usuarioId: await contaPorEmail(tx, l.email) } });
+        await tx.vinculoIj.create({ data: { membroId: m.id, entrada } });
+        const posicao = await posicaoDaLinha();
+        if (posicao) await tx.ocupacao.create({ data: { membroId: m.id, posicaoId: posicao.id, inicio: entrada, principal: true } });
         await historico(tx, m.id, "Importado em lote", ator);
       }
       await tx.importacaoMembros.create({ data: { id: chave, autorId: ator.id, quantidade: linhas.length } });

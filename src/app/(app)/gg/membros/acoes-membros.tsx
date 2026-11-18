@@ -1,32 +1,57 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
+import { UserPlus } from "lucide-react";
 import { MensagemErro } from "@/components/erros/mensagem-erro";
 import { CAMPO } from "@/components/gg/ui";
 import { useAcao } from "@/components/gg/use-acao";
-import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ROTULO_STATUS_MEMBRO, STATUS_MEMBRO } from "@/lib/gg/modelo";
 import { criarMembroAction, ligarContasAction } from "../actions";
 
-/** Novo membro e "ligar contas pelo e-mail" (só para quem edita G&G). */
-export function AcoesMembros() {
+/**
+ * Ações da lista de membros. GAB-105: pessoa que vai usar o CRM é cadastrada em Gestão → Usuários
+ * (conta, membro e posição juntos); o "Novo membro" daqui segue para quem edita G&G, para membro
+ * sem conta do CRM, com o atalho para a Gestão ao lado. "Ligar contas pelo e-mail" também é do editor.
+ */
+export function AcoesMembros({ editor, gestao }: { editor: boolean; gestao: boolean }) {
   const [aberto, setAberto] = useState(false);
   const { pendente, erro, setErro, rodar } = useAcao();
   const [aviso, setAviso] = useState<string | null>(null);
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <Button variant="outline" disabled={pendente} onClick={() => rodar(() => ligarContasAction(), "ligar as contas", (r) => setAviso(r && "ligados" in r ? `${r.ligados ?? 0} conta(s) ligada(s).` : null))}>
-        Ligar contas pelo e-mail
-      </Button>
-      <Button
-        onClick={() => {
-          setErro(null);
-          setAberto(true);
-        }}
-      >
-        Novo membro
-      </Button>
+      {editor ? (
+        <Button variant="outline" disabled={pendente} onClick={() => rodar(() => ligarContasAction(), "ligar as contas", (r) => setAviso(r && "ligados" in r ? `${r.ligados ?? 0} conta(s) ligada(s).` : null))}>
+          Ligar contas pelo e-mail
+        </Button>
+      ) : null}
+      {editor ? (
+        <Button
+          variant={gestao ? "outline" : "default"}
+          onClick={() => {
+            setErro(null);
+            setAberto(true);
+          }}
+        >
+          Novo membro
+        </Button>
+      ) : null}
+      {gestao ? (
+        <Link href="/gestao/usuarios" className={buttonVariants()}>
+          <UserPlus className="h-4 w-4" />
+          Cadastrar em Gestão → Usuários
+        </Link>
+      ) : (
+        <span className="text-xs text-fg-faint">
+          Novo membro é sem conta do CRM; para criar conta use{" "}
+          <Link href="/gestao/usuarios" className="underline">
+            Gestão → Usuários
+          </Link>{" "}
+          (gestor ou admin).
+        </span>
+      )}
       {aviso || erro ? (
         <div className="self-center text-sm text-fg-mute" aria-live="polite">
           {aviso}
@@ -37,6 +62,13 @@ export function AcoesMembros() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Novo membro</DialogTitle>
+            <DialogDescription>
+              Sem conta do CRM; para criar conta use{" "}
+              <Link href="/gestao/usuarios" className="underline">
+                Gestão → Usuários
+              </Link>
+              .
+            </DialogDescription>
           </DialogHeader>
           <form
             className="grid gap-3"

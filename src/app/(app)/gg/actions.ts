@@ -101,6 +101,8 @@ export async function importarMembrosAction(json: string, chave: string): Promis
 /**
  * Ponte com a conta do CRM: aplicar o que o organograma sugere ou convidar quem não tem
  * conta. Passa pelas regras de Gestão (`auth/usuarios`): só gestor/admin muda conta.
+ * GAB-105: a tela do G&G não convida nem cria membro; pessoa nova é cadastrada em Gestão →
+ * Usuários (`auth/cadastro`). `criarMembroAction`/`convidarParaCrmAction` ficam como serviço.
  */
 export async function aplicarNoCrmAction(membroId: string): Promise<EstadoGG> {
   if (!parse(id, membroId)) return INVALIDO;
