@@ -1,16 +1,22 @@
 "use client";
 
 import { useActionState, useRef, useState } from "react";
-import type { Papel } from "@prisma/client";
+import type { Area, Cargo, Papel } from "@prisma/client";
 import { Copy, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import type { GrupoPosicoes, OpcaoPosicao } from "@/lib/auth/cadastro";
+import { podeAtribuirPapel } from "@/lib/auth/papeis";
 import { criarConviteAction } from "./actions";
+import { CampoPosicao } from "./campo-posicao";
 import { CamposPapelLado } from "./campos-lado";
 
-export function ConvidarDialog({ papelAtor, googleAtivo = false }: { papelAtor: Papel; googleAtivo?: boolean }) {
+type Posicoes = { grupos: readonly GrupoPosicoes[]; temAreaGG: boolean };
+const SEM_POSICOES: Posicoes = { grupos: [], temAreaGG: false };
+
+export function ConvidarDialog({ papelAtor, googleAtivo = false, posicoes = SEM_POSICOES }: { papelAtor: Papel; googleAtivo?: boolean; posicoes?: Posicoes }) {
   const [aberto, setAberto] = useState(false);
   // Remonta o corpo a cada abertura: o estado do useActionState (link gerado,
   // erro) não vaza para o próximo convite.
@@ -36,14 +42,33 @@ export function ConvidarDialog({ papelAtor, googleAtivo = false }: { papelAtor: 
               : "Você recebe um link para mandar por WhatsApp ou email. Vale 7 dias."}
           </DialogDescription>
         </DialogHeader>
-        <CorpoConvite key={iteracao} papelAtor={papelAtor} googleAtivo={googleAtivo} onFechar={() => mudarAberto(false)} />
+        <CorpoConvite key={iteracao} papelAtor={papelAtor} googleAtivo={googleAtivo} posicoes={posicoes} onFechar={() => mudarAberto(false)} />
       </DialogContent>
     </Dialog>
   );
 }
 
-function CorpoConvite({ papelAtor, googleAtivo, onFechar }: { papelAtor: Papel; googleAtivo: boolean; onFechar: () => void }) {
+type Lado = { papel: Papel; area: Area | null; cargos: readonly Cargo[] };
+const LADO_PADRAO: Lado = { papel: "VENDEDOR", area: null, cargos: [] };
+
+export function CorpoConvite({ papelAtor, googleAtivo, posicoes = SEM_POSICOES, onFechar }: { papelAtor: Papel; googleAtivo: boolean; posicoes?: Posicoes; onFechar: () => void }) {
   const [estado, action, pendente] = useActionState(criarConviteAction, undefined);
+  // A posição pré-preenche papel/área/cargos (`derivarDoOrganograma`, calculado no servidor); quem
+  // cadastra ajusta depois. Remontar os campos (key) aplica o novo valor inicial; o servidor reaplica a régua.
+  const [lado, setLado] = useState<Lado>(LADO_PADRAO);
+  const [versao, setVersao] = useState(0);
+  const [nota, setNota] = useState<string | null>(null);
+
+  function escolherPosicao(o: OpcaoPosicao | null) {
+    if (!o) return setNota(null);
+    if (!podeAtribuirPapel(papelAtor, o.sugestao.papel)) {
+      setNota("O organograma sugere um papel que você não pode atribuir: escolha o papel abaixo.");
+      return;
+    }
+    setLado(o.sugestao);
+    setVersao((v) => v + 1);
+    setNota("Papel, área e cargo preenchidos pela posição. Ajuste se precisar.");
+  }
 
   if (estado?.link && googleAtivo) return <CadastroComGoogle email={estado.email} link={estado.link} expiraEm={estado.expiraEm} onFechar={onFechar} />;
   if (estado?.link) return <LinkGerado link={estado.link} expiraEm={estado.expiraEm} onFechar={onFechar} />;
@@ -62,7 +87,9 @@ function CorpoConvite({ papelAtor, googleAtivo, onFechar }: { papelAtor: Papel; 
         <Label htmlFor="telefone">WhatsApp (DDD + número)</Label>
         <Input id="telefone" name="telefone" placeholder="11 99999-8888" inputMode="tel" />
       </div>
-      <CamposPapelLado papelAtor={papelAtor} papel="VENDEDOR" area={null} cargos={[]} />
+      <CampoPosicao grupos={posicoes.grupos} temAreaGG={posicoes.temAreaGG} onEscolher={escolherPosicao} />
+      {nota ? <p className="-mt-2 text-xs text-fg-faint">{nota}</p> : null}
+      <CamposPapelLado key={versao} papelAtor={papelAtor} papel={lado.papel} area={lado.area} cargos={lado.cargos} />
       {estado?.erro ? (
         <p role="alert" className="text-sm text-danger">
           {estado.erro}

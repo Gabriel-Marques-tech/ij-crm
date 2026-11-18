@@ -107,6 +107,17 @@ tem lado; gestor e admin só têm lado se a gestão der (ex.: o diretor que tamb
 - A ponte Gente & Gestão → conta (`derivarDoOrganograma`) sugere os cargos pelo organograma: cargo
   com `eh_gp` em área de Projetos → PM, em Vendas → GP; cargo PO → PO; diretoria em área de Projetos
   → Gestor + Diretor.
+- **Cadastro único (GAB-105)**: pessoa nova é cadastrada em Gestão → Usuários. O campo opcional
+  "Posição na IJ" lista as posições ativas do organograma e pré-preenche papel, área e cargos com
+  `derivarDoOrganograma` (quem cadastra ajusta; o servidor reaplica `podeAtribuirPapel` e
+  `resolverAreaCargos`). Salvar cria, numa transação, a conta, o membro do G&G com o mesmo e-mail
+  (ou liga o existente, por igualdade exata do e-mail normalizado; membro já ligado a outra conta é
+  recusado) e a ocupação (início hoje, principal). A edição de usuário mostra as ocupações abertas
+  e permite adicionar e encerrar posição. **Regra de permissão**: os serviços do G&G exigem
+  `ehEditorGG`, mas gestor e admin atribuem e encerram posição **pela Gestão** (variantes `*Tx` de
+  `lib/gg/organizacao`, chamadas só de `lib/auth/cadastro`), com a régua da Gestão: gestor não mexe
+  em admin e ninguém mexe na própria posição, exceto o admin. Editor de G&G que não é gestor segue
+  editando pelo G&G. A tela do G&G não cria membro nem convida mais: aponta para a Gestão.
 
 ## Como funciona a conexão com o WhatsApp
 

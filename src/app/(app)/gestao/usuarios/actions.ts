@@ -3,7 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { exigirPapel } from "@/lib/auth/atual";
-import { atualizarUsuario, criarConvite, reemitirConvite, type ErroUsuario } from "@/lib/auth/usuarios";
+import { atualizarUsuario, reemitirConvite, type ErroUsuario } from "@/lib/auth/usuarios";
+import { adicionarPosicaoAoUsuario, cadastrarPessoa, encerrarOcupacaoDoUsuario, type ErroCadastro } from "@/lib/auth/cadastro";
+import { MENSAGEM_ERRO_ORG } from "@/lib/gg/organizacao";
 import { MENSAGEM_REDEFINICAO, gerarLinkRedefinicao } from "@/lib/auth/redefinicao";
 import { desligarGoogle, type ErroDesligarGoogle } from "@/lib/auth/google-login";
 import { comTratamentoForm } from "@/lib/erros/registrar";
@@ -20,6 +22,15 @@ const MENSAGEM: Record<ErroUsuario, string> = {
   CREDENCIAIS_INVALIDAS: "Credenciais inválidas.",
   NAO_PODE_ALTERAR_A_SI: "Você não pode alterar seu próprio papel ou se desativar.",
   USUARIO_NAO_ENCONTRADO: "Usuário não encontrado.",
+};
+
+/** Cadastro único (GAB-105): conta + membro do G&G + posição. Mensagens do G&G ajustadas ao contexto da Gestão. */
+const MENSAGEM_CADASTRO: Record<ErroCadastro, string> = {
+  ...MENSAGEM_ERRO_ORG,
+  ...MENSAGEM,
+  SEM_PERMISSAO: "Você não pode atribuir posição a esta pessoa.",
+  NAO_ENCONTRADO: "Posição ou ocupação não encontrada (pode ter sido desativada ou já encerrada). Recarregue a página.",
+  JA_OCUPA: "Essa pessoa já ocupa essa posição.",
 };
 
 export type EstadoConvite = { erro?: string; link?: string; expiraEm?: string; email?: string } | undefined;
@@ -40,6 +51,8 @@ const conviteSchema = z.object({
   area: areaSchema.optional(),
   cargos: cargosSchema,
   areaEntrada: areaEntradaSchema.optional(),
+  // "" = sem posição (campo opcional).
+  posicaoId: z.string().max(64).optional(),
 });
 
 /**
@@ -83,12 +96,15 @@ export async function criarConviteAction(_prev: EstadoConvite, form: FormData): 
       papel: form.get("papel"),
       telefone: form.get("telefone") ?? undefined,
       cargos: [],
+      posicaoId: form.get("posicaoId") ?? undefined,
       ...ladoDoForm(form),
     });
     if (!parsed.success) return { erro: parsed.error.issues[0]?.message ?? "Dados inválidos." };
-    const r = await criarConvite(parsed.data, ator);
-    if (!r.ok) return { erro: MENSAGEM[r.erro] };
+    // Conta + membro do G&G (criado ou ligado pelo e-mail) + posição, numa transação só.
+    const r = await cadastrarPessoa(parsed.data, ator);
+    if (!r.ok) return { erro: MENSAGEM_CADASTRO[r.erro] };
     revalidatePath("/gestao/usuarios");
+    revalidatePath("/gg", "layout");
     // Com o Google configurado a pessoa já entra com este email; o link fica como alternativa.
     return { link: linkConvite(r.token), expiraEm: r.expiraEm.toISOString(), email: normalizarEmail(parsed.data.email) ?? parsed.data.email };
   });
@@ -160,6 +176,34 @@ export async function desligarGoogleAction(usuarioId: string): Promise<EstadoEdi
     const r = await desligarGoogle(usuarioId, ator);
     if (!r.ok) return { erro: MENSAGEM_DESLIGAR_GOOGLE[r.erro] };
     revalidatePath("/gestao/usuarios");
+    return { ok: true };
+  });
+}
+
+const idSchema = z.string().min(1).max(64);
+
+/** Edição de usuário (GAB-105): atribui uma posição do organograma (início hoje). */
+export async function adicionarPosicaoUsuarioAction(usuarioId: string, posicaoId: string): Promise<EstadoEdicao> {
+  return comTratamentoForm("gestao.usuarios.adicionarPosicao", async (): Promise<EstadoEdicao> => {
+    const ator = await exigirPapel("GESTOR");
+    if (!idSchema.safeParse(usuarioId).success || !idSchema.safeParse(posicaoId).success) return { erro: "Escolha uma posição." };
+    const r = await adicionarPosicaoAoUsuario(usuarioId, posicaoId, ator);
+    if (!r.ok) return { erro: MENSAGEM_CADASTRO[r.erro] };
+    revalidatePath("/gestao/usuarios");
+    revalidatePath("/gg", "layout");
+    return { ok: true };
+  });
+}
+
+/** Edição de usuário (GAB-105): encerra hoje uma ocupação aberta da pessoa. */
+export async function encerrarOcupacaoUsuarioAction(usuarioId: string, ocupacaoId: string): Promise<EstadoEdicao> {
+  return comTratamentoForm("gestao.usuarios.encerrarOcupacao", async (): Promise<EstadoEdicao> => {
+    const ator = await exigirPapel("GESTOR");
+    if (!idSchema.safeParse(usuarioId).success || !idSchema.safeParse(ocupacaoId).success) return { erro: "Dados inválidos." };
+    const r = await encerrarOcupacaoDoUsuario(usuarioId, ocupacaoId, ator);
+    if (!r.ok) return { erro: MENSAGEM_CADASTRO[r.erro] };
+    revalidatePath("/gestao/usuarios");
+    revalidatePath("/gg", "layout");
     return { ok: true };
   });
 }

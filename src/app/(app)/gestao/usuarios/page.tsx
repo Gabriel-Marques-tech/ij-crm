@@ -3,6 +3,8 @@ import { exigirPapel } from "@/lib/auth/atual";
 import { googleConfigurado } from "@/lib/auth/google";
 import { podeGerarRedefinicao } from "@/lib/auth/papeis";
 import { listarUsuarios } from "@/lib/auth/usuarios";
+import { ocupacoesPorConta, opcoesDePosicao } from "@/lib/auth/cadastro";
+import { carregarBase } from "@/lib/gg/organizacao";
 import { ConvidarDialog } from "./convidar-dialog";
 import { TabelaUsuarios } from "./tabela-usuarios";
 
@@ -12,7 +14,10 @@ const fmt = new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "s
 
 export default async function UsuariosPage() {
   const ator = await exigirPapel("GESTOR");
-  const usuarios = await listarUsuarios();
+  const [usuarios, base] = await Promise.all([listarUsuarios(), carregarBase()]);
+  // Cadastro único (GAB-105): posições do organograma para o cadastro e a edição.
+  const posicoes = opcoesDePosicao(base);
+  const ocupacoes = ocupacoesPorConta(base);
   const googleAtivo = googleConfigurado();
   // "Esqueci a senha" (GAB-43): pedidos abertos de contas ativas.
   const pedidos = usuarios.filter((u) => u.ativo && u.redefinicaoPedidaEm);
@@ -21,8 +26,8 @@ export default async function UsuariosPage() {
       <PageHeader
         eyebrow="gestão · usuários"
         title="Usuários"
-        description="Quem acessa o CRM e qual telefone liga a pessoa às mensagens do grupo."
-        actions={<ConvidarDialog papelAtor={ator.papel} googleAtivo={googleAtivo} />}
+        description="Quem acessa o CRM, qual telefone liga a pessoa às mensagens do grupo e a posição dela na IJ. O cadastro aqui também cria (ou liga) o membro no G&G."
+        actions={<ConvidarDialog papelAtor={ator.papel} googleAtivo={googleAtivo} posicoes={posicoes} />}
       />
       {pedidos.length > 0 ? (
         <section className="mb-6 rounded-xl border border-l-2 border-border border-l-danger bg-surface p-4">
@@ -44,7 +49,7 @@ export default async function UsuariosPage() {
           </p>
         </section>
       ) : null}
-      <TabelaUsuarios usuarios={usuarios} ator={ator} googleAtivo={googleAtivo} />
+      <TabelaUsuarios usuarios={usuarios} ator={ator} googleAtivo={googleAtivo} posicoes={posicoes} ocupacoes={ocupacoes} />
     </>
   );
 }

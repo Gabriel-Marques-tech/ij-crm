@@ -153,3 +153,11 @@ export function progresso(inicial: number, meta: number, atual: number): number 
 export function naMeta(direcao: "MAIOR" | "MENOR", atual: number, meta: number): boolean {
   return direcao === "MAIOR" ? atual >= meta : atual <= meta;
 }
+
+/**
+ * O nome parece da área Gente & Gestão? Só para AVISAR quando nenhuma área está marcada `ehGG`
+ * (aí quem ocupa a posição não vira editor de G&G); permissão nunca sai daqui.
+ */
+export function pareceAreaGG(texto: string): boolean {
+  return /gente|\bg ?& ?g\b|\bgg\b|gestao de pessoas/.test(normalizar(texto));
+}

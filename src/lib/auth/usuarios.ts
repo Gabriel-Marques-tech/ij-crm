@@ -1,4 +1,4 @@
-import type { Area, AreaEntrada, Cargo, Papel, Usuario } from "@prisma/client";
+import type { Area, AreaEntrada, Cargo, Papel, Prisma, Usuario } from "@prisma/client";
 import { db } from "@/lib/db";
 import { normalizarEmail, normalizarTelefoneBr } from "@/lib/normalizacao";
 import { mesmaAreaEntrada, regraDeArea, resolverAreaCargos, resolverAreaEntrada } from "./areas";
@@ -34,7 +34,7 @@ function resolverTelefone(entrada: string | null | undefined): Resultado<{ telef
 
 type Lado = { area: Area | null; cargos: readonly Cargo[] };
 
-function formatarLado(l: Lado): string {
+export function formatarLado(l: Lado): string {
   return `${l.area ?? "nenhuma"}[${l.cargos.join(",")}]`;
 }
 
@@ -49,14 +49,21 @@ function ehViolacaoDeUnique(e: unknown, coluna: string): boolean {
   return Array.isArray(alvo) ? alvo.includes(coluna) : typeof alvo === "string" && alvo.includes(coluna);
 }
 
+export type DadosConvite = { nome: string; email: string; papel: Papel; telefone?: string | null; area?: Area | null; cargos?: readonly Cargo[]; areaEntrada?: AreaEntrada | null };
+
 /**
  * Cria o usuário já com o convite pendente (sem senha) e devolve o token em
  * claro UMA vez — ele não é persistido, só o hash.
+ *
+ * `tx`: grava dentro da transação de quem chama (cadastro único, `./cadastro`). Aí um
+ * `{ ok: false }` deixa a transação abortada (o Postgres não segue depois do erro):
+ * quem chama tem de desfazer. A auditoria também fica com quem chama, depois do commit.
  */
 export async function criarConvite(
-  dados: { nome: string; email: string; papel: Papel; telefone?: string | null; area?: Area | null; cargos?: readonly Cargo[]; areaEntrada?: AreaEntrada | null },
+  dados: DadosConvite,
   por: Ator,
-): Promise<Resultado<{ usuarioId: string; token: string; expiraEm: Date }>> {
+  tx?: Prisma.TransactionClient,
+): Promise<Resultado<{ usuarioId: string; token: string; expiraEm: Date; papel: Papel; area: Area | null; cargos: Cargo[]; areaEntrada: AreaEntrada | null }>> {
   if (!podeAtribuirPapel(por.papel, dados.papel)) return { ok: false, erro: "PAPEL_NAO_PERMITIDO" };
   const email = normalizarEmail(dados.email);
   if (!email) return { ok: false, erro: "EMAIL_INVALIDO" };
@@ -70,7 +77,7 @@ export async function criarConvite(
 
   const convite = gerarConvite();
   try {
-    const u = await db.usuario.create({
+    const u = await (tx ?? db).usuario.create({
       data: {
         nome: dados.nome.trim(),
         email,
@@ -85,8 +92,8 @@ export async function criarConvite(
       },
       select: { id: true },
     });
-    console.info(`[auditoria] usuario.convidado usuario=${u.id} por=${por.id} papel=${dados.papel} lado=${formatarLado(lado)} entrada=${areaEntrada ?? "nenhuma"}`);
-    return { ok: true, usuarioId: u.id, token: convite.token, expiraEm: convite.expiraEm };
+    if (!tx) console.info(`[auditoria] usuario.convidado usuario=${u.id} por=${por.id} papel=${dados.papel} lado=${formatarLado(lado)} entrada=${areaEntrada ?? "nenhuma"}`);
+    return { ok: true, usuarioId: u.id, token: convite.token, expiraEm: convite.expiraEm, papel: dados.papel, area: lado.area, cargos: lado.cargos, areaEntrada };
   } catch (e) {
     if (ehViolacaoDeUnique(e, "email")) return { ok: false, erro: "EMAIL_EM_USO" };
     if (ehViolacaoDeUnique(e, "telefone_whatsapp")) return { ok: false, erro: "TELEFONE_EM_USO" };

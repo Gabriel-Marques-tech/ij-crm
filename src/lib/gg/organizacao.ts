@@ -7,6 +7,12 @@
  * Quem edita: admin e quem ocupa hoje uma posição na área G&G (ou nas frentes dela).
  * Quem lê: todo usuário ativo do CRM (decisão §3.1). Mudar a conta do CRM (convidar,
  * aplicar papel) segue as regras de Gestão (`auth/usuarios`): só gestor/admin.
+ *
+ * Cadastro único (GAB-105): Gestão → Usuários cria a conta, o membro e a ocupação numa
+ * transação só (`auth/cadastro`), pelas variantes `*Tx` daqui, que NÃO conferem `ehEditorGG`.
+ * Regra: gestor e admin atribuem e encerram posição pela Gestão (com a régua de
+ * `podeAtribuirPapel` sobre a conta da pessoa), e só por lá; quem chama as `*Tx` é quem
+ * confere isso. Editor de G&G que não é gestor segue editando pelo G&G, como antes.
  */
 import type { Area, CategoriaCargo, Papel, Prisma, StatusMembro, TipoAreaOrg } from "@prisma/client";
 import { diaDoPrazo, instanteDoPrazo } from "@/lib/calendario/semana";
@@ -29,7 +35,9 @@ export type ErroOrg =
   | "MOTIVO_OBRIGATORIO"
   | "CICLO"
   | "COM_HISTORICO"
-  | "IMPORTACAO";
+  | "IMPORTACAO"
+  | "MEMBRO_DE_OUTRA_CONTA"
+  | "MEMBRO_AMBIGUO";
 export const MENSAGEM_ERRO_ORG: Record<ErroOrg, string> = {
   SEM_PERMISSAO: "Só a área de Gente & Gestão e a administração editam a estrutura.",
   NAO_ENCONTRADO: "Registro não encontrado.",
@@ -42,10 +50,12 @@ export const MENSAGEM_ERRO_ORG: Record<ErroOrg, string> = {
   CICLO: "Essa liderança criaria um ciclo no organograma.",
   COM_HISTORICO: "Posição com histórico não muda de área nem de cargo: crie outra posição.",
   IMPORTACAO: "Importação recusada.",
+  MEMBRO_DE_OUTRA_CONTA: "Já existe um membro do G&G com esse e-mail ligado a outra conta do CRM. Confira o membro no G&G antes de cadastrar.",
+  MEMBRO_AMBIGUO: "Há mais de um membro do G&G com esse e-mail. Resolva a duplicidade no G&G antes de cadastrar.",
 };
 export type ResultadoOrg<T = object> = ({ ok: true } & T) | { ok: false; erro: ErroOrg; detalhe?: string };
 
-class Recusa extends Error {
+export class Recusa extends Error {
   constructor(
     readonly erro: ErroOrg,
     readonly detalhe?: string,
@@ -245,6 +255,36 @@ export async function editarMembro(id: string, d: DadosMembro, ator: AtorGG): Pr
   }
 }
 
+/**
+ * Membro da conta `usuarioId` (cadastro e edição pela Gestão, GAB-105), na transação de quem
+ * chama e SEM conferir quem edita. Ordem: o membro já ligado a esta conta; senão o membro com o
+ * mesmo e-mail, por igualdade EXATA da forma normalizada (`normalizarEmail`, comparada em memória
+ * como em `importarMembros`, nada de ILIKE), que é ligado; senão cria um membro ATIVO com período
+ * aberto (entrada não informada). Membro com o e-mail ligado a OUTRA conta ou dois membros com o
+ * mesmo e-mail: `Recusa` (quem chama desfaz tudo).
+ */
+export async function membroDaContaTx(tx: Tx, conta: { usuarioId: string; nome: string; email: string }, ator: AtorGG): Promise<{ id: string; criado: boolean; ligado: boolean }> {
+  const proprio = await tx.membro.findUnique({ where: { usuarioId: conta.usuarioId }, select: { id: true } });
+  if (proprio) return { id: proprio.id, criado: false, ligado: false };
+  const email = normalizarEmail(conta.email);
+  if (!email) throw new Recusa("DADOS_INVALIDOS");
+  const comEmail = (await tx.membro.findMany({ where: { email: { not: null } }, select: { id: true, email: true, usuarioId: true } })).filter((m) => normalizarEmail(m.email!) === email);
+  if (comEmail.length > 1) throw new Recusa("MEMBRO_AMBIGUO");
+  const existente = comEmail[0];
+  if (existente) {
+    if (existente.usuarioId !== null) throw new Recusa("MEMBRO_DE_OUTRA_CONTA");
+    // usuarioId: null no where: se outro cadastro ligou no meio, não rouba o membro.
+    const r = await tx.membro.updateMany({ where: { id: existente.id, usuarioId: null }, data: { usuarioId: conta.usuarioId } });
+    if (r.count === 0) throw new Recusa("MEMBRO_DE_OUTRA_CONTA");
+    await historico(tx, existente.id, "Conta do CRM ligada pelo cadastro na Gestão", ator);
+    return { id: existente.id, criado: false, ligado: true };
+  }
+  const m = await tx.membro.create({ data: { nome: conta.nome.trim(), email, status: "ATIVO", usuarioId: conta.usuarioId } });
+  await tx.vinculoIj.create({ data: { membroId: m.id, entrada: null } });
+  await historico(tx, m.id, "Membro cadastrado pela Gestão (com a conta do CRM)", ator);
+  return { id: m.id, criado: true, ligado: false };
+}
+
 /** Liga, de uma vez, todo membro sem conta cujo e-mail bate com uma conta do CRM. */
 export async function ligarContasPorEmail(ator: AtorGG): Promise<ResultadoOrg<{ ligados: number }>> {
   try {
@@ -323,19 +363,27 @@ async function abrirOcupacao(tx: Tx, membroId: string, posicaoId: string, inicio
   await tx.ocupacao.create({ data: { membroId, posicaoId, inicio, principal: principal ?? temPrincipal === 0 } });
 }
 
+/**
+ * Corpo de `adicionarOcupante` dentro de uma transação de quem chama, SEM conferir quem edita
+ * (quem chama confere: o G&G com `ehEditorGG`, a Gestão com a régua dela). Lança `Recusa`.
+ * `principal: true` = vira a principal e tira a marca das outras abertas (cadastro pela Gestão).
+ */
+export async function atribuirPosicaoTx(tx: Tx, posicaoId: string, membroId: string, inicio: string | null, ator: AtorGG, opcoes: { principal?: boolean } = {}) {
+  const d = data(inicio);
+  await travarMembro(tx, membroId);
+  const p = await tx.posicao.findFirst({ where: { id: posicaoId, ativo: true } });
+  const m = await tx.membro.findUnique({ where: { id: membroId } });
+  if (!p || !m) throw new Recusa("NAO_ENCONTRADO");
+  if (await tx.ocupacao.count({ where: { membroId, posicaoId, fim: null, invalidadoEm: null } })) throw new Recusa("JA_OCUPA");
+  if (opcoes.principal) await tx.ocupacao.updateMany({ where: { membroId, fim: null, invalidadoEm: null, principal: true }, data: { principal: false } });
+  await abrirOcupacao(tx, membroId, posicaoId, d, opcoes.principal);
+  await historico(tx, membroId, `Atribuído a ${p.nome}`, ator, { inicio });
+}
+
 export async function adicionarOcupante(posicaoId: string, membroId: string, inicio: string | null, ator: AtorGG): Promise<ResultadoOrg> {
   try {
     await exigirEditor(ator);
-    const d = data(inicio);
-    await db.$transaction(async (tx) => {
-      await travarMembro(tx, membroId);
-      const p = await tx.posicao.findFirst({ where: { id: posicaoId, ativo: true } });
-      const m = await tx.membro.findUnique({ where: { id: membroId } });
-      if (!p || !m) throw new Recusa("NAO_ENCONTRADO");
-      if (await tx.ocupacao.count({ where: { membroId, posicaoId, fim: null, invalidadoEm: null } })) throw new Recusa("JA_OCUPA");
-      await abrirOcupacao(tx, membroId, posicaoId, d);
-      await historico(tx, membroId, `Atribuído a ${p.nome}`, ator, { inicio });
-    });
+    await db.$transaction((tx) => atribuirPosicaoTx(tx, posicaoId, membroId, inicio, ator));
     return { ok: true };
   } catch (e) {
     return traduzir(e);
@@ -349,17 +397,24 @@ async function ocupacaoAberta(tx: Tx, ocupacaoId: string) {
   return o;
 }
 
+/**
+ * Corpo de `encerrarOcupacao` na transação de quem chama, SEM conferir quem edita (ver
+ * `atribuirPosicaoTx`). `doMembro`: recusa se a ocupação for de outro membro. Lança `Recusa`.
+ */
+export async function encerrarOcupacaoTx(tx: Tx, ocupacaoId: string, fim: string, ator: AtorGG, doMembro?: string) {
+  const d = data(fim, { obrigatoria: true })!;
+  const o = await ocupacaoAberta(tx, ocupacaoId);
+  if (doMembro !== undefined && o.membroId !== doMembro) throw new Recusa("NAO_ENCONTRADO");
+  if (o.inicio && d < o.inicio) throw new Recusa("DATA_ANTES_DO_INICIO");
+  await tx.ocupacao.update({ where: { id: o.id }, data: { fim: d, principal: false } });
+  await historico(tx, o.membroId, `Vínculo encerrado: ${o.posicao.nome}`, ator, { fim });
+}
+
 /** Fim = primeiro dia em que já não ocupa ([início, fim)). */
 export async function encerrarOcupacao(ocupacaoId: string, fim: string, ator: AtorGG): Promise<ResultadoOrg> {
   try {
     await exigirEditor(ator);
-    const d = data(fim, { obrigatoria: true })!;
-    await db.$transaction(async (tx) => {
-      const o = await ocupacaoAberta(tx, ocupacaoId);
-      if (o.inicio && d < o.inicio) throw new Recusa("DATA_ANTES_DO_INICIO");
-      await tx.ocupacao.update({ where: { id: o.id }, data: { fim: d, principal: false } });
-      await historico(tx, o.membroId, `Vínculo encerrado: ${o.posicao.nome}`, ator, { fim });
-    });
+    await db.$transaction((tx) => encerrarOcupacaoTx(tx, ocupacaoId, fim, ator));
     return { ok: true };
   } catch (e) {
     return traduzir(e);
