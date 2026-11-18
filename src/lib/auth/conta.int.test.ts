@@ -94,6 +94,15 @@ describe("trocarEmail", () => {
     log.mockRestore();
   });
 
+  it("email novo limpa a conta Google amarrada (o próximo login com Google amarra de novo)", async () => {
+    const u = await usuario();
+    await db.usuario.update({ where: { id: u.id }, data: { googleSub: "sub-antigo" } });
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    expect((await trocarEmail(u.id, { senha: "senha-antiga-1", email: "ana.nova@ij.test" })).ok).toBe(true);
+    expect((await db.usuario.findUniqueOrThrow({ where: { id: u.id } })).googleSub).toBeNull();
+    vi.restoreAllMocks();
+  });
+
   it("senha errada → recusa", async () => {
     const u = await usuario();
     expect(await trocarEmail(u.id, { senha: "errada-123", email: "outro@ij.test" })).toEqual({ ok: false, erro: "SENHA_ATUAL_INCORRETA" });

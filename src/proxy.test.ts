@@ -24,6 +24,13 @@ describe("proxy", () => {
     expect(proxy(req("/api/usuarios/x/foto")).status).toBe(401);
   });
 
+  it("Entrar com Google: início e callback são públicos; outro /api/auth não", () => {
+    expect(proxy(req("/api/auth/google")).headers.get("location")).toBeNull();
+    expect(proxy(req("/api/auth/google/callback?code=x&state=y")).headers.get("location")).toBeNull();
+    expect(proxy(req("/api/auth/google")).status).toBe(200);
+    expect(proxy(req("/api/auth/outra")).status).toBe(401);
+  });
+
   it("não libera prefixo parecido (/api/healthz)", () => {
     const res = proxy(req("/api/healthz"));
     expect(res.status).toBe(401);
