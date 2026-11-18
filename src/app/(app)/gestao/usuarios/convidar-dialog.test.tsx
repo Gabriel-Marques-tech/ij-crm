@@ -155,7 +155,7 @@ describe("cadastro: Posição na IJ em cascata", () => {
 describe("cadastro: homônimo e ficha ligada", () => {
   it("homônimo sem e-mail: pergunta, e 'Ligar a ele e salvar' reenvia os mesmos dados com o membro; o resultado mostra a ficha", async () => {
     acoes.criarConviteAction
-      .mockResolvedValueOnce({ erro: 'Já existe "Ana Souza" sem e-mail no G&G. É a mesma pessoa?', homonimo: { id: "m1", nome: "Ana Souza" } })
+      .mockResolvedValueOnce({ erro: 'Já existe "Ana Souza" sem e-mail no G&G. É a mesma pessoa?', homonimos: [{ id: "m1", nome: "Ana Souza" }] })
       .mockResolvedValueOnce({ link: "https://crm/convite/x", expiraEm: new Date().toISOString(), email: "ana@ij.test", fichaLigada: { nome: "Ana Souza", posicoes: ["Vendas · Membro"] } });
     montar();
     fireEvent.change(screen.getByLabelText("Nome"), { target: { value: "Ana Souza" } });
@@ -175,7 +175,7 @@ describe("cadastro: homônimo e ficha ligada", () => {
 
   it("'É outra pessoa' reenvia com criarMembroNovo", async () => {
     acoes.criarConviteAction.mockReset();
-    acoes.criarConviteAction.mockResolvedValueOnce({ erro: "x", homonimo: { id: "m1", nome: "Ana Souza" } }).mockResolvedValueOnce({ erro: "outra coisa" });
+    acoes.criarConviteAction.mockResolvedValueOnce({ erro: "x", homonimos: [{ id: "m1", nome: "Ana Souza" }] }).mockResolvedValueOnce({ erro: "outra coisa" });
     montar();
     fireEvent.change(screen.getByLabelText("Nome"), { target: { value: "Ana Souza" } });
     fireEvent.change(screen.getByLabelText("Email"), { target: { value: "ana@ij.test" } });
@@ -186,5 +186,52 @@ describe("cadastro: homônimo e ficha ligada", () => {
     expect(enviado.get("criarMembroNovo")).toBe("1");
     expect(enviado.get("ligarMembroId")).toBeNull();
     expect(await screen.findByText("outra coisa")).toBeTruthy();
+  });
+
+  it("depois de um erro, o form mantém o que mostra (cascata, papel, campos) e é isso que vai no reenvio e na confirmação", async () => {
+    acoes.criarConviteAction.mockReset();
+    acoes.criarConviteAction
+      .mockResolvedValueOnce({ erro: "Esse telefone já está em outro usuário." })
+      .mockResolvedValueOnce({ erro: "x", homonimos: [{ id: "m1", nome: "Ana Souza" }] })
+      .mockResolvedValueOnce({ erro: "fim" });
+    montar();
+    fireEvent.change(screen.getByLabelText("Nome"), { target: { value: "Ana Souza" } });
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "ana@ij.test" } });
+    escolher("Área da IJ", "proj");
+    escolher("Cargo na IJ", "p_pm");
+    fireEvent.submit(screen.getByRole("button", { name: "Cadastrar" }).closest("form")!);
+    expect(await screen.findByText("Esse telefone já está em outro usuário.")).toBeTruthy();
+    // Nada foi limpo: a tela mostra o que o próximo envio leva.
+    expect(sel("Área da IJ").value).toBe("proj");
+    expect(sel("Cargo na IJ").value).toBe("p_pm");
+    expect(papel()).toBe("PROJETOS");
+    expect((screen.getByLabelText("Nome") as HTMLInputElement).value).toBe("Ana Souza");
+    // Muda a posição e reenvia: vai a nova.
+    escolher("Área da IJ", "vend");
+    fireEvent.submit(screen.getByRole("button", { name: "Cadastrar" }).closest("form")!);
+    await waitFor(() => expect(acoes.criarConviteAction).toHaveBeenCalledTimes(2));
+    expect((acoes.criarConviteAction.mock.calls[1][1] as FormData).get("posicaoId")).toBe("p_mv");
+    // Na confirmação do homônimo, troca o telefone antes: vai o form atual, não o do envio anterior.
+    await screen.findByRole("button", { name: "Ligar a ele e salvar" });
+    fireEvent.change(screen.getByLabelText("WhatsApp (DDD + número)"), { target: { value: "11 98888-7777" } });
+    fireEvent.click(screen.getByRole("button", { name: "Ligar a ele e salvar" }));
+    await waitFor(() => expect(acoes.criarConviteAction).toHaveBeenCalledTimes(3));
+    const terceiro = acoes.criarConviteAction.mock.calls[2][1] as FormData;
+    expect(terceiro.get("ligarMembroId")).toBe("m1");
+    expect(terceiro.get("telefone")).toBe("11 98888-7777");
+    expect(terceiro.get("posicaoId")).toBe("p_mv");
+    expect(terceiro.get("papel")).toBe("VENDEDOR");
+  });
+
+  it("com mais de um homônimo, mostra um botão para cada", async () => {
+    acoes.criarConviteAction.mockReset();
+    acoes.criarConviteAction.mockResolvedValueOnce({ erro: "x", homonimos: [{ id: "m1", nome: "Ana Souza" }, { id: "m2", nome: "ana souza" }] });
+    montar();
+    fireEvent.change(screen.getByLabelText("Nome"), { target: { value: "Ana Souza" } });
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "ana@ij.test" } });
+    fireEvent.submit(screen.getByRole("button", { name: "Cadastrar" }).closest("form")!);
+    expect(await screen.findByText(/Há 2 membros sem e-mail/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: 'Ligar a "Ana Souza" (1)' })).toBeTruthy();
+    expect(screen.getByRole("button", { name: 'Ligar a "ana souza" (2)' })).toBeTruthy();
   });
 });

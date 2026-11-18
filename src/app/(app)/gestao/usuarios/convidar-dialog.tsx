@@ -52,29 +52,25 @@ type Lado = { papel: Papel; area: Area | null; cargos: readonly Cargo[] };
 const LADO_PADRAO: Lado = { papel: "VENDEDOR", area: null, cargos: [] };
 
 export function CorpoConvite({ papelAtor, googleAtivo, posicoes = SEM_POSICOES, onFechar }: { papelAtor: Papel; googleAtivo: boolean; posicoes?: Posicoes; onFechar: () => void }) {
-  // O último envio fica guardado: a confirmação do homônimo reenvia os mesmos dados, e os campos
-  // de texto voltam preenchidos depois de um erro (o React limpa o form após a action).
-  const ultimo = useRef<FormData | null>(null);
-  const [textos, setTextos] = useState<Record<string, string>>({});
-  const [estado, action, pendente] = useActionState(async (prev: Parameters<typeof criarConviteAction>[0], form: FormData) => {
-    ultimo.current = form;
-    setTextos(Object.fromEntries(["nome", "email", "telefone"].map((k) => [k, String(form.get(k) ?? "")])));
-    return criarConviteAction(prev, form);
-  }, undefined);
-  const valor = (campo: string) => textos[campo];
-
-  function confirmarHomonimo(campo: "ligarMembroId" | "criarMembroNovo", v: string) {
-    if (!ultimo.current) return;
-    const f = new FormData();
-    for (const [k, x] of ultimo.current) if (k !== "ligarMembroId" && k !== "criarMembroNovo") f.append(k, x);
-    f.set(campo, v);
-    startTransition(() => action(f));
-  }
+  const [estado, action, pendente] = useActionState(criarConviteAction, undefined);
+  // Envio por onSubmit (não `<form action>`): o React não limpa o form depois da action, então o que a
+  // tela mostra (cascata, papel, campos) é sempre o que vai no próximo envio, inclusive na confirmação.
+  const formRef = useRef<HTMLFormElement>(null);
   // A posição pré-preenche papel/área/cargos (`derivarDoOrganograma`, calculado no servidor); quem
   // cadastra ajusta depois. Remontar os campos (key) aplica o novo valor inicial; o servidor reaplica a régua.
   const [lado, setLado] = useState<Lado>(LADO_PADRAO);
   const [versao, setVersao] = useState(0);
   const [nota, setNota] = useState<string | null>(null);
+
+  function enviar(extra?: [campo: "ligarMembroId" | "criarMembroNovo", valor: string]) {
+    const form = formRef.current;
+    if (!form) return;
+    // A confirmação do homônimo vale para os dados que estão no form agora, que o navegador valida de novo.
+    if (extra && !form.reportValidity()) return;
+    const f = new FormData(form);
+    if (extra) f.set(extra[0], extra[1]);
+    startTransition(() => action(f));
+  }
 
   function escolherPosicao(o: OpcaoPosicao | null) {
     // Sem posição (ou cargo ainda por escolher): o que já está nos campos fica como está.
@@ -97,34 +93,50 @@ export function CorpoConvite({ papelAtor, googleAtivo, posicoes = SEM_POSICOES, 
       </div>
     );
 
+  const homonimos = estado?.homonimos ?? [];
   return (
-    <form action={action} className="space-y-4">
+    <form
+      ref={formRef}
+      onSubmit={(e) => {
+        e.preventDefault();
+        enviar();
+      }}
+      className="space-y-4"
+    >
       <div className="space-y-1.5">
         <Label htmlFor="nome">Nome</Label>
-        <Input id="nome" name="nome" required autoFocus defaultValue={valor("nome")} />
+        <Input id="nome" name="nome" required autoFocus />
       </div>
       <div className="space-y-1.5">
         <Label htmlFor="email">Email</Label>
-        <Input id="email" name="email" type="email" required defaultValue={valor("email")} />
+        <Input id="email" name="email" type="email" required />
       </div>
       <div className="space-y-1.5">
         <Label htmlFor="telefone">WhatsApp (DDD + número)</Label>
-        <Input id="telefone" name="telefone" placeholder="11 99999-8888" inputMode="tel" defaultValue={valor("telefone")} />
+        <Input id="telefone" name="telefone" placeholder="11 99999-8888" inputMode="tel" />
       </div>
       <CampoPosicao areas={posicoes.areas} temAreaGG={posicoes.temAreaGG} onEscolher={escolherPosicao} />
       {nota ? <p className="-mt-2 text-xs text-fg-faint">{nota}</p> : null}
       <CamposPapelLado key={versao} papelAtor={papelAtor} papel={lado.papel} area={lado.area} cargos={lado.cargos} />
-      {estado?.homonimo ? (
+      {homonimos.length ? (
         <div role="alert" className="space-y-2 rounded-lg border border-warn/50 bg-muted p-3 text-sm">
           <p>
-            Já existe <strong>&quot;{estado.homonimo.nome}&quot;</strong> sem e-mail no G&G. Ligar a ele?
+            {homonimos.length === 1 ? (
+              <>
+                Já existe <strong>&quot;{homonimos[0].nome}&quot;</strong> sem e-mail no G&G. Ligar a ele?
+              </>
+            ) : (
+              <>Há {homonimos.length} membros sem e-mail no G&G com esse nome. É algum deles?</>
+            )}
           </p>
-          <p className="text-xs text-fg-faint">Ligar grava este e-mail na ficha dele e registra no histórico. Se for outra pessoa, um membro novo é criado.</p>
+          <p className="text-xs text-fg-faint">Ligar grava este e-mail na ficha e registra no histórico. Se for outra pessoa, um membro novo é criado.</p>
           <div className="flex flex-wrap gap-2">
-            <Button type="button" size="sm" disabled={pendente} onClick={() => confirmarHomonimo("ligarMembroId", estado.homonimo!.id)}>
-              Ligar a ele e salvar
-            </Button>
-            <Button type="button" size="sm" variant="outline" disabled={pendente} onClick={() => confirmarHomonimo("criarMembroNovo", "1")}>
+            {homonimos.map((h, i) => (
+              <Button key={h.id} type="button" size="sm" disabled={pendente} onClick={() => enviar(["ligarMembroId", h.id])}>
+                {homonimos.length === 1 ? "Ligar a ele e salvar" : `Ligar a "${h.nome}" (${i + 1})`}
+              </Button>
+            ))}
+            <Button type="button" size="sm" variant="outline" disabled={pendente} onClick={() => enviar(["criarMembroNovo", "1"])}>
               É outra pessoa: criar membro novo
             </Button>
           </div>
@@ -141,7 +153,6 @@ export function CorpoConvite({ papelAtor, googleAtivo, posicoes = SEM_POSICOES, 
   );
 }
 
-/** Com o Google configurado: a pessoa já pode entrar; o link de convite (senha) fica opcional. */
 /** Ficha do G&G que já existia e foi ligada à conta (GAB-105), com as posições abertas dela. */
 function NotaFichaLigada({ ficha }: { ficha: FichaLigada }) {
   return (

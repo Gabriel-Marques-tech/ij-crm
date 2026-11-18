@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AreaPosicoes } from "@/lib/auth/cadastro";
 
 const acoes = vi.hoisted(() => ({
-  adicionarPosicaoUsuarioAction: vi.fn<(...a: unknown[]) => Promise<{ ok?: true; erro?: string; homonimo?: { id: string; nome: string } }>>(async () => ({ ok: true })),
+  adicionarPosicaoUsuarioAction: vi.fn<(...a: unknown[]) => Promise<{ ok?: true; erro?: string; homonimos?: { id: string; nome: string }[] }>>(async () => ({ ok: true })),
   encerrarOcupacaoUsuarioAction: vi.fn(async (): Promise<{ ok?: true; erro?: string }> => ({ ok: true })),
 }));
 vi.mock("./actions", () => acoes);
@@ -63,7 +63,7 @@ describe("edição: Posição na IJ", () => {
   });
 
   it("homônimo sem e-mail: pergunta e 'Ligar a ele' reenvia com o membro", async () => {
-    acoes.adicionarPosicaoUsuarioAction.mockResolvedValueOnce({ erro: "x", homonimo: { id: "m1", nome: "Edu Lima" } });
+    acoes.adicionarPosicaoUsuarioAction.mockResolvedValueOnce({ erro: "x", homonimos: [{ id: "m1", nome: "Edu Lima" }] });
     render(<PosicoesUsuario usuarioId="u1" ocupacoes={[]} areas={AREAS} temAreaGG />);
     escolherPm();
     fireEvent.click(screen.getByRole("button", { name: "Adicionar posição" }));

@@ -7,7 +7,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { Papel } from "@prisma/client";
 import { dbTeste, limparBanco } from "@/test/db";
 import { carregarBase, ehEditorGG } from "@/lib/gg/organizacao";
-import { adicionarPosicaoAoUsuario, cadastrarPessoa, encerrarOcupacaoDoUsuario, ocupacoesPorConta, opcoesDePosicao, type OpcaoPosicao } from "./cadastro";
+import { adicionarPosicaoAoUsuario, cadastrarPessoa, encerrarOcupacaoDoUsuario, ocupacoesPorConta, opcoesDePosicao, traduzir, type OpcaoPosicao } from "./cadastro";
 
 const db = dbTeste();
 const HOJE = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date());
@@ -209,7 +209,7 @@ describe("cadastrarPessoa com posição", () => {
     const ana = await db.membro.create({ data: { nome: "Ana Souza", status: "ATIVO" } });
     const o = await opcao("p_pm");
     const dados = { nome: "ana  souza", email: "ana@ij.test", ...o.sugestao, posicaoId: o.id };
-    expect(await cadastrarPessoa({ ...dados, nome: "Ana Souza" }, gestor)).toEqual({ ok: false, erro: "MEMBRO_MESMO_NOME", homonimo: { id: ana.id, nome: "Ana Souza" } });
+    expect(await cadastrarPessoa({ ...dados, nome: "Ana Souza" }, gestor)).toEqual({ ok: false, erro: "MEMBRO_MESMO_NOME", homonimos: [{ id: ana.id, nome: "Ana Souza" }] });
     expect(await conta("ana@ij.test")).toBeNull();
     expect(await db.membro.count()).toBe(1);
 
@@ -227,6 +227,72 @@ describe("cadastrarPessoa com posição", () => {
     // Ligar a um membro que já tem e-mail ou conta não passa.
     expect(await cadastrarPessoa({ nome: "Caio", email: "caio@ij.test", papel: "VENDEDOR", posicaoId: "p_mv" }, gestor, { ligarMembroId: ana.id })).toMatchObject({ ok: false, erro: "NAO_ENCONTRADO" });
     expect(await conta("caio@ij.test")).toBeNull();
+  });
+
+  it("ligarMembroId forjado: a ficha de outra pessoa (sem e-mail e sem conta, outro nome) não é ligada", async () => {
+    const { gestor } = await semear();
+    const carlos = await db.membro.create({ data: { nome: "Carlos Diretor", status: "ATIVO" } });
+    await db.membro.create({ data: { nome: "Zé Lima", status: "ATIVO" } });
+    expect(await cadastrarPessoa({ nome: "Zé Lima", email: "ze@ij.test", papel: "VENDEDOR", posicaoId: "p_mv" }, gestor, { ligarMembroId: carlos.id })).toMatchObject({ ok: false, erro: "NAO_ENCONTRADO" });
+    // Sem homônimo nenhum, o id forjado também não passa (não vira "criar novo" escondido).
+    expect(await cadastrarPessoa({ nome: "Bruna", email: "bruna@ij.test", papel: "VENDEDOR", posicaoId: "p_mv" }, gestor, { ligarMembroId: carlos.id })).toMatchObject({ ok: false, erro: "NAO_ENCONTRADO" });
+    const u = await db.usuario.create({ data: { nome: "Edu", email: "edu@ij.test", papel: "VISUALIZADOR" } });
+    expect(await adicionarPosicaoAoUsuario(u.id, "p_agg", gestor, { ligarMembroId: carlos.id })).toMatchObject({ ok: false, erro: "NAO_ENCONTRADO" });
+    expect(await db.membro.findUniqueOrThrow({ where: { id: carlos.id } })).toMatchObject({ usuarioId: null, email: null });
+    expect(await db.usuario.count({ where: { email: { in: ["ze@ij.test", "bruna@ij.test"] } } })).toBe(0);
+  });
+
+  it("homônimo: espaços internos não escondem; com mais de um, devolve todos para a tela escolher", async () => {
+    const { gestor } = await semear();
+    const a1 = await db.membro.create({ data: { nome: "Ana  Souza", status: "ATIVO" } });
+    const a2 = await db.membro.create({ data: { nome: "ana souza", status: "INATIVO" } });
+    const r = await cadastrarPessoa({ nome: "Ána Souza", email: "ana@ij.test", papel: "VENDEDOR", posicaoId: "p_mv" }, gestor);
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.homonimos?.map((h) => h.id).sort()).toEqual([a1.id, a2.id].sort());
+    expect(await cadastrarPessoa({ nome: "Ána Souza", email: "ana@ij.test", papel: "VENDEDOR", posicaoId: "p_mv" }, gestor, { ligarMembroId: a2.id })).toMatchObject({ ok: true, membroId: a2.id });
+  });
+
+  it("reingresso pela Gestão encerra na data da saída as ocupações que ficaram abertas antes dela, com histórico", async () => {
+    const { gestor } = await semear();
+    const m = await db.membro.create({ data: { nome: "Rita", email: "rita@ij.test", status: "INATIVO" } });
+    await db.vinculoIj.create({ data: { membroId: m.id, entrada: new Date("2025-02-01"), saida: new Date("2025-12-01") } });
+    const presa = await db.ocupacao.create({ data: { membroId: m.id, posicaoId: "p_mv", inicio: new Date("2025-03-01"), principal: true } });
+    expect(await cadastrarPessoa({ nome: "Rita", email: "rita@ij.test", papel: "PROJETOS", posicaoId: "p_pm" }, gestor)).toMatchObject({ ok: true });
+    const o = await db.ocupacao.findUniqueOrThrow({ where: { id: presa.id } });
+    expect(o.fim?.toISOString().slice(0, 10)).toBe("2025-12-01");
+    expect(o.principal).toBe(false);
+    expect((await db.historicoOrg.findMany({ where: { membroId: m.id } })).map((h) => h.evento)).toContain("Vínculo encerrado na saída da IJ: Membro de Vendas");
+    expect(ocupacoesPorConta(await carregarBase())[(await conta("rita@ij.test"))!.id].map((x) => x.rotulo)).toEqual(["Projetos · PM"]);
+  });
+
+  it("P2002 real do índice membro_email_unico vira recusa clara", async () => {
+    await semear();
+    await db.membro.create({ data: { nome: "Ana", email: "ana@ij.test" } });
+    const erro = await db.membro.create({ data: { nome: "Outra", email: "ANA@ij.test" } }).catch((e: unknown) => e);
+    expect(traduzir(erro)).toEqual({ ok: false, erro: "MEMBRO_EMAIL_EM_USO" });
+    // P2002 de outra tabela não é traduzido como membro.
+    const outro = await db.usuario.create({ data: { nome: "J2", email: "julia@ij.test" } }).catch((e: unknown) => e);
+    expect(() => traduzir(outro)).toThrow();
+  });
+
+  it("frentes de mesmo nome em ramos diferentes mostram o caminho", async () => {
+    await semear();
+    // O banco barra nome igual (lower/trim), mas não acento: "Seleção" e "Selecao" convivem.
+    await db.areaOrg.createMany({
+      data: [
+        { id: "sel1", nome: "Seleção", tipo: "FRENTE", superiorId: "gg" },
+        { id: "pes", nome: "Pessoas", tipo: "FRENTE", superiorId: "gg" },
+        { id: "sel2", nome: "Selecao", tipo: "FRENTE", superiorId: "pes" },
+      ],
+    });
+    await db.posicao.createMany({
+      data: [
+        { id: "p_s1", nome: "Analista Sel 1", areaId: "sel1", cargoId: "ana" },
+        { id: "p_s2", nome: "Analista Sel 2", areaId: "sel2", cargoId: "ana" },
+      ],
+    });
+    const gg = opcoesDePosicao(await carregarBase()).areas.find((a) => a.id === "gg")!;
+    expect(gg.frentes.map((f) => f.nome)).toEqual(["Pessoas · Selecao", "RH", "Seleção"]);
   });
 
   it("posição com área ou cargo desativado não é atribuída", async () => {
@@ -270,9 +336,21 @@ describe("edição: adicionar e encerrar posição", () => {
     const { gestor } = await semear();
     const u = await db.usuario.create({ data: { nome: "Edu Lima", email: "edu@ij.test", papel: "VISUALIZADOR" } });
     const edu = await db.membro.create({ data: { nome: "Edu Lima", status: "ATIVO" } });
-    expect(await adicionarPosicaoAoUsuario(u.id, "p_agg", gestor)).toEqual({ ok: false, erro: "MEMBRO_MESMO_NOME", homonimo: { id: edu.id, nome: "Edu Lima" } });
+    expect(await adicionarPosicaoAoUsuario(u.id, "p_agg", gestor)).toEqual({ ok: false, erro: "MEMBRO_MESMO_NOME", homonimos: [{ id: edu.id, nome: "Edu Lima" }] });
     expect(await adicionarPosicaoAoUsuario(u.id, "p_agg", gestor, { ligarMembroId: edu.id })).toEqual({ ok: true });
     expect(await db.membro.findUniqueOrThrow({ where: { id: edu.id } })).toMatchObject({ usuarioId: u.id, email: "edu@ij.test" });
+  });
+
+  it("conta já ligada a membro INATIVO: adicionar posição faz o reingresso", async () => {
+    const { gestor } = await semear();
+    const u = await db.usuario.create({ data: { nome: "Ivo", email: "ivo@ij.test", papel: "VISUALIZADOR" } });
+    const m = await db.membro.create({ data: { nome: "Ivo", email: "ivo@ij.test", status: "INATIVO", usuarioId: u.id } });
+    await db.vinculoIj.create({ data: { membroId: m.id, entrada: new Date("2025-01-10"), saida: new Date("2025-06-30") } });
+    expect(await adicionarPosicaoAoUsuario(u.id, "p_agg", gestor)).toEqual({ ok: true });
+    const r = await db.membro.findUniqueOrThrow({ where: { id: m.id }, include: { vinculos: true } });
+    expect(r.status).toBe("ATIVO");
+    expect(r.vinculos.filter((v) => v.saida === null).map((v) => v.entrada?.toISOString().slice(0, 10))).toEqual([HOJE]);
+    expect(await ehEditorGG(u)).toBe(true);
   });
 
   it("segunda posição não vira principal; liga membro existente pelo e-mail", async () => {

@@ -36,10 +36,14 @@ const MENSAGEM_CADASTRO: Record<ErroCadastro, string> = {
 /** Membro sem e-mail e sem conta com o mesmo nome no G&G: a tela pergunta se é a mesma pessoa. */
 export type Homonimo = { id: string; nome: string };
 
-export type EstadoConvite = { erro?: string; link?: string; expiraEm?: string; email?: string; homonimo?: Homonimo; fichaLigada?: FichaLigada } | undefined;
+export type EstadoConvite = { erro?: string; link?: string; expiraEm?: string; email?: string; homonimos?: Homonimo[]; fichaLigada?: FichaLigada } | undefined;
 
-function falha(r: FalhaCadastro): { erro: string; homonimo?: Homonimo } {
-  if (r.homonimo) return { erro: `Já existe "${r.homonimo.nome}" sem e-mail no G&G. É a mesma pessoa?`, homonimo: r.homonimo };
+function falha(r: FalhaCadastro): { erro: string; homonimos?: Homonimo[] } {
+  if (r.homonimos?.length)
+    return {
+      erro: r.homonimos.length === 1 ? `Já existe "${r.homonimos[0].nome}" sem e-mail no G&G. É a mesma pessoa?` : `Há ${r.homonimos.length} membros sem e-mail no G&G com esse nome. É algum deles?`,
+      homonimos: r.homonimos,
+    };
   return { erro: r.detalhe ?? MENSAGEM_CADASTRO[r.erro] };
 }
 
@@ -206,8 +210,8 @@ export async function adicionarPosicaoUsuarioAction(
   usuarioId: string,
   posicaoId: string,
   confirmacao: { ligarMembroId?: string | null; criarMembroNovo?: boolean } = {},
-): Promise<EstadoEdicao & { homonimo?: Homonimo }> {
-  return comTratamentoForm("gestao.usuarios.adicionarPosicao", async (): Promise<EstadoEdicao & { homonimo?: Homonimo }> => {
+): Promise<EstadoEdicao & { homonimos?: Homonimo[] }> {
+  return comTratamentoForm("gestao.usuarios.adicionarPosicao", async (): Promise<EstadoEdicao & { homonimos?: Homonimo[] }> => {
     const ator = await exigirPapel("GESTOR");
     if (!idSchema.safeParse(usuarioId).success || !idSchema.safeParse(posicaoId).success) return { erro: "Escolha uma posição." };
     const ligar = confirmacao?.ligarMembroId;

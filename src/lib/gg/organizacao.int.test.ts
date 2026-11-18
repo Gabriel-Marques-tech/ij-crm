@@ -207,12 +207,13 @@ describe("importação (importar_membros)", () => {
     expect(await db.membro.count()).toBe(1);
   });
 
-  it("membro já cadastrado pelo e-mail (sem caixa) e com posição recusa o lote; _ e % não são curinga", async () => {
+  it("membro já cadastrado pelo e-mail (sem caixa) recusa o lote; _ e % não são curinga", async () => {
     const { admin } = await semear();
-    const joao = await novo("Joao", admin, "Joao.Silva@ij.test");
-    await adicionarOcupante("p_sm", joao, null, admin);
+    // Membro com status e período (o criarMembro do G&G abre um), sem posição: segue recusando, como antes.
+    await novo("Joao", admin, "Joao.Silva@ij.test");
     const repetido = validarImportacao([{ nome: "Outro", email: "joao.silva@IJ.test" }], HOJE);
-    expect(await importarMembros(repetido, "00000000-0000-0000-0000-000000000004", admin)).toMatchObject({ ok: false, erro: "IMPORTACAO", detalhe: "Linha 1: membro já cadastrado, com posição." });
+    expect(await importarMembros(repetido, "00000000-0000-0000-0000-000000000004", admin)).toMatchObject({ ok: false, erro: "IMPORTACAO", detalhe: "Linha 1: membro já cadastrado." });
+    expect(await db.membro.count()).toBe(1);
     const parecidos = validarImportacao([{ nome: "Jo1", email: "jo_o.silva@ij.test" }, { nome: "Jo2", email: "jo%@ij.test" }], HOJE);
     expect(await importarMembros(parecidos, "00000000-0000-0000-0000-000000000005", admin)).toEqual({ ok: true, quantidade: 2 });
   });
@@ -230,6 +231,18 @@ describe("importação × cadastro pela Gestão (GAB-105)", () => {
     expect(m).toMatchObject({ nome: "Lia", status: "ATIVO", usuarioId: conta.id });
     expect(m.ocupacoes.map((o) => [o.posicaoId, o.principal])).toEqual([["p_pm", true]]);
     expect(m.vinculos.map((v) => v.entrada?.toISOString().slice(0, 10))).toEqual(["2026-03-02"]);
+  });
+
+  it("membro com o mesmo e-mail com posição, ou com status e período, recusa o lote inteiro", async () => {
+    const { admin } = await semear();
+    const comPosicao = await db.membro.create({ data: { nome: "Rui", email: "rui@ij.test", status: "NAO_INFORMADO" } });
+    await db.ocupacao.create({ data: { membroId: comPosicao.id, posicaoId: "p_sm" } });
+    const lote = validarImportacao([{ nome: "Novo" }, { nome: "Rui", email: "rui@ij.test" }], HOJE);
+    expect(await importarMembros(lote, "00000000-0000-0000-0000-000000000007", admin)).toMatchObject({ ok: false, erro: "IMPORTACAO", detalhe: "Linha 2: membro já cadastrado." });
+    const ativo = await db.membro.create({ data: { nome: "Sol", email: "sol@ij.test", status: "ATIVO" } });
+    await db.vinculoIj.create({ data: { membroId: ativo.id, entrada: null } });
+    expect(await importarMembros(validarImportacao([{ nome: "Sol", email: "sol@ij.test" }], HOJE), "00000000-0000-0000-0000-000000000008", admin)).toMatchObject({ ok: false, detalhe: "Linha 1: membro já cadastrado." });
+    expect(await db.membro.count()).toBe(2);
   });
 });
 

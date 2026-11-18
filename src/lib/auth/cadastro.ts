@@ -13,7 +13,7 @@
  */
 import type { Area, Cargo, Papel, Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { derivarDoOrganograma, descendentes, pareceAreaGG } from "@/lib/gg/modelo";
+import { derivarDoOrganograma, descendentes, normalizar, pareceAreaGG } from "@/lib/gg/modelo";
 import {
   areasGG,
   atribuirPosicaoTx,
@@ -33,8 +33,8 @@ import { podeAtribuirPapel } from "./papeis";
 import { criarConvite, formatarLado, type DadosConvite, type ErroUsuario } from "./usuarios";
 
 export type ErroCadastro = ErroUsuario | ErroOrg;
-/** Falha; `homonimo` = membro sem e-mail e sem conta com o mesmo nome, para a tela pedir confirmação. */
-export type FalhaCadastro = { ok: false; erro: ErroCadastro; detalhe?: string; homonimo?: { id: string; nome: string } };
+/** Falha; `homonimos` = membros sem e-mail e sem conta com o mesmo nome, para a tela pedir confirmação. */
+export type FalhaCadastro = { ok: false; erro: ErroCadastro; detalhe?: string; homonimos?: { id: string; nome: string }[] };
 export type ResultadoCadastro<T = object> = ({ ok: true } & T) | FalhaCadastro;
 /** Confirmação da tela quando há homônimo: ligar a ele (`ligarMembroId`) ou é outra pessoa (`criarMembroNovo`). */
 export type ConfirmacaoMembro = { ligarMembroId?: string | null; criarMembroNovo?: boolean };
@@ -56,13 +56,14 @@ class RecusaConta extends Desfaz {}
 const atorGG = (a: Ator): AtorGG => ({ id: a.id, nome: a.nome ?? "", papel: a.papel });
 const hoje = () => diaEmFuso(new Date());
 
-function traduzir(e: unknown): FalhaCadastro {
+/** Exportada para o teste do P2002 real. */
+export function traduzir(e: unknown): FalhaCadastro {
   if (e instanceof Desfaz) return { ok: false, erro: e.erro };
-  if (e instanceof RecusaHomonimo) return { ok: false, erro: e.erro, homonimo: e.membro };
+  if (e instanceof RecusaHomonimo) return { ok: false, erro: e.erro, homonimos: e.membros };
   if (e instanceof Recusa) return { ok: false, erro: e.erro, ...(e.detalhe ? { detalhe: e.detalhe } : {}) };
   // Índice `membro_email_unico` (lower(trim(email))): outro membro com o e-mail em outra grafia.
-  const err = e as { code?: string; meta?: { target?: unknown } };
-  if (err?.code === "P2002" && String(err.meta?.target ?? "").includes("membro_email")) return { ok: false, erro: "MEMBRO_EMAIL_EM_USO" };
+  const err = e as { code?: string; meta?: { target?: unknown; modelName?: unknown } };
+  if (err?.code === "P2002" && err.meta?.modelName === "Membro" && String(err.meta?.target ?? "").includes("email")) return { ok: false, erro: "MEMBRO_EMAIL_EM_USO" };
   throw e;
 }
 
@@ -201,10 +202,18 @@ export function opcoesDePosicao(base: BaseOrg): { areas: AreaPosicoes[]; temArea
   const areas = base.areas
     .filter((a) => a.superiorId === null || !base.areas.some((x) => x.id === a.superiorId))
     .map((a): AreaPosicoes => {
-      const frentes = [...descendentes(base.areas, a.id)]
-        .filter((id) => id !== a.id)
-        .map((id) => base.areas.find((x) => x.id === id)!)
-        .map((f) => ({ id: f.id, nome: f.nome, posicoes: no(f.id) }))
+      const abaixo = [...descendentes(base.areas, a.id)].filter((id) => id !== a.id).map((id) => base.areas.find((x) => x.id === id)!);
+      // Frentes de mesmo nome em ramos diferentes mostram o caminho abaixo da área ("Pessoas · Seleção").
+      // O banco já barra nome igual (lower/trim); aqui "igual" também ignora acento e espaços, que ele deixa passar.
+      const caminho = (f: (typeof abaixo)[number]) => {
+        const nomes: string[] = [];
+        for (let x: typeof f | undefined = f; x && x.id !== a.id; x = base.areas.find((y) => y.id === x!.superiorId)) nomes.unshift(x.nome);
+        return nomes.join(" · ");
+      };
+      const chave = (nome: string) => normalizar(nome).replace(/\s+/g, " ");
+      const repetido = (nome: string) => abaixo.filter((x) => chave(x.nome) === chave(nome)).length > 1;
+      const frentes = abaixo
+        .map((f) => ({ id: f.id, nome: repetido(f.nome) ? caminho(f) : f.nome, posicoes: no(f.id) }))
         .filter((f) => f.posicoes.length > 0)
         .sort((x, y) => comparar(x.nome, y.nome));
       return { id: a.id, nome: a.nome, posicoes: no(a.id), frentes, ehGG: gg.has(a.id), pareceGG: gg.has(a.id) || pareceAreaGG(a.nome) };

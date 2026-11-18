@@ -32,16 +32,16 @@ export function PosicoesUsuario({
   const [aviso, setAviso] = useState<string | null>(null);
   const [pendente, startTransition] = useTransition();
   // Homônimo sem e-mail no G&G (só quando a conta ainda não tem membro): pergunta antes de criar outro.
-  const [homonimo, setHomonimo] = useState<{ id: string; nome: string; posicao: OpcaoPosicao } | null>(null);
+  const [homonimo, setHomonimo] = useState<{ membros: { id: string; nome: string }[]; posicao: OpcaoPosicao } | null>(null);
 
-  function rodar(chamar: () => Promise<{ erro?: string; ok?: true; homonimo?: { id: string; nome: string } } | undefined>, depois: () => void, posicao?: OpcaoPosicao) {
+  function rodar(chamar: () => Promise<{ erro?: string; ok?: true; homonimos?: { id: string; nome: string }[] } | undefined>, depois: () => void, posicao?: OpcaoPosicao) {
     setErro(null);
     setAviso(null);
     setHomonimo(null);
     startTransition(async () => {
       try {
         const r = await chamar();
-        if (r?.homonimo && posicao) setHomonimo({ ...r.homonimo, posicao });
+        if (r?.homonimos?.length && posicao) setHomonimo({ membros: r.homonimos, posicao });
         else if (r?.erro) setErro(r.erro);
         else depois();
       } catch {
@@ -99,12 +99,20 @@ export function PosicoesUsuario({
       {homonimo ? (
         <div role="alert" className="space-y-2 rounded-lg border border-warn/50 bg-surface p-3 text-sm">
           <p>
-            Já existe <strong>&quot;{homonimo.nome}&quot;</strong> sem e-mail no G&G. Ligar a ele?
+            {homonimo.membros.length === 1 ? (
+              <>
+                Já existe <strong>&quot;{homonimo.membros[0].nome}&quot;</strong> sem e-mail no G&G. Ligar a ele?
+              </>
+            ) : (
+              <>Há {homonimo.membros.length} membros sem e-mail no G&G com esse nome. É algum deles?</>
+            )}
           </p>
           <div className="flex flex-wrap gap-2">
-            <Button type="button" size="sm" disabled={pendente} onClick={() => adicionar(homonimo.posicao, { ligarMembroId: homonimo.id })}>
-              Ligar a ele
-            </Button>
+            {homonimo.membros.map((h, i) => (
+              <Button key={h.id} type="button" size="sm" disabled={pendente} onClick={() => adicionar(homonimo.posicao, { ligarMembroId: h.id })}>
+                {homonimo.membros.length === 1 ? "Ligar a ele" : `Ligar a "${h.nome}" (${i + 1})`}
+              </Button>
+            ))}
             <Button type="button" size="sm" variant="outline" disabled={pendente} onClick={() => adicionar(homonimo.posicao, { criarMembroNovo: true })}>
               É outra pessoa: criar membro novo
             </Button>

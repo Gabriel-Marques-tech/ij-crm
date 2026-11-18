@@ -259,22 +259,46 @@ export async function editarMembro(id: string, d: DadosMembro, ator: AtorGG): Pr
   }
 }
 
-/** Membro sem e-mail e sem conta com o mesmo nome de quem está sendo cadastrado: pede confirmação na tela. */
+/** Membros sem e-mail e sem conta com o mesmo nome de quem está sendo cadastrado: a tela pergunta qual (ou nenhum). */
 export class RecusaHomonimo extends Recusa {
-  constructor(readonly membro: { id: string; nome: string }) {
+  constructor(readonly membros: { id: string; nome: string }[]) {
     super("MEMBRO_MESMO_NOME");
   }
 }
 
-/** Quem saiu da IJ e volta pela Gestão: reingresso na mesma transação (novo período desde hoje, ATIVO), como `registrarEntrada`. */
+/** Chave de homônimo: sem acento e caixa, espaços juntados. */
+const chaveNome = (nome: string) => normalizar(nome).replace(/\s+/g, " ");
+
+/** Membros sem e-mail e sem conta com o mesmo nome (candidatos a "é a mesma pessoa"). */
+async function homonimos(tx: Tx, nome: string) {
+  const chave = chaveNome(nome);
+  return (await tx.membro.findMany({ where: { email: null, usuarioId: null }, select: { id: true, nome: true }, orderBy: { nome: "asc" } })).filter((m) => chaveNome(m.nome) === chave);
+}
+
+/**
+ * Quem saiu da IJ e volta pela Gestão: reingresso na mesma transação, como `registrarEntrada`
+ * (novo período desde hoje, ATIVO). As ocupações que ficaram abertas e começaram antes da saída
+ * são encerradas na data da saída (a saída não fecha nada sozinha, como no G&G), com histórico.
+ */
 async function reingressarSeInativo(tx: Tx, membroId: string, ator: AtorGG) {
   const m = await tx.membro.findUniqueOrThrow({ where: { id: membroId }, select: { status: true } });
   if (m.status !== "INATIVO") return;
   const dia = hoje();
   const d = instanteDoPrazo(dia);
   if (!(await tx.vinculoIj.findFirst({ where: { membroId, saida: null } }))) {
-    const ultimo = await tx.vinculoIj.findFirst({ where: { membroId }, orderBy: { saida: "desc" } });
+    const ultimo = await tx.vinculoIj.findFirst({ where: { membroId, saida: { not: null } }, orderBy: { saida: "desc" } });
     if (ultimo?.saida && d < ultimo.saida) throw new Recusa("DATA_ANTES_DO_INICIO");
+    if (ultimo?.saida) {
+      const saida = ultimo.saida;
+      const presas = await tx.ocupacao.findMany({
+        where: { membroId, fim: null, invalidadoEm: null, OR: [{ inicio: null }, { inicio: { lt: saida } }] },
+        include: { posicao: { select: { nome: true } } },
+      });
+      for (const o of presas) {
+        await tx.ocupacao.update({ where: { id: o.id }, data: { fim: saida, principal: false } });
+        await historico(tx, membroId, `Vínculo encerrado na saída da IJ: ${o.posicao.nome}`, ator, { fim: diaDoPrazo(saida) });
+      }
+    }
     await tx.vinculoIj.create({ data: { membroId, entrada: d } });
   }
   await tx.membro.update({ where: { id: membroId }, data: { status: "ATIVO" } });
@@ -291,14 +315,14 @@ async function ligarConta(tx: Tx, membroId: string, usuarioId: string, ator: Ato
 
 /**
  * Membro da conta `usuarioId` (cadastro e edição pela Gestão, GAB-105), na transação de quem
- * chama e SEM conferir quem edita. Ordem:
- * 1. o membro já ligado a esta conta;
+ * chama e SEM conferir quem edita. Só é chamada quando há posição a atribuir. Ordem:
+ * 1. o membro já ligado a esta conta (INATIVO faz reingresso);
  * 2. o membro com o mesmo e-mail, por igualdade EXATA da forma normalizada (`normalizarEmail`,
  *    comparada em memória como em `importarMembros`, nada de ILIKE), que é ligado;
- * 3. `opcoes.ligarMembroId`: o membro sem e-mail e sem conta que quem cadastra confirmou na tela
- *    (ganha o e-mail);
- * 4. sem confirmação, membro sem e-mail e sem conta com o mesmo nome normalizado: `RecusaHomonimo`
- *    (a tela pergunta), a não ser que `opcoes.criarNovo` diga que é outra pessoa;
+ * 3. `opcoes.ligarMembroId`: um dos homônimos (sem e-mail, sem conta, mesmo nome normalizado),
+ *    conferido AQUI, que quem cadastra escolheu na tela (ganha o e-mail). Outro id: recusa;
+ * 4. sem escolha, havendo homônimos: `RecusaHomonimo` com todos (a tela pergunta), a não ser que
+ *    `opcoes.criarNovo` diga que é outra pessoa;
  * 5. cria um membro ATIVO com período aberto (entrada não informada).
  * Membro ligado (2 e 3) que estava INATIVO faz reingresso. Membro com o e-mail ligado a OUTRA
  * conta ou dois com o mesmo e-mail: `Recusa` (quem chama desfaz tudo).
@@ -310,7 +334,10 @@ export async function membroDaContaTx(
   opcoes: { ligarMembroId?: string | null; criarNovo?: boolean } = {},
 ): Promise<{ id: string; criado: boolean; ligado: boolean }> {
   const proprio = await tx.membro.findUnique({ where: { usuarioId: conta.usuarioId }, select: { id: true } });
-  if (proprio) return { id: proprio.id, criado: false, ligado: false };
+  if (proprio) {
+    await reingressarSeInativo(tx, proprio.id, ator);
+    return { id: proprio.id, criado: false, ligado: false };
+  }
   const email = normalizarEmail(conta.email);
   if (!email) throw new Recusa("DADOS_INVALIDOS");
   const comEmail = (await tx.membro.findMany({ where: { email: { not: null } }, select: { id: true, email: true, usuarioId: true } })).filter((m) => normalizarEmail(m.email!) === email);
@@ -322,17 +349,14 @@ export async function membroDaContaTx(
     return { id: existente.id, criado: false, ligado: true };
   }
   const nome = conta.nome.trim();
+  const candidatos = await homonimos(tx, nome);
   if (opcoes.ligarMembroId) {
-    const alvo = await tx.membro.findFirst({ where: { id: opcoes.ligarMembroId, email: null, usuarioId: null }, select: { id: true } });
-    if (!alvo) throw new Recusa("NAO_ENCONTRADO", "O membro escolhido não está mais sem e-mail e sem conta. Recarregue e tente de novo.");
-    await ligarConta(tx, alvo.id, conta.usuarioId, ator, `Conta do CRM ligada e e-mail gravado pelo cadastro na Gestão (${email})`, email);
-    return { id: alvo.id, criado: false, ligado: true };
+    // Só um dos homônimos detectados: um id forjado não liga a ficha de outra pessoa.
+    if (!candidatos.some((c) => c.id === opcoes.ligarMembroId)) throw new Recusa("NAO_ENCONTRADO", "Esse membro não é um homônimo sem e-mail e sem conta de quem está sendo cadastrado. Recarregue e tente de novo.");
+    await ligarConta(tx, opcoes.ligarMembroId, conta.usuarioId, ator, `Conta do CRM ligada e e-mail gravado pelo cadastro na Gestão (${email})`, email);
+    return { id: opcoes.ligarMembroId, criado: false, ligado: true };
   }
-  if (!opcoes.criarNovo) {
-    const chave = normalizar(nome);
-    const homonimo = (await tx.membro.findMany({ where: { email: null, usuarioId: null }, select: { id: true, nome: true } })).find((m) => normalizar(m.nome) === chave);
-    if (homonimo) throw new RecusaHomonimo(homonimo);
-  }
+  if (candidatos.length && !opcoes.criarNovo) throw new RecusaHomonimo(candidatos);
   const m = await tx.membro.create({ data: { nome, email, status: "ATIVO", usuarioId: conta.usuarioId } });
   await tx.vinculoIj.create({ data: { membroId: m.id, entrada: null } });
   await historico(tx, m.id, "Membro cadastrado pela Gestão (com a conta do CRM)", ator);
@@ -620,9 +644,12 @@ export async function importarMembros(linhas: LinhaImportacao[], chave: string, 
         if (chaveL) doLote.add(chaveL);
         const existente = chaveL ? porEmail.get(chaveL) : undefined;
         if (existente) {
-          // GAB-105: o cadastro na Gestão cria o membro só com a conta (e às vezes sem posição). Membro com o
-          // mesmo e-mail e sem ocupação é completado pela linha (conta, status, período, posição), sem derrubar o lote.
-          if (await tx.ocupacao.count({ where: { membroId: existente.id, invalidadoEm: null } })) throw new Recusa("IMPORTACAO", `${linha}: membro já cadastrado, com posição.`);
+          // GAB-105: membro com o mesmo e-mail ainda sem nada (sem ocupação; status não informado ou sem período) é
+          // completado pela linha (conta, status, período, posição), sem derrubar o lote.
+          // Só o membro "vazio": sem ocupação e (status não informado ou sem período nenhum). Os demais seguem a
+          // regra do G&G: recusa o lote.
+          const ficha = await tx.membro.findUniqueOrThrow({ where: { id: existente.id }, select: { status: true, _count: { select: { vinculos: true, ocupacoes: { where: { invalidadoEm: null } } } } } });
+          if (ficha._count.ocupacoes > 0 || (ficha.status !== "NAO_INFORMADO" && ficha._count.vinculos > 0)) throw new Recusa("IMPORTACAO", `${linha}: membro já cadastrado.`);
           await tx.membro.update({
             where: { id: existente.id },
             data: { ...(l.status !== "NAO_INFORMADO" ? { status: l.status } : {}), ...(existente.usuarioId ? {} : { usuarioId: await contaPorEmail(tx, l.email) }) },

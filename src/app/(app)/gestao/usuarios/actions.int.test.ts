@@ -268,10 +268,21 @@ describe("cadastro único pela action (GAB-105)", () => {
     await gestor();
     const ana = await db.membro.create({ data: { nome: "Ana Souza" } });
     const campos = { nome: "Ana Souza", email: "ana@ij.test", papel: "VISUALIZADOR", ladoNoForm: "1", area: "", posicaoId: "p_agg" };
-    expect(await criarConviteAction(undefined, form(campos))).toEqual({ erro: 'Já existe "Ana Souza" sem e-mail no G&G. É a mesma pessoa?', homonimo: { id: ana.id, nome: "Ana Souza" } });
+    expect(await criarConviteAction(undefined, form(campos))).toEqual({ erro: 'Já existe "Ana Souza" sem e-mail no G&G. É a mesma pessoa?', homonimos: [{ id: ana.id, nome: "Ana Souza" }] });
     const r = await criarConviteAction(undefined, form({ ...campos, ligarMembroId: ana.id }));
     expect(r).toMatchObject({ fichaLigada: { nome: "Ana Souza", posicoes: ["Gente & Gestão · Analista"] } });
     expect(r).toHaveProperty("link");
+  });
+
+  it("ligarMembroId forjado (membro que não é homônimo) é recusado no cadastro e na edição", async () => {
+    await gestor();
+    const carlos = await db.membro.create({ data: { nome: "Carlos Diretor" } });
+    const r = await criarConviteAction(undefined, form({ nome: "Zé", email: "ze@ij.test", papel: "VISUALIZADOR", ladoNoForm: "1", area: "", posicaoId: "p_agg", ligarMembroId: carlos.id }));
+    expect(r?.erro).toMatch(/não é um homônimo/);
+    expect(await db.usuario.findUnique({ where: { email: "ze@ij.test" } })).toBeNull();
+    const u = await db.usuario.create({ data: { nome: "Edu", email: "edu@ij.test", papel: "VISUALIZADOR" } });
+    expect((await adicionarPosicaoUsuarioAction(u.id, "p_agg", { ligarMembroId: carlos.id }))?.erro).toMatch(/não é um homônimo/);
+    expect(await db.membro.findUniqueOrThrow({ where: { id: carlos.id } })).toMatchObject({ usuarioId: null, email: null });
   });
 
   it("edição: adiciona e encerra posição pela action", async () => {
