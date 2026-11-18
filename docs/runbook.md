@@ -1229,8 +1229,9 @@ CRM ("Use sua conta Google @sou.inteli.edu.br.").
    `GOOGLE_CLIENT_SECRET` (marque como segredo) e
    `GOOGLE_DOMINIOS_PERMITIDOS=sou.inteli.edu.br`. Confira que `APP_URL` é a URL
    pública usada no passo 5.
-2. **Redeploy** (o merge traz a migration aditiva `20261118120000_login_google`,
-   que só adiciona a coluna nula `usuario.google_sub`; o `migrate` roda antes do
+2. **Redeploy** (o merge traz as migrations aditivas `20261118120000_login_google`
+   e `20261118130000_google_desligado`, que só adicionam as colunas nulas
+   `usuario.google_sub` e `usuario.google_desligado_em`; o `migrate` roda antes do
    app). Backup do Postgres antes, como em todo deploy com migration.
 3. Abra `/login`: o botão **Entrar com Google** aparece acima do formulário.
    Teste com uma conta cadastrada e outra não cadastrada.
@@ -1252,12 +1253,15 @@ Standalone (`compose.prod.yml`): as mesmas três variáveis no `.env`
   de novo. Pessoa recriou a conta Google: botão **Desligar Google** (ícone de
   corrente partida) na linha dela em Gestão → Usuários. Mesma regra do link de
   redefinição: gestor só para papéis abaixo do seu, admin para qualquer um,
-  ninguém em si mesmo. Auditoria `usuario.google_desligado usuario=… por=…`.
+  ninguém em si mesmo. Na mesma transação, **todas as sessões da pessoa caem**.
+  Auditoria `usuario.google_desligado usuario=… por=… sessoes_encerradas=N`.
 - **Busca do email**: igualdade exata com o email normalizado (nada de `ILIKE`;
   `_` e `%` são literais). Email com caractere não-ASCII (ex.: sinal Kelvin
   U+212A) é recusado como não cadastrado.
-- **Convite pendente** é resolvido (token apagado) no **1º** login com Google;
-  quem nunca entrou aparece como "ainda não entrou".
+- **Convite pendente** é resolvido (token apagado) só no **1º** vínculo de quem
+  nunca teve o Google desligado (`usuario.google_desligado_em` nulo); quem nunca
+  entrou aparece como "ainda não entrou". Link gerado depois (inclusive após
+  Desligar Google) nunca é apagado pelo login com Google.
 - **Saída por senha** de quem só entra com Google: botão **Gerar link para
   definir senha** na linha dela (é o link de convite; com o Google já ligado,
   ele continua valendo nos logins seguintes). Quem tem senha usa o link de
@@ -1271,7 +1275,9 @@ Standalone (`compose.prod.yml`): as mesmas três variáveis no `.env`
   folgado porque no campus todos podem sair pelo mesmo NAT: 120 inícios em 15
   min (`limitadorGoogleInicio`) e 30 recusas no callback em 15 min
   (`limitadorGoogleFalhas`; login concluído zera). O callback do próprio fluxo
-  nunca é recusado pelo contador de inícios.
+  nunca é recusado pelo contador de inícios. Só conta recusa com pedido válido
+  (state + cookie batendo): GET forjado no callback não gasta a cota do IP, e
+  as recusas não travam o início.
 - **state/nonce/PKCE**: guardados na memória do processo por 10 min (o
   navegador só leva o `state` num cookie httpOnly `ij_google_state`, path
   `/api/auth/google`) e consumidos no callback (uso único). Redeploy no meio de

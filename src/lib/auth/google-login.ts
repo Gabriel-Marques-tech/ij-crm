@@ -43,16 +43,18 @@ export async function entrarComGoogle(c: { sub: string; email: string }): Promis
   if (!email) return { ok: false, erro: "NAO_CADASTRADO", motivo: "desconhecido" };
   const u = await db.usuario.findUnique({
     where: { email },
-    select: { id: true, ativo: true, googleSub: true, conviteTokenHash: true, conviteExpiraEm: true },
+    select: { id: true, ativo: true, googleSub: true, googleDesligadoEm: true, conviteTokenHash: true, conviteExpiraEm: true },
   });
   if (!u) return { ok: false, erro: "NAO_CADASTRADO", motivo: "desconhecido" };
   if (!u.ativo) return { ok: false, erro: "NAO_CADASTRADO", motivo: "inativo" };
   if (u.googleSub !== null && u.googleSub !== c.sub) return { ok: false, erro: "CONTA_DIFERENTE", motivo: "sub_diferente" };
 
   const vinculou = u.googleSub === null;
-  // Só o 1º login com Google resolve o convite. Link gerado DEPOIS (gestão dando senha a
-  // quem já entra com Google) continua valendo nos logins seguintes.
-  const conviteResolvido = vinculou && (u.conviteTokenHash !== null || u.conviteExpiraEm !== null);
+  // Só o 1º vínculo de quem NUNCA teve Google desligado resolve o convite: aí o token só
+  // pode ser o do cadastro (ou reemissão antes de qualquer vínculo). Link gerado depois
+  // (gestão dando senha a quem já entra com Google, inclusive após "Desligar Google")
+  // nunca é apagado pelo login com Google. Opção mais simples: um carimbo, sem datas a comparar.
+  const conviteResolvido = vinculou && u.googleDesligadoEm === null && (u.conviteTokenHash !== null || u.conviteExpiraEm !== null);
   if (vinculou) {
     try {
       // `googleSub: null` e `ativo` no where: se outro login amarrou outra
@@ -76,8 +78,9 @@ export async function entrarComGoogle(c: { sub: string; email: string }): Promis
 export type ErroDesligarGoogle = "USUARIO_NAO_ENCONTRADO" | "PAPEL_NAO_PERMITIDO" | "NAO_PODE_ALTERAR_A_SI" | "SEM_GOOGLE";
 
 /**
- * Gestão: desliga a conta Google amarrada (`google_sub` = null), ex.: a pessoa
- * recriou a conta Google. O próximo login com Google amarra de novo. Mesma
+ * Gestão: desliga a conta Google amarrada (`google_sub` = null) e encerra as
+ * sessões do usuário, ex.: a pessoa recriou a conta Google. O próximo login com
+ * Google amarra de novo (sem apagar convite gerado depois). Mesma
  * regra do link de redefinição (é tomada de conta): só papel estritamente
  * inferior (gestor → vendedor…), admin → qualquer um, ninguém em si mesmo.
  */
@@ -89,8 +92,13 @@ export async function desligarGoogle(usuarioId: string, por: Pick<Usuario, "id" 
   if (alvo.googleSub === null) return { ok: false, erro: "SEM_GOOGLE" };
   // `papel` no where: promovido no meio → nada é gravado.
   const permitidos: Papel[] = PAPEIS.filter((p) => podeGerarRedefinicao(por.papel, p));
-  const r = await db.usuario.updateMany({ where: { id: alvo.id, papel: { in: permitidos }, googleSub: { not: null } }, data: { googleSub: null } });
-  if (r.count === 0) return { ok: false, erro: "PAPEL_NAO_PERMITIDO" };
-  console.info(`[auditoria] usuario.google_desligado usuario=${alvo.id} por=${por.id}`);
+  // Mesma transação: as sessões abertas caem (quem entrou pela conta Google desligada sai).
+  const encerradas = await db.$transaction(async (tx) => {
+    const r = await tx.usuario.updateMany({ where: { id: alvo.id, papel: { in: permitidos }, googleSub: { not: null } }, data: { googleSub: null, googleDesligadoEm: new Date() } });
+    if (r.count === 0) return null;
+    return (await tx.sessao.deleteMany({ where: { usuarioId: alvo.id } })).count;
+  });
+  if (encerradas === null) return { ok: false, erro: "PAPEL_NAO_PERMITIDO" };
+  console.info(`[auditoria] usuario.google_desligado usuario=${alvo.id} por=${por.id} sessoes_encerradas=${encerradas}`);
   return { ok: true };
 }

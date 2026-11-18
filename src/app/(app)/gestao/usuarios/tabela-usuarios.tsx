@@ -88,7 +88,7 @@ export function TabelaUsuarios({ usuarios, ator, googleAtivo = false }: { usuari
   }
 
   function desligar(u: Usuario) {
-    if (!window.confirm(`Desligar a conta Google de ${u.nome}? O próximo login com Google (com o mesmo email) liga a conta de novo.`)) return;
+    if (!window.confirm(`Desligar a conta Google de ${u.nome}? Isso encerra todas as sessões abertas dela. O próximo login com Google (com o mesmo email) liga a conta de novo.`)) return;
     setErroLinha(null);
     startTransition(async () => {
       const r = await desligarGoogleAction(u.id);

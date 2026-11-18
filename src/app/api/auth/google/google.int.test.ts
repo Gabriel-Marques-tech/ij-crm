@@ -315,12 +315,29 @@ describe("Entrar com Google", () => {
     expect(cookieSessao(await voltarDoGoogle(p))).not.toBeNull();
   });
 
-  it("limitador: 30 recusas por IP bloqueiam início e callback", async () => {
+  it("limitador: callbacks forjados sem pedido válido não contam (não travam o IP)", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
-    for (let i = 0; i < 30; i++) await voltarDoGoogle({ state: "inventado", cookie: "ij_google_state=inventado" });
-    const res = await iniciarGET(new Request(`${BASE}/api/auth/google`, { headers: { "x-forwarded-for": ip } }));
-    expect(new URL(res.headers.get("location")!).searchParams.get("erro")).toBe("limite");
-    expect(destino(await voltarDoGoogle({ state: "x", cookie: "ij_google_state=x" })).searchParams.get("erro")).toBe("limite");
+    await criarUsuario({ email: `ana@${DOMINIO}` });
+    for (let i = 0; i < 60; i++) {
+      await voltarDoGoogle({ state: "inventado", cookie: "ij_google_state=inventado" });
+      await voltarDoGoogle({ state: null });
+      await voltarDoGoogle({ state: "x", error: "access_denied" });
+    }
+    const p = await iniciar();
+    claimsDaVez = { ...claimsDaVez, email: `ana@${DOMINIO}`, sub: "sub-ana" };
+    expect(cookieSessao(await voltarDoGoogle(p))).not.toBeNull();
+    vi.restoreAllMocks();
+  });
+
+  it("limitador: 30 recusas com pedido válido bloqueiam o callback, mas não o início", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    for (let i = 0; i < 30; i++) {
+      const p = await iniciar();
+      claimsDaVez = { ...claimsDaVez, email: `ninguem@${DOMINIO}`, sub: "sub-x" };
+      expect(destino(await voltarDoGoogle(p)).searchParams.get("erro")).toBe("nao_cadastrado");
+    }
+    const p = await iniciar(); // o início continua liberado
+    expect(destino(await voltarDoGoogle(p)).searchParams.get("erro")).toBe("limite");
     vi.restoreAllMocks();
   });
 

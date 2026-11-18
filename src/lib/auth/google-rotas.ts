@@ -43,11 +43,16 @@ function paraLogin(erro: CodigoErroGoogle, ref: string, voltar: string | null): 
   return apagarCookieState(NextResponse.redirect(u, 303));
 }
 
-/** Recusa esperada: loga a causa (sem segredo) e volta ao login com a mesma ref. Conta no limitador de recusas. */
-function recusar(erro: CodigoErroGoogle, motivo: string, ctx: { ip: string; voltar: string | null; email?: string }): NextResponse {
+/**
+ * Recusa esperada: loga a causa (sem segredo) e volta ao login com a mesma ref.
+ * Conta no limitador de recusas só quando havia um pedido válido (`contar`):
+ * um GET forjado no callback, sem cookie/state, não custa nada a quem forja e
+ * não pode gastar a cota do IP inteiro (NAT do campus). Bater no limite também
+ * não conta de novo.
+ */
+function recusar(erro: CodigoErroGoogle, motivo: string, ctx: { ip: string; voltar: string | null; email?: string; contar?: boolean }): NextResponse {
   const ref = novaRef();
-  // Bater no limite não conta de novo (senão quem espera nunca sai do bloqueio).
-  if (erro !== "limite") limitadorGoogleFalhas.registrarFalha(ctx.ip);
+  if (erro !== "limite" && ctx.contar !== false) limitadorGoogleFalhas.registrarFalha(ctx.ip);
   console.warn(`[auth.google] ref=${ref} recusado erro=${erro} motivo=${motivo}${ctx.email ? ` email=${mascararEmail(ctx.email)}` : ""}`);
   return paraLogin(erro, ref, ctx.voltar);
 }
@@ -66,8 +71,8 @@ export async function iniciarLoginGoogle(req: Request): Promise<Response> {
   if (!cfg) return naoEncontrado();
   const ip = ipDoCliente(req.headers);
   const voltar = destinoSeguro(new URL(req.url).searchParams.get("voltar"));
+  // O início só olha o limitador de inícios: recusas no callback não travam o botão para o IP inteiro.
   if (limitadorGoogleInicio.bloqueado(ip)) return recusar("limite", "limitador_inicio", { ip, voltar });
-  if (limitadorGoogleFalhas.bloqueado(ip)) return recusar("limite", "limitador_recusas", { ip, voltar });
   // Só o limitador de inícios conta aqui: o callback deste mesmo fluxo não pode ser recusado por ele.
   limitadorGoogleInicio.registrarFalha(ip);
   const pedido = guardaPedidosGoogle.criar(voltar);
@@ -90,18 +95,21 @@ export async function callbackGoogle(req: Request): Promise<Response> {
   if (!cfg) return naoEncontrado();
   const ip = ipDoCliente(req.headers);
   let voltar: string | null = null;
+  let pedidoValido = false;
   try {
     const q = new URL(req.url).searchParams;
     if (limitadorGoogleFalhas.bloqueado(ip)) return recusar("limite", "limitador_callback", { ip, voltar });
     // Consome o pedido antes de tudo: mesmo um retorno com erro queima o state (uso único).
     const pedido = guardaPedidosGoogle.consumir(q.get("state"), cookieDe(req, COOKIE_STATE_GOOGLE));
     voltar = pedido ? destinoSeguro(pedido.voltar) : null;
+    pedidoValido = pedido !== null;
     const erroGoogle = q.get("error");
     if (erroGoogle) {
       const motivo = `google_${erroGoogle.replace(/[^a-z_]/gi, "").slice(0, 40)}`;
-      return recusar(erroGoogle === "access_denied" ? "cancelado" : "falha", motivo, { ip, voltar });
+      return recusar(erroGoogle === "access_denied" ? "cancelado" : "falha", motivo, { ip, voltar, contar: pedidoValido });
     }
-    if (!pedido) return recusar("expirado", "state_invalido_ou_reutilizado", { ip, voltar });
+    // Sem pedido válido (state ausente, inválido, reutilizado ou sem cookie): recusa sem contar.
+    if (!pedido) return recusar("expirado", "state_invalido_ou_reutilizado", { ip, voltar, contar: false });
     const codigo = q.get("code");
     if (!codigo || codigo.length > 2048) return recusar("falha", "sem_code", { ip, voltar });
 
@@ -129,7 +137,7 @@ export async function callbackGoogle(req: Request): Promise<Response> {
     res.cookies.set(COOKIE_AREA, "", { path: "/", maxAge: 0 });
     return res;
   } catch (e) {
-    limitadorGoogleFalhas.registrarFalha(ip);
+    if (pedidoValido) limitadorGoogleFalhas.registrarFalha(ip);
     return paraLogin("falha", registrarErro("auth.google.callback", e), voltar);
   }
 }
