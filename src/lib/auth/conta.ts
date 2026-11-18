@@ -112,7 +112,8 @@ export async function trocarEmail(
   if (!r.ok) return r;
   if (email === r.email) return { ok: true, email };
   try {
-    await db.usuario.update({ where: { id: usuarioId }, data: { email } });
+    // Email novo = a conta Google amarrada ao antigo deixa de valer (o próximo login com Google amarra de novo).
+    await db.usuario.update({ where: { id: usuarioId }, data: { email, googleSub: null } });
   } catch (e) {
     // Só o único de email vira mensagem amigável; qualquer outro P2002 é inesperado.
     if (ehUniqueDeEmail(e)) return { ok: false, erro: "EMAIL_EM_USO" };

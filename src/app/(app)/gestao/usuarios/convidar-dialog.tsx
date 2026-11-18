@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { criarConviteAction } from "./actions";
 import { CamposPapelLado } from "./campos-lado";
 
-export function ConvidarDialog({ papelAtor }: { papelAtor: Papel }) {
+export function ConvidarDialog({ papelAtor, googleAtivo = false }: { papelAtor: Papel; googleAtivo?: boolean }) {
   const [aberto, setAberto] = useState(false);
   // Remonta o corpo a cada abertura: o estado do useActionState (link gerado,
   // erro) não vaza para o próximo convite.
@@ -25,22 +25,27 @@ export function ConvidarDialog({ papelAtor }: { papelAtor: Papel }) {
     <Dialog open={aberto} onOpenChange={mudarAberto}>
       <DialogTrigger render={<Button />}>
         <UserPlus className="h-4 w-4" />
-        Convidar
+        {googleAtivo ? "Cadastrar" : "Convidar"}
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Convidar pessoa</DialogTitle>
-          <DialogDescription>Você recebe um link para mandar por WhatsApp ou email. Vale 7 dias.</DialogDescription>
+          <DialogTitle>{googleAtivo ? "Cadastrar pessoa" : "Convidar pessoa"}</DialogTitle>
+          <DialogDescription>
+            {googleAtivo
+              ? "Depois de salvar, a pessoa já entra com a conta Google deste email. Não precisa mandar link."
+              : "Você recebe um link para mandar por WhatsApp ou email. Vale 7 dias."}
+          </DialogDescription>
         </DialogHeader>
-        <CorpoConvite key={iteracao} papelAtor={papelAtor} onFechar={() => mudarAberto(false)} />
+        <CorpoConvite key={iteracao} papelAtor={papelAtor} googleAtivo={googleAtivo} onFechar={() => mudarAberto(false)} />
       </DialogContent>
     </Dialog>
   );
 }
 
-function CorpoConvite({ papelAtor, onFechar }: { papelAtor: Papel; onFechar: () => void }) {
+function CorpoConvite({ papelAtor, googleAtivo, onFechar }: { papelAtor: Papel; googleAtivo: boolean; onFechar: () => void }) {
   const [estado, action, pendente] = useActionState(criarConviteAction, undefined);
 
+  if (estado?.link && googleAtivo) return <CadastroComGoogle email={estado.email} link={estado.link} expiraEm={estado.expiraEm} onFechar={onFechar} />;
   if (estado?.link) return <LinkGerado link={estado.link} expiraEm={estado.expiraEm} onFechar={onFechar} />;
 
   return (
@@ -64,9 +69,36 @@ function CorpoConvite({ papelAtor, onFechar }: { papelAtor: Papel; onFechar: () 
         </p>
       ) : null}
       <Button type="submit" className="w-full" disabled={pendente}>
-        {pendente ? "Gerando…" : "Gerar link de convite"}
+        {pendente ? "Salvando…" : googleAtivo ? "Cadastrar" : "Gerar link de convite"}
       </Button>
     </form>
+  );
+}
+
+/** Com o Google configurado: a pessoa já pode entrar; o link de convite (senha) fica opcional. */
+function CadastroComGoogle({ email, link, expiraEm, onFechar }: { email?: string; link: string; expiraEm?: string; onFechar: () => void }) {
+  const [mostrarLink, setMostrarLink] = useState(false);
+  if (mostrarLink) return <LinkGerado link={link} expiraEm={expiraEm} onFechar={onFechar} aviso="Mostrado só uma vez. Deixa de valer depois do primeiro login com Google." />;
+  return (
+    <div className="space-y-4">
+      <div className="rounded-lg border border-border bg-muted p-3 text-sm">
+        <p className="eyebrow mb-1">cadastrado</p>
+        <p>
+          {email ? <span className="font-mono text-fg-soft">{email}</span> : "A pessoa"} já pode entrar no CRM com <strong>Entrar com Google</strong>. Não precisa mandar link.
+        </p>
+      </div>
+      <p className="text-xs text-fg-faint">
+        Prefere que ela use senha? Mostre o link de convite (vale 7 dias, aparece uma vez só). Ele deixa de valer depois do primeiro login com Google.
+      </p>
+      <div className="flex gap-2">
+        <Button onClick={onFechar} className="flex-1">
+          Fechar
+        </Button>
+        <Button variant="outline" onClick={() => setMostrarLink(true)}>
+          Mostrar link de convite
+        </Button>
+      </div>
+    </div>
   );
 }
 

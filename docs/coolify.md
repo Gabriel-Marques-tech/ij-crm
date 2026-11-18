@@ -46,7 +46,11 @@ produção atual. Não existe mais deploy automático via AWS/SSM.
 6. Em **Domains**, associe o serviço `app` a
    `https://crm.seudominio.com.br:3000`. A porta é interna; o acesso público
    continua por HTTPS na porta 443. Use a mesma origem em `APP_URL`, sem `:3000`.
-7. Carregue o Compose e faça o deploy com build das imagens `app` e `migrate`.
+7. Entrar com Google (opcional): `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` e
+   `GOOGLE_DOMINIOS_PERMITIDOS=sou.inteli.edu.br` (padrão do compose). URI de
+   redirecionamento no Google Cloud: `<APP_URL>/api/auth/google/callback`. Passo a
+   passo: runbook §14.
+8. Carregue o Compose e faça o deploy com build das imagens `app` e `migrate`.
    Ambos devem vir do mesmo commit. Os serviços Evolution, PostgreSQL da
    Evolution e Redis são iniciados pelo Compose.
 

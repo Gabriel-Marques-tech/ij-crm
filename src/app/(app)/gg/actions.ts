@@ -5,6 +5,7 @@ import { z } from "zod";
 import type { CategoriaEvento, DirecaoKpi, PapelRaci, StatusMembro, TipoDemanda } from "@prisma/client";
 import { exigirUsuario } from "@/lib/auth/atual";
 import { criarConvite, atualizarUsuario } from "@/lib/auth/usuarios";
+import { googleConfigurado } from "@/lib/auth/google";
 import { resolverAreaCargos, ROTULO_CARGO } from "@/lib/auth/areas";
 import { db } from "@/lib/db";
 import { comTratamento, type Inesperado } from "@/lib/erros/registrar";
@@ -17,7 +18,8 @@ import { diaEmFuso } from "@/lib/projetos/aging";
  * Actions da área G&G. Toda uma: sessão → zod → serviço (que confere quem edita:
  * `ehEditorGG`). Erro de regra volta como `{ erro }` com a mensagem pronta.
  */
-export type EstadoGG = { ok: true; id?: string; link?: string; quantidade?: number; ligados?: number } | { erro: string } | Inesperado;
+/** `google`: Entrar com Google ligado: a pessoa convidada já entra com o email, o link é alternativa. */
+export type EstadoGG = { ok: true; id?: string; link?: string; google?: boolean; quantidade?: number; ligados?: number } | { erro: string } | Inesperado;
 
 const id = z.string().min(1).max(64);
 const dia = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -132,7 +134,7 @@ export async function convidarParaCrmAction(membroId: string): Promise<EstadoGG>
     const cargos = lado.cargos.map((c) => ROTULO_CARGO[c]).join(", ");
     await db.historicoOrg.create({ data: { membroId, evento: `Convidado para o CRM como ${papel}${lado.area ? ` · ${lado.area}` : ""}${cargos ? ` · ${cargos}` : ""}`, autorId: a.id } });
     const base_ = process.env.APP_URL?.replace(/\/+$/, "") ?? "http://localhost:3000";
-    return { ok: true, link: `${base_}/convite/${r.token}` };
+    return { ok: true, link: `${base_}/convite/${r.token}`, google: googleConfigurado() };
   });
 }
 

@@ -14,6 +14,8 @@ const PUBLICAS = [
   "/api/health",
   "/api/mcp",
   "/api/oauth",
+  // Entrar com Google: início e callback acontecem sem sessão.
+  "/api/auth/google",
   "/.well-known",
   "/oauth",
 ];

@@ -258,6 +258,7 @@ export async function listarUsuarios() {
       telefoneWhatsapp: true,
       ativo: true,
       senhaHash: true,
+      googleSub: true,
       conviteExpiraEm: true,
       criadoEm: true,
       redefinicaoPedidaEm: true,
@@ -265,9 +266,13 @@ export async function listarUsuarios() {
       foto: { select: { atualizadoEm: true } },
     },
   }).then((lista) =>
-    lista.map(({ senhaHash, foto, ...u }) => ({
+    lista.map(({ senhaHash, googleSub, foto, ...u }) => ({
       ...u,
-      convitePendente: senhaHash === null,
+      // Quem já entrou com Google não tem convite pendente, mesmo sem senha.
+      convitePendente: senhaHash === null && googleSub === null,
+      entraComGoogle: googleSub !== null,
+      // Sem senha (convite pendente ou só Google): a gestão pode gerar o link para definir senha.
+      semSenha: senhaHash === null,
       redefinicaoLinkAtivo: u.redefinicaoExpiraEm !== null && u.redefinicaoExpiraEm.getTime() > Date.now(),
       fotoEm: foto?.atualizadoEm.getTime() ?? null,
     })),

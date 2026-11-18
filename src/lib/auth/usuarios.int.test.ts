@@ -257,7 +257,18 @@ describe("listarUsuarios (GAB-43)", () => {
       expect(u).not.toHaveProperty("senhaHash");
       expect(u).not.toHaveProperty("redefinicaoTokenHash");
       expect(u).not.toHaveProperty("foto");
+      expect(u).not.toHaveProperty("googleSub");
     }
+  });
+
+  it("quem já entrou com Google não aparece com convite pendente, mesmo sem senha", async () => {
+    await admin();
+    const google = await db.usuario.create({ data: { nome: "Google", email: "g@ij.test", papel: "VENDEDOR", senhaHash: null, googleSub: "sub-1" } });
+    const pendente = await db.usuario.create({ data: { nome: "Pendente", email: "p@ij.test", papel: "VENDEDOR", senhaHash: null } });
+    const lista = await listarUsuarios();
+    const por = (id: string) => lista.find((u) => u.id === id)!;
+    expect(por(google.id)).toMatchObject({ convitePendente: false, entraComGoogle: true, semSenha: true });
+    expect(por(pendente.id)).toMatchObject({ convitePendente: true, entraComGoogle: false, semSenha: true });
   });
 });
 

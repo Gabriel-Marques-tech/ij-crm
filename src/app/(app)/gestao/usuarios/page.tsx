@@ -1,5 +1,6 @@
 import { PageHeader } from "@/components/shell/page-header";
 import { exigirPapel } from "@/lib/auth/atual";
+import { googleConfigurado } from "@/lib/auth/google";
 import { podeGerarRedefinicao } from "@/lib/auth/papeis";
 import { listarUsuarios } from "@/lib/auth/usuarios";
 import { ConvidarDialog } from "./convidar-dialog";
@@ -12,6 +13,7 @@ const fmt = new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "s
 export default async function UsuariosPage() {
   const ator = await exigirPapel("GESTOR");
   const usuarios = await listarUsuarios();
+  const googleAtivo = googleConfigurado();
   // "Esqueci a senha" (GAB-43): pedidos abertos de contas ativas.
   const pedidos = usuarios.filter((u) => u.ativo && u.redefinicaoPedidaEm);
   return (
@@ -20,7 +22,7 @@ export default async function UsuariosPage() {
         eyebrow="gestão · usuários"
         title="Usuários"
         description="Quem acessa o CRM e qual telefone liga a pessoa às mensagens do grupo."
-        actions={<ConvidarDialog papelAtor={ator.papel} />}
+        actions={<ConvidarDialog papelAtor={ator.papel} googleAtivo={googleAtivo} />}
       />
       {pedidos.length > 0 ? (
         <section className="mb-6 rounded-xl border border-l-2 border-border border-l-danger bg-surface p-4">
@@ -42,7 +44,7 @@ export default async function UsuariosPage() {
           </p>
         </section>
       ) : null}
-      <TabelaUsuarios usuarios={usuarios} ator={ator} />
+      <TabelaUsuarios usuarios={usuarios} ator={ator} googleAtivo={googleAtivo} />
     </>
   );
 }

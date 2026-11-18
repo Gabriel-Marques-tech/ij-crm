@@ -11,6 +11,7 @@
 import type { Area, CategoriaCargo, Papel, Prisma, StatusMembro, TipoAreaOrg } from "@prisma/client";
 import { diaDoPrazo, instanteDoPrazo } from "@/lib/calendario/semana";
 import { db } from "@/lib/db";
+import { normalizarEmail } from "@/lib/normalizacao";
 import { diaEmFuso } from "@/lib/projetos/aging";
 import { descendentes, derivarDoOrganograma, normalizar, temCiclo, vigente, type Derivado, type LinhaImportacao } from "./modelo";
 
@@ -182,11 +183,21 @@ async function exigirEditor(ator: AtorGG) {
 
 // ---------------------------------------------------------------- membros
 
-/** Liga a conta do CRM pelo e-mail (sem diferenciar maiúsculas). */
+/**
+ * Liga a conta do CRM pelo e-mail (sem diferenciar maiúsculas). Igualdade EXATA
+ * com o email normalizado, que é como `usuario.email` é gravado: nada de
+ * `mode: "insensitive"` (vira ILIKE, e `_`/`%` casariam outra conta).
+ */
 async function contaPorEmail(tx: Tx, email: string | null): Promise<string | null> {
-  if (!email) return null;
-  const u = await tx.usuario.findFirst({ where: { email: { equals: email.trim(), mode: "insensitive" }, membro: { is: null } }, select: { id: true } });
+  const e = email ? normalizarEmail(email) : null;
+  if (!e) return null;
+  const u = await tx.usuario.findFirst({ where: { email: e, membro: { is: null } }, select: { id: true } });
   return u?.id ?? null;
+}
+
+/** Chave de comparação de e-mail de membro (o membro guarda o e-mail como foi digitado). */
+function chaveEmail(email: string): string {
+  return normalizarEmail(email) ?? email.trim().toLowerCase();
 }
 
 export type DadosMembro = { nome: string; email: string | null; status: StatusMembro; entrada?: string | null };
@@ -470,6 +481,8 @@ export async function importarMembros(linhas: LinhaImportacao[], chave: string, 
       const feita = await tx.importacaoMembros.findUnique({ where: { id: chave } });
       if (feita) return feita.quantidade;
       const [areas, cargos, posicoes] = await Promise.all([tx.areaOrg.findMany({ where: { ativo: true } }), tx.cargoOrg.findMany({ where: { ativo: true } }), tx.posicao.findMany({ where: { ativo: true } })]);
+      // E-mails já cadastrados, comparados em memória pela forma normalizada (sem ILIKE: `_`/`%` são literais).
+      const emails = new Set((await tx.membro.findMany({ where: { email: { not: null } }, select: { email: true } })).map((m) => chaveEmail(m.email!)));
       for (const [i, l] of linhas.entries()) {
         const linha = `Linha ${i + 1}`;
         const area = l.area ? areas.find((a) => normalizar(a.nome) === normalizar(l.area!)) : null;
@@ -478,8 +491,9 @@ export async function importarMembros(linhas: LinhaImportacao[], chave: string, 
         if (l.cargo && !cargo) throw new Recusa("IMPORTACAO", `${linha}: cargo "${l.cargo}" não existe.`);
         if (!!area !== !!cargo) throw new Recusa("IMPORTACAO", `${linha}: informe área e cargo juntos.`);
         // Como no importar_membros do G&G: já existe pelo nome ou pelo e-mail (sem caixa) → recusa o lote.
-        const jaExiste = await tx.membro.count({ where: { OR: [{ nome: { equals: l.nome, mode: "insensitive" } }, ...(l.email ? [{ email: { equals: l.email, mode: "insensitive" as const } }] : [])] } });
+        const jaExiste = (l.email && emails.has(chaveEmail(l.email))) || (await tx.membro.count({ where: { nome: { equals: l.nome, mode: "insensitive" } } }));
         if (jaExiste) throw new Recusa("IMPORTACAO", `${linha}: membro já cadastrado.`);
+        if (l.email) emails.add(chaveEmail(l.email));
         const m = await tx.membro.create({ data: { nome: l.nome, email: l.email, status: l.status, usuarioId: await contaPorEmail(tx, l.email) } });
         const entrada = l.entrada ? instanteDoPrazo(l.entrada) : null;
         await tx.vinculoIj.create({ data: { membroId: m.id, entrada } });

@@ -206,4 +206,27 @@ describe("importação (importar_membros)", () => {
     expect(await importarMembros(lote, "00000000-0000-0000-0000-000000000003", admin)).toMatchObject({ ok: false, erro: "IMPORTACAO", detalhe: "Linha 2: membro já cadastrado." });
     expect(await db.membro.count()).toBe(1);
   });
+
+  it("membro já cadastrado pelo e-mail (sem caixa) recusa o lote; _ e % não são curinga", async () => {
+    const { admin } = await semear();
+    await novo("Joao", admin, "Joao.Silva@ij.test");
+    const repetido = validarImportacao([{ nome: "Outro", email: "joao.silva@IJ.test" }], HOJE);
+    expect(await importarMembros(repetido, "00000000-0000-0000-0000-000000000004", admin)).toMatchObject({ ok: false, erro: "IMPORTACAO", detalhe: "Linha 1: membro já cadastrado." });
+    const parecidos = validarImportacao([{ nome: "Jo1", email: "jo_o.silva@ij.test" }, { nome: "Jo2", email: "jo%@ij.test" }], HOJE);
+    expect(await importarMembros(parecidos, "00000000-0000-0000-0000-000000000005", admin)).toEqual({ ok: true, quantidade: 2 });
+  });
+});
+
+describe("contaPorEmail (ligar conta do CRM pelo e-mail)", () => {
+  it("liga pela igualdade exata do e-mail normalizado; _ e % não casam outra conta", async () => {
+    const { admin } = await semear();
+    const joao = await db.usuario.create({ data: { nome: "Joao", email: "joao.silva@ij.test" } });
+    const sublinhado = await novo("Jo1", admin, "jo_o.silva@ij.test");
+    const porcento = await novo("Jo2", admin, "jo%@ij.test");
+    expect((await db.membro.findUniqueOrThrow({ where: { id: sublinhado } })).usuarioId).toBeNull();
+    expect((await db.membro.findUniqueOrThrow({ where: { id: porcento } })).usuarioId).toBeNull();
+    expect(await ligarContasPorEmail(admin)).toEqual({ ok: true, ligados: 0 });
+    const certo = await novo("Joao", admin, " Joao.Silva@IJ.test ");
+    expect((await db.membro.findUniqueOrThrow({ where: { id: certo } })).usuarioId).toBe(joao.id);
+  });
 });

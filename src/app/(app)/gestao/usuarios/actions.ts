@@ -5,7 +5,9 @@ import { z } from "zod";
 import { exigirPapel } from "@/lib/auth/atual";
 import { atualizarUsuario, criarConvite, reemitirConvite, type ErroUsuario } from "@/lib/auth/usuarios";
 import { MENSAGEM_REDEFINICAO, gerarLinkRedefinicao } from "@/lib/auth/redefinicao";
+import { desligarGoogle, type ErroDesligarGoogle } from "@/lib/auth/google-login";
 import { comTratamentoForm } from "@/lib/erros/registrar";
+import { normalizarEmail } from "@/lib/normalizacao";
 
 const MENSAGEM: Record<ErroUsuario, string> = {
   PAPEL_NAO_PERMITIDO: "Você não pode atribuir esse papel.",
@@ -20,7 +22,7 @@ const MENSAGEM: Record<ErroUsuario, string> = {
   USUARIO_NAO_ENCONTRADO: "Usuário não encontrado.",
 };
 
-export type EstadoConvite = { erro?: string; link?: string; expiraEm?: string } | undefined;
+export type EstadoConvite = { erro?: string; link?: string; expiraEm?: string; email?: string } | undefined;
 
 const papelSchema = z.enum(["ADMIN", "GESTOR", "VENDEDOR", "PROJETOS", "VISUALIZADOR"]);
 // "" = nenhuma área. Coerência com o papel é resolvida no serviço (lib/auth/areas).
@@ -87,7 +89,8 @@ export async function criarConviteAction(_prev: EstadoConvite, form: FormData): 
     const r = await criarConvite(parsed.data, ator);
     if (!r.ok) return { erro: MENSAGEM[r.erro] };
     revalidatePath("/gestao/usuarios");
-    return { link: linkConvite(r.token), expiraEm: r.expiraEm.toISOString() };
+    // Com o Google configurado a pessoa já entra com este email; o link fica como alternativa.
+    return { link: linkConvite(r.token), expiraEm: r.expiraEm.toISOString(), email: normalizarEmail(parsed.data.email) ?? parsed.data.email };
   });
 }
 
@@ -137,6 +140,25 @@ export async function alternarAtivoAction(usuarioId: string, ativo: boolean): Pr
     const ator = await exigirPapel("GESTOR");
     const r = await atualizarUsuario(usuarioId, { ativo }, ator);
     if (!r.ok) return { erro: MENSAGEM[r.erro] };
+    revalidatePath("/gestao/usuarios");
+    return { ok: true };
+  });
+}
+
+const MENSAGEM_DESLIGAR_GOOGLE: Record<ErroDesligarGoogle, string> = {
+  USUARIO_NAO_ENCONTRADO: "Usuário não encontrado.",
+  PAPEL_NAO_PERMITIDO: "Você não pode desligar o Google deste usuário (gestor só para papéis abaixo do seu).",
+  NAO_PODE_ALTERAR_A_SI: "Você não pode desligar o seu próprio Google aqui.",
+  SEM_GOOGLE: "Este usuário não tem conta Google ligada.",
+};
+
+/** Desliga a conta Google amarrada (o próximo login com Google amarra de novo). Mesma regra do link de redefinição. */
+export async function desligarGoogleAction(usuarioId: string): Promise<EstadoEdicao> {
+  return comTratamentoForm("gestao.usuarios.desligarGoogle", async (): Promise<EstadoEdicao> => {
+    const ator = await exigirPapel("GESTOR");
+    if (typeof usuarioId !== "string" || !usuarioId) return { erro: MENSAGEM_DESLIGAR_GOOGLE.USUARIO_NAO_ENCONTRADO };
+    const r = await desligarGoogle(usuarioId, ator);
+    if (!r.ok) return { erro: MENSAGEM_DESLIGAR_GOOGLE[r.erro] };
     revalidatePath("/gestao/usuarios");
     return { ok: true };
   });

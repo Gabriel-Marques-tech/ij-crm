@@ -79,10 +79,15 @@ export class FreioEsqueci {
 }
 
 // Singletons do processo (sobrevivem ao hot reload do Next em dev).
-const g = globalThis as unknown as { limitadorLogin?: Limitador; freioEsqueci?: FreioEsqueci };
+const g = globalThis as unknown as { limitadorLogin?: Limitador; freioEsqueci?: FreioEsqueci; limitadorGoogleInicio?: Limitador; limitadorGoogleFalhas?: Limitador };
 export const limitadorLogin = (g.limitadorLogin ??= new Limitador({ maxFalhas: 5, janelaMs: 15 * 60 * 1000 }));
 // 10 pedidos por IP em 15 min; 3 por IP+email por hora.
 export const freioEsqueci = (g.freioEsqueci ??= new FreioEsqueci(
   new Limitador({ maxFalhas: 10, janelaMs: 15 * 60 * 1000 }),
   new Limitador({ maxFalhas: 3, janelaMs: 60 * 60 * 1000 }),
 ));
+// Entrar com Google, por IP. Folgados de propósito: no campus todo mundo pode sair pelo mesmo NAT.
+// Inícios: limita o mapa de pedidos (google.ts); 120 em 15 min. Login concluído NÃO zera.
+export const limitadorGoogleInicio = (g.limitadorGoogleInicio ??= new Limitador({ maxFalhas: 120, janelaMs: 15 * 60 * 1000 }));
+// Recusas no callback (state inválido, conta não cadastrada…): 30 em 15 min; login concluído zera.
+export const limitadorGoogleFalhas = (g.limitadorGoogleFalhas ??= new Limitador({ maxFalhas: 30, janelaMs: 15 * 60 * 1000 }));

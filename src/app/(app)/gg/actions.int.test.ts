@@ -8,7 +8,7 @@ vi.mock("@/lib/auth/atual", () => ({ exigirUsuario }));
 vi.mock("server-only", () => ({}));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
-import { adicionarOcupanteAction, aplicarNoCrmAction, criarMembroAction, registrarSaidaAction } from "./actions";
+import { adicionarOcupanteAction, aplicarNoCrmAction, convidarParaCrmAction, criarMembroAction, registrarSaidaAction } from "./actions";
 
 const db = dbTeste();
 const HOJE = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date());
@@ -77,5 +77,20 @@ describe("autorização das actions de G&G", () => {
     como(julia); // a gestão aplica normalmente
     expect(await aplicarNoCrmAction(mc)).toEqual({ ok: true });
     expect((await db.usuario.findUniqueOrThrow({ where: { id: caio.id } })).papel).toBe("GESTOR");
+  });
+
+  it("convidar para o CRM avisa quando a pessoa já pode entrar com Google", async () => {
+    const { alice } = await semear();
+    como(alice);
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    const sem = await membro("Sem", "sem@ij.test");
+    vi.stubEnv("GOOGLE_CLIENT_ID", "");
+    expect(await convidarParaCrmAction(sem)).toMatchObject({ ok: true, link: expect.stringContaining("/convite/"), google: false });
+    const com = await membro("Com", "com@ij.test");
+    vi.stubEnv("GOOGLE_CLIENT_ID", "id");
+    vi.stubEnv("GOOGLE_CLIENT_SECRET", "segredo");
+    expect(await convidarParaCrmAction(com)).toMatchObject({ ok: true, google: true });
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
   });
 });
