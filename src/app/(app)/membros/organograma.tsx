@@ -106,11 +106,12 @@ export function Organograma({ base, editor, cadastra, escopo, fechado }: { base:
 function No({ p, ctx }: { p: PosicaoB; ctx: Contexto }) {
   const { base, posicoes, fechados, escopo, editor, cadastra } = ctx;
   const filhos = posicoes.filter((x) => x.liderancaId === p.id);
-  const area = base.areas.find((a) => a.id === p.areaId)!;
-  const cargo = base.cargos.find((c) => c.id === p.cargoId)!;
+  // Área ou cargo desativado com a posição ainda ativa: o cartão avisa em vez de derrubar a página.
+  const area = base.areas.find((a) => a.id === p.areaId);
+  const cargo = base.cargos.find((c) => c.id === p.cargoId);
   const ocupacoes = base.ocupacoes.filter((o) => o.posicaoId === p.id && vigente(o, base.hoje));
   const fechado = fechados.has(p.id);
-  const frente = area.tipo === "FRENTE";
+  const frente = area?.tipo === "FRENTE";
   return (
     <li>
       <article
@@ -121,11 +122,11 @@ function No({ p, ctx }: { p: PosicaoB; ctx: Contexto }) {
         )}
       >
         <div className="mb-1.5 flex items-start justify-between gap-2">
-          <span className={cn("pt-1.5 font-mono text-[11px] tracking-wide", frente ? "text-chart-5" : "text-primary/80")}>{area.nome}</span>
+          <span className={cn("pt-1.5 font-mono text-[11px] tracking-wide", frente ? "text-chart-5" : "text-primary/80")}>{area?.nome ?? "área inativa"}</span>
           {editor ? (
             <MenuOcupacao
               posicao={{ id: p.id, nome: p.nome }}
-              ocupantes={ocupacoes.map((o) => ({ ocupacaoId: o.id, nome: base.membros.find((m) => m.id === o.membroId)!.nome, principal: o.principal }))}
+              ocupantes={ocupacoes.map((o) => ({ ocupacaoId: o.id, nome: base.membros.find((m) => m.id === o.membroId)?.nome ?? "?", principal: o.principal }))}
               posicoes={ctx.opcoesPosicao}
               membros={ctx.opcoesMembro}
               hoje={base.hoje}
@@ -134,7 +135,7 @@ function No({ p, ctx }: { p: PosicaoB; ctx: Contexto }) {
         </div>
         <strong className="block text-sm font-medium leading-snug">{p.nome}</strong>
         <span className="text-xs text-fg-faint">
-          {cargo.nome} · {ROTULO_CATEGORIA[cargo.categoria]}
+          {cargo ? `${cargo.nome} · ${ROTULO_CATEGORIA[cargo.categoria]}` : "cargo inativo"}
         </span>
         {ocupacoes.length ? (
           ocupacoes.map((o, i) => {

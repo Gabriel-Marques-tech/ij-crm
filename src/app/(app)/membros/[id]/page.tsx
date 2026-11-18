@@ -27,7 +27,8 @@ const TOM_STATUS = { ATIVO: "ok", AFASTADO: "aviso", INATIVO: "perigo", NAO_INFO
 export default async function FichaPage({ params }: { params: Promise<{ id: string }> }) {
   const ator = await exigirUsuario();
   const { id } = await params;
-  const [base, editor] = await Promise.all([carregarBase(), ehEditorGG(ator)]);
+  const base = await carregarBase();
+  const editor = await ehEditorGG(ator, base);
   const m = base.membros.find((x) => x.id === id);
   if (!m) notFound();
   const gestao = temPapelMinimo(ator.papel, "GESTOR");

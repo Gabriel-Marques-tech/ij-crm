@@ -29,7 +29,8 @@ export default async function MembrosPage({ searchParams }: { searchParams: Prom
   const ator = await exigirUsuario();
   const sp = await searchParams;
   const visao = lerVisao(um(sp.visao));
-  const [base, editor] = await Promise.all([carregarBase(), ehEditorGG(ator)]);
+  const base = await carregarBase();
+  const editor = await ehEditorGG(ator, base);
   const gestao = temPapelMinimo(ator.papel, "GESTOR");
   const cadastra = podeCadastrarPessoa(ator.papel);
   const posicoes = cadastra ? opcoesDePosicao(base) : null;

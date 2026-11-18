@@ -33,10 +33,10 @@ export async function ListaMembros({ ator, base, editor, filtros }: { ator: { id
   }).length;
   const areaDe = (id: string) => base.areas.find((a) => a.id === id);
   const cargoDe = (id: string) => base.cargos.find((c) => c.id === id);
-  // Áreas de topo e, logo abaixo, as frentes delas (indentadas): a área inclui as frentes no filtro.
+  // Áreas de topo e, logo abaixo, as frentes delas com "— " (a área inclui as frentes no filtro).
   const opcoesArea = base.areas
     .filter((a) => !a.superiorId)
-    .flatMap((a) => [{ id: a.id, nome: a.nome }, ...base.areas.filter((f) => f.superiorId === a.id).map((f) => ({ id: f.id, nome: `  ${f.nome}` }))]);
+    .flatMap((a) => [{ id: a.id, nome: a.nome }, ...base.areas.filter((f) => f.superiorId === a.id).map((f) => ({ id: f.id, nome: `— ${f.nome}` }))]);
   const filtrando = !!(filtros.q || filtros.area || filtros.cargo || filtros.status);
 
   return (

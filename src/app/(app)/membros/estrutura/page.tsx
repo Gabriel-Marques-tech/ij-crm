@@ -20,7 +20,8 @@ const TOM_CATEGORIA = { DIRETORIA: "coral", LIDERANCA: "gg", MEMBRO: "neutro" } 
  */
 export default async function EstruturaPage() {
   const ator = await exigirUsuario();
-  const [base, editor] = await Promise.all([carregarBase(), ehEditorGG(ator)]);
+  const base = await carregarBase();
+  const editor = await ehEditorGG(ator, base);
   const ocupadas = (ids: Set<string>) => base.ocupacoes.filter((o) => vigente(o, base.hoje) && ids.has(base.posicoes.find((p) => p.id === o.posicaoId)?.areaId ?? "")).length;
   const topo = base.areas.filter((a) => !a.superiorId);
   return (

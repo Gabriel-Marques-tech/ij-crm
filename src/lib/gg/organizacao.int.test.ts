@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type { Papel } from "@prisma/client";
 import { dbTeste, limparBanco } from "@/test/db";
-import { validarImportacao } from "./modelo";
+import { validarImportacao, vigente } from "./modelo";
 import {
   adicionarOcupante,
   carregarBase,
@@ -270,6 +270,43 @@ describe("importação: linha inativa fecha o período (GAB-106, M1 da revisão 
     expect(rui.vinculos.map((v) => [v.entrada?.toISOString().slice(0, 10), v.saida?.toISOString().slice(0, 10) ?? null])).toEqual([["2025-03-01", HOJE]]);
     const sol = await db.membro.findFirstOrThrow({ where: { nome: "Sol" }, include: { vinculos: true } });
     expect(sol.vinculos.map((v) => v.saida)).toEqual([null]);
+  });
+});
+
+describe("importação: linha inativa com área e cargo não ocupa a vaga (GAB-106)", () => {
+  it("a ocupação entra encerrada na data da importação, não principal; postosDe vazio e a posição segue vaga", async () => {
+    const { admin } = await semear();
+    const lote = validarImportacao([{ nome: "Ex PM", email: "ex.pm@ij.test", status: "inativo", area: "Projetos", cargo: "PM", entrada: "2025-03-01" }], HOJE);
+    expect(await importarMembros(lote, "00000000-0000-0000-0000-000000000011", admin)).toEqual({ ok: true, quantidade: 1 });
+    const m = await db.membro.findFirstOrThrow({ where: { nome: "Ex PM" } });
+    const ocs = await ocupacoes(m.id);
+    expect(ocs.map((o) => [o.posicaoId, o.fim?.toISOString().slice(0, 10), o.principal])).toEqual([["p_pm", HOJE, false]]);
+    const base = await carregarBase();
+    expect(postosDe(base, m.id)).toEqual([]);
+    // O organograma marca "Vago" a posição sem ocupação vigente.
+    expect(base.ocupacoes.filter((o) => o.posicaoId === "p_pm" && vigente(o, base.hoje))).toEqual([]);
+  });
+
+  it("membro existente NAO_INFORMADO completado por linha inativa com posição: idem", async () => {
+    const { admin } = await semear();
+    const lia = await db.membro.create({ data: { nome: "Lia", email: "lia@ij.test", status: "NAO_INFORMADO" } });
+    const lote = validarImportacao([{ nome: "Lia", email: "lia@ij.test", status: "inativo", area: "Projetos", cargo: "PM" }], HOJE);
+    expect(await importarMembros(lote, "00000000-0000-0000-0000-000000000012", admin)).toEqual({ ok: true, quantidade: 1 });
+    expect(postosDe(await carregarBase(), lia.id)).toEqual([]);
+    expect((await ocupacoes(lia.id)).map((o) => [o.fim?.toISOString().slice(0, 10), o.principal])).toEqual([[HOJE, false]]);
+  });
+});
+
+describe("ehEditorGG com a base já carregada (GAB-106)", () => {
+  it("responde igual sem ir ao banco de novo", async () => {
+    const { admin, julia, paula, paulaU } = await semear();
+    const m = await novo("Paula", admin, "paula@ij.test");
+    await db.membro.update({ where: { id: m }, data: { usuarioId: paulaU.id } });
+    await adicionarOcupante("p_grh", m, null, admin);
+    const base = await carregarBase();
+    for (const u of [admin, julia, paula]) expect(await ehEditorGG(u, base)).toBe(await ehEditorGG(u));
+    expect(await ehEditorGG(paula, base)).toBe(true);
+    expect(await ehEditorGG(julia, base)).toBe(false);
   });
 });
 
