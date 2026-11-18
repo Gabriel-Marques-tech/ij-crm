@@ -13,6 +13,7 @@ import {
   encerrarOcupacao,
   importarMembros,
   ligarContasPorEmail,
+  membroDaContaTx,
   postosDe,
   registrarEntrada,
   registrarSaida,
@@ -243,6 +244,61 @@ describe("importação × cadastro pela Gestão (GAB-105)", () => {
     await db.vinculoIj.create({ data: { membroId: ativo.id, entrada: null } });
     expect(await importarMembros(validarImportacao([{ nome: "Sol", email: "sol@ij.test" }], HOJE), "00000000-0000-0000-0000-000000000008", admin)).toMatchObject({ ok: false, detalhe: "Linha 1: membro já cadastrado." });
     expect(await db.membro.count()).toBe(2);
+  });
+});
+
+describe("importação: linha inativa fecha o período (GAB-106, M1 da revisão do GAB-105)", () => {
+  it("membro NAO_INFORMADO com período aberto e linha inativa: fica INATIVO com o período fechado, como registrarSaida", async () => {
+    const { admin } = await semear();
+    const lia = await db.membro.create({ data: { nome: "Lia", email: "lia@ij.test", status: "NAO_INFORMADO" } });
+    await db.vinculoIj.create({ data: { membroId: lia.id, entrada: new Date("2025-02-01T03:00:00Z") } });
+    const lote = validarImportacao([{ nome: "Lia", email: "lia@ij.test", status: "inativo" }], HOJE);
+    expect(await importarMembros(lote, "00000000-0000-0000-0000-000000000009", admin)).toEqual({ ok: true, quantidade: 1 });
+    const m = await db.membro.findUniqueOrThrow({ where: { id: lia.id }, include: { vinculos: true } });
+    expect(m.status).toBe("INATIVO");
+    expect(m.vinculos.map((v) => v.saida?.toISOString().slice(0, 10) ?? null)).toEqual([HOJE]);
+    expect(await db.vinculoIj.count({ where: { membroId: lia.id, saida: null } })).toBe(0);
+    expect((await db.historicoOrg.findMany({ where: { membroId: lia.id } })).map((h) => h.evento)).toContain("Saída da IJ registrada pela importação (data da importação)");
+  });
+
+  it("membro novo importado como inativo também não fica com período aberto", async () => {
+    const { admin } = await semear();
+    const lote = validarImportacao([{ nome: "Rui", status: "inativo", entrada: "2025-03-01" }, { nome: "Sol", status: "ativo" }], HOJE);
+    expect(await importarMembros(lote, "00000000-0000-0000-0000-000000000010", admin)).toEqual({ ok: true, quantidade: 2 });
+    const rui = await db.membro.findFirstOrThrow({ where: { nome: "Rui" }, include: { vinculos: true } });
+    expect(rui.status).toBe("INATIVO");
+    expect(rui.vinculos.map((v) => [v.entrada?.toISOString().slice(0, 10), v.saida?.toISOString().slice(0, 10) ?? null])).toEqual([["2025-03-01", HOJE]]);
+    const sol = await db.membro.findFirstOrThrow({ where: { nome: "Sol" }, include: { vinculos: true } });
+    expect(sol.vinculos.map((v) => v.saida)).toEqual([null]);
+  });
+});
+
+describe("ligarConta pelo homônimo escolhido (GAB-106, M2 da revisão do GAB-105)", () => {
+  it("se o homônimo ganhou e-mail no meio do cadastro, recusa em vez de sobrescrever", async () => {
+    const { admin } = await semear();
+    const conta = await db.usuario.create({ data: { nome: "Ana", email: "ana.nova@ij.test" } });
+    const ana = await db.membro.create({ data: { nome: "Ana", status: "ATIVO" } });
+    // Depois de a busca de homônimos ver a Ana sem e-mail, outra sessão grava um e-mail nela (a corrida).
+    const espiar = <T extends object>(alvo: T, troca: (k: string | symbol, v: unknown) => unknown): T =>
+      new Proxy(alvo, { get: (t, k) => troca(k, typeof Reflect.get(t, k) === "function" ? (Reflect.get(t, k) as (...a: unknown[]) => unknown).bind(t) : Reflect.get(t, k)) });
+    const cadastro = db.$transaction(async (tx) => {
+      const txEspiao = espiar(tx, (k, v) =>
+        k !== "membro"
+          ? v
+          : espiar(tx.membro, (km, vm) =>
+              km !== "findMany"
+                ? vm
+                : async (args: { where?: { email?: unknown } }) => {
+                    const r = await tx.membro.findMany(args as never);
+                    if (args?.where?.email === null) await db.membro.update({ where: { id: ana.id }, data: { email: "ana.outra@ij.test" } });
+                    return r;
+                  },
+            ),
+      );
+      return membroDaContaTx(txEspiao, { usuarioId: conta.id, nome: "Ana", email: conta.email }, admin, { ligarMembroId: ana.id });
+    });
+    await expect(cadastro).rejects.toMatchObject({ erro: "MEMBRO_DE_OUTRA_CONTA" });
+    expect(await db.membro.findUniqueOrThrow({ where: { id: ana.id } })).toMatchObject({ email: "ana.outra@ij.test", usuarioId: null });
   });
 });
 
