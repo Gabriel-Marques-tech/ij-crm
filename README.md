@@ -67,11 +67,14 @@ sem dependência nova: `src/lib/auth/google.ts`, rotas `/api/auth/google` e
   ou não verificado volta ao `/login` com "Seu email não está cadastrado no CRM. Peça a um
   gestor." e uma ref; o log tem a causa com a mesma ref (`grep 'ref=<ref>'`).
 - **Domínio**: `GOOGLE_DOMINIOS_PERMITIDOS` (vírgula; vazio ou `*` = qualquer domínio).
-  Confere o domínio do email e o claim `hd` quando vem. Produção: `sou.inteli.edu.br`.
+  Com lista, exige o domínio do email **e** o claim `hd` (conta do Workspace; conta
+  pessoal sem `hd` é recusada). Produção: `sou.inteli.edu.br`.
 - **Conta amarrada**: o 1º login grava o `sub` do Google em `usuario.google_sub`; depois só
-  essa conta Google entra naquele usuário. Trocar o email (Perfil → email) limpa o `sub`.
-- **Convite pendente** de quem entra pelo Google é resolvido (token apagado). Na Gestão a
-  pessoa aparece com a etiqueta "Google".
+  essa conta Google entra naquele usuário. Trocar o email (Perfil → email) limpa o `sub`;
+  a Gestão tem **Desligar Google** (mesma regra do link de redefinição).
+- **Convite pendente** é resolvido (token apagado) no 1º login com Google. Na Gestão a
+  pessoa aparece com a etiqueta "Google"; sem senha, ela ganha **Gerar link para definir
+  senha** como saída se o Google falhar.
 - A senha continua funcionando (saída do admin se o Google falhar).
 - Variáveis: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` (sem elas o botão some e as rotas dão
   404) e `GOOGLE_DOMINIOS_PERMITIDOS`. Passo a passo no Google Cloud: runbook §14. URI de

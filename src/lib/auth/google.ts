@@ -188,7 +188,8 @@ export function validarClaims(payload: Record<string, unknown>, esperado: { clie
   if (typeof payload.iss !== "string" || !EMISSORES.has(payload.iss)) return { ok: false, erro: "EMISSOR" };
   const aud = payload.aud;
   const audOk = typeof aud === "string" ? aud === esperado.clientId : Array.isArray(aud) && aud.includes(esperado.clientId) && payload.azp === esperado.clientId;
-  if (!audOk) return { ok: false, erro: "AUDIENCIA" };
+  // `azp` (parte autorizada), quando vem, tem de ser este cliente mesmo com `aud` string.
+  if (!audOk || (payload.azp !== undefined && payload.azp !== esperado.clientId)) return { ok: false, erro: "AUDIENCIA" };
   if (typeof payload.exp !== "number" || payload.exp + FOLGA_RELOGIO_S <= agoraS) return { ok: false, erro: "EXPIRADO" };
   if (typeof payload.iat === "number" && payload.iat - FOLGA_RELOGIO_S > agoraS) return { ok: false, erro: "EXPIRADO" };
   if (typeof payload.nonce !== "string" || payload.nonce.length !== esperado.nonce.length || !timingSafeEqual(Buffer.from(payload.nonce), Buffer.from(esperado.nonce))) {
@@ -199,7 +200,9 @@ export function validarClaims(payload: Record<string, unknown>, esperado: { clie
   // O Google manda booleano; aceita também a string antiga "true".
   if (payload.email_verified !== true && payload.email_verified !== "true") return { ok: false, erro: "EMAIL_NAO_VERIFICADO" };
   const hd = typeof payload.hd === "string" && payload.hd ? payload.hd.toLowerCase() : null;
-  return { ok: true, claims: { sub: payload.sub, email: payload.email.trim().toLowerCase(), hd } };
+  // Email como veio (só sem espaços): NÃO usar toLowerCase aqui, ele transforma o sinal
+  // Kelvin (U+212A) em "k". A forma de busca exata é de `emailParaBusca` (google-login.ts).
+  return { ok: true, claims: { sub: payload.sub, email: payload.email.trim(), hd } };
 }
 
 export type BuscaChave = (kid: string) => Promise<JsonWebKey | null>;
@@ -267,14 +270,14 @@ export function esquecerJwksGoogle(): void {
 
 /**
  * `GOOGLE_DOMINIOS_PERMITIDOS` vazio = qualquer domínio (o email ainda precisa
- * estar cadastrado). Com lista: o domínio do email tem de estar nela e, se o
- * Google mandar `hd` (conta Workspace), ele também.
+ * estar cadastrado). Com lista: o domínio do email E o `hd` têm de estar nela.
+ * `hd` é obrigatório: só conta gerenciada pelo Workspace do domínio o traz; uma
+ * conta Google pessoal criada com um email do domínio não tem `hd` e é recusada.
  */
 export function dominioPermitido(claims: Pick<ClaimsGoogle, "email" | "hd">, dominios: readonly string[]): boolean {
   if (dominios.length === 0) return true;
   const dominioEmail = claims.email.slice(claims.email.lastIndexOf("@") + 1).toLowerCase();
-  if (!dominios.includes(dominioEmail)) return false;
-  return claims.hd === null || dominios.includes(claims.hd.toLowerCase());
+  return dominios.includes(dominioEmail) && claims.hd !== null && dominios.includes(claims.hd.toLowerCase());
 }
 
 // ---------------------------------------------------------------- mensagens da tela de login

@@ -15,7 +15,7 @@ import { destinoSeguro } from "./destino";
 import { type CodigoErroGoogle, configGoogle, dominioPermitido, guardaPedidosGoogle, trocarCodigo, urlAutorizacao, verificarIdToken } from "./google";
 import { entrarComGoogle } from "./google-login";
 import { ipDoCliente } from "./ip";
-import { limitadorGoogle } from "./limitador";
+import { limitadorGoogleFalhas, limitadorGoogleInicio } from "./limitador";
 import { SESSAO_DURACAO_DIAS, criarSessao } from "./sessao";
 import { COOKIE_AREA } from "./visibilidade";
 
@@ -43,10 +43,11 @@ function paraLogin(erro: CodigoErroGoogle, ref: string, voltar: string | null): 
   return apagarCookieState(NextResponse.redirect(u, 303));
 }
 
-/** Recusa esperada: loga a causa (sem segredo) e volta ao login com a mesma ref. */
+/** Recusa esperada: loga a causa (sem segredo) e volta ao login com a mesma ref. Conta no limitador de recusas. */
 function recusar(erro: CodigoErroGoogle, motivo: string, ctx: { ip: string; voltar: string | null; email?: string }): NextResponse {
   const ref = novaRef();
-  limitadorGoogle.registrarFalha(ctx.ip);
+  // Bater no limite não conta de novo (senão quem espera nunca sai do bloqueio).
+  if (erro !== "limite") limitadorGoogleFalhas.registrarFalha(ctx.ip);
   console.warn(`[auth.google] ref=${ref} recusado erro=${erro} motivo=${motivo}${ctx.email ? ` email=${mascararEmail(ctx.email)}` : ""}`);
   return paraLogin(erro, ref, ctx.voltar);
 }
@@ -65,8 +66,10 @@ export async function iniciarLoginGoogle(req: Request): Promise<Response> {
   if (!cfg) return naoEncontrado();
   const ip = ipDoCliente(req.headers);
   const voltar = destinoSeguro(new URL(req.url).searchParams.get("voltar"));
-  if (limitadorGoogle.bloqueado(ip)) return recusar("limite", "limitador_inicio", { ip, voltar });
-  limitadorGoogle.registrarFalha(ip); // todo início conta; o login concluído zera
+  if (limitadorGoogleInicio.bloqueado(ip)) return recusar("limite", "limitador_inicio", { ip, voltar });
+  if (limitadorGoogleFalhas.bloqueado(ip)) return recusar("limite", "limitador_recusas", { ip, voltar });
+  // Só o limitador de inícios conta aqui: o callback deste mesmo fluxo não pode ser recusado por ele.
+  limitadorGoogleInicio.registrarFalha(ip);
   const pedido = guardaPedidosGoogle.criar(voltar);
   const res = NextResponse.redirect(urlAutorizacao(cfg, pedido), 303);
   res.cookies.set(COOKIE_STATE_GOOGLE, pedido.state, {
@@ -89,7 +92,7 @@ export async function callbackGoogle(req: Request): Promise<Response> {
   let voltar: string | null = null;
   try {
     const q = new URL(req.url).searchParams;
-    if (limitadorGoogle.bloqueado(ip)) return recusar("limite", "limitador_callback", { ip, voltar });
+    if (limitadorGoogleFalhas.bloqueado(ip)) return recusar("limite", "limitador_callback", { ip, voltar });
     // Consome o pedido antes de tudo: mesmo um retorno com erro queima o state (uso único).
     const pedido = guardaPedidosGoogle.consumir(q.get("state"), cookieDe(req, COOKIE_STATE_GOOGLE));
     voltar = pedido ? destinoSeguro(pedido.voltar) : null;
@@ -116,7 +119,7 @@ export async function callbackGoogle(req: Request): Promise<Response> {
     const r = await entrarComGoogle(claims);
     if (!r.ok) return recusar(r.erro === "NAO_CADASTRADO" ? "nao_cadastrado" : "conta_diferente", r.motivo, { ip, voltar, email: claims.email });
 
-    limitadorGoogle.registrarSucesso(ip);
+    limitadorGoogleFalhas.registrarSucesso(ip);
     const expiraEm = new Date(Date.now() + SESSAO_DURACAO_DIAS * 24 * 60 * 60 * 1000);
     const sessao = await criarSessao(r.usuarioId, expiraEm, req.headers.get("user-agent"));
     console.info(`[auditoria] usuario.login_google usuario=${r.usuarioId}`);
@@ -126,7 +129,7 @@ export async function callbackGoogle(req: Request): Promise<Response> {
     res.cookies.set(COOKIE_AREA, "", { path: "/", maxAge: 0 });
     return res;
   } catch (e) {
-    limitadorGoogle.registrarFalha(ip);
+    limitadorGoogleFalhas.registrarFalha(ip);
     return paraLogin("falha", registrarErro("auth.google.callback", e), voltar);
   }
 }

@@ -108,7 +108,7 @@ export function PonteCrm({
   desligado: { cards: number; tarefas: number } | null;
 }) {
   const { pendente, erro, rodar } = useAcao();
-  const [link, setLink] = useState<string | null>(null);
+  const [link, setLink] = useState<{ url: string; google: boolean } | null>(null);
   // A conta é descrita pelos cargos efetivos (`cargosDe`): GP legado em Projetos aparece como PM, igual à tabela de usuários.
   const descrever = (papel: Papel, area: Area | null, cargos: readonly Cargo[]) => `papel ${papel} · ${area ? `área ${ROTULO_AREA[area]}` : "sem área"}${cargos.length ? ` · ${cargos.map((c) => ROTULO_CARGO[c]).join(", ")}` : ""}`;
   const sugestao = d.conflito ? `duas áreas (${d.conflito.map((a) => ROTULO_AREA[a]).join(" e ")}): marque a posição principal` : d.papel ? descrever(d.papel, d.area, d.cargos) : "sem posição: nada a sugerir";
@@ -136,7 +136,7 @@ export function PonteCrm({
           </Button>
         ) : null}
         {!conta && temEmail && podeMudarConta ? (
-          <Button size="sm" disabled={pendente} onClick={() => rodar(() => convidarParaCrmAction(membroId), "convidar para o CRM", (r) => setLink(r && "link" in r ? (r.link ?? null) : null))}>
+          <Button size="sm" disabled={pendente} onClick={() => rodar(() => convidarParaCrmAction(membroId), "convidar para o CRM", (r) => setLink(r && "link" in r && r.link ? { url: r.link, google: r.google === true } : null))}>
             Convidar para o CRM
           </Button>
         ) : null}
@@ -144,7 +144,15 @@ export function PonteCrm({
       </div>
       {link ? (
         <p className="text-xs">
-          Link do convite (mostrado uma vez): <code className="select-all break-all font-mono">{link}</code>
+          {link.google ? (
+            <>
+              Conta criada: a pessoa já pode entrar com <b>Entrar com Google</b> usando este e-mail, sem link. Se preferir senha, o link do convite (mostrado uma vez; deixa de valer depois do
+              primeiro login com Google):{" "}
+            </>
+          ) : (
+            "Link do convite (mostrado uma vez): "
+          )}
+          <code className="select-all break-all font-mono">{link.url}</code>
         </p>
       ) : null}
       {desligado && conta?.ativo ? (

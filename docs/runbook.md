@@ -1186,10 +1186,11 @@ relação com o conector MCP (§12), onde o CRM é o provedor OAuth.
 Sem `GOOGLE_CLIENT_ID` **ou** `GOOGLE_CLIENT_SECRET` o botão some e as rotas dão
 404 (só senha, como antes). Nos dois compose de produção
 `GOOGLE_DOMINIOS_PERMITIDOS` vazio ou ausente vira `sou.inteli.edu.br`; para abrir a
-qualquer domínio use `*`. Com a lista preenchida, o domínio do email tem de estar
-nela e, se o Google mandar `hd` (conta Workspace), ele também. Email de outro
-domínio é recusado mesmo cadastrado no CRM ("Use sua conta Google
-@sou.inteli.edu.br.").
+qualquer domínio use `*`. Com a lista preenchida, o domínio do email **e** o
+claim `hd` têm de estar nela. `hd` só vem em conta gerenciada pelo Workspace do
+domínio: uma conta Google pessoal criada com um email `@sou.inteli.edu.br` (sem
+`hd`) é recusada. Email de outro domínio também é recusado mesmo cadastrado no
+CRM ("Use sua conta Google @sou.inteli.edu.br.").
 
 ### Criar o cliente OAuth no Google Cloud
 
@@ -1209,7 +1210,8 @@ domínio é recusado mesmo cadastrado no CRM ("Use sua conta Google
      outra organização. Publique o app (**Publicar app** → "Em produção"); em modo
      "Teste" só os usuários de teste cadastrados entram e o login expira em 7 dias.
      Com só `openid`/`email` não precisa de verificação. O filtro de domínio fica
-     com o CRM (`GOOGLE_DOMINIOS_PERMITIDOS=sou.inteli.edu.br`).
+     com o CRM (`GOOGLE_DOMINIOS_PERMITIDOS=sou.inteli.edu.br`, que exige o `hd`
+     do Workspace da Inteli).
 4. **Credenciais → Criar credenciais → ID do cliente OAuth** (ou **Clientes →
    Criar cliente**). Tipo: **Aplicativo da Web**. Nome: `ij-crm produção`.
 5. **URIs de redirecionamento autorizados**: exatamente
@@ -1247,22 +1249,38 @@ Standalone (`compose.prod.yml`): as mesmas três variáveis no `.env`
   a etiqueta **Google** aparece na Gestão. Depois só essa conta Google entra
   naquele usuário ("Esta conta Google não é a que está ligada ao seu usuário").
   Trocar o email (Perfil → Email) limpa o `sub`; o próximo login com Google amarra
-  de novo. Para desamarrar à mão (pessoa recriou a conta Google):
-  `UPDATE usuario SET google_sub = NULL WHERE email = '<email>';`
-- **Convite pendente** de quem entra pelo Google é resolvido (token apagado);
+  de novo. Pessoa recriou a conta Google: botão **Desligar Google** (ícone de
+  corrente partida) na linha dela em Gestão → Usuários. Mesma regra do link de
+  redefinição: gestor só para papéis abaixo do seu, admin para qualquer um,
+  ninguém em si mesmo. Auditoria `usuario.google_desligado usuario=… por=…`.
+- **Busca do email**: igualdade exata com o email normalizado (nada de `ILIKE`;
+  `_` e `%` são literais). Email com caractere não-ASCII (ex.: sinal Kelvin
+  U+212A) é recusado como não cadastrado.
+- **Convite pendente** é resolvido (token apagado) no **1º** login com Google;
   quem nunca entrou aparece como "ainda não entrou".
+- **Saída por senha** de quem só entra com Google: botão **Gerar link para
+  definir senha** na linha dela (é o link de convite; com o Google já ligado,
+  ele continua valendo nos logins seguintes). Quem tem senha usa o link de
+  redefinição, como antes.
 - **Desativar** o usuário bloqueia o Google também (e derruba as sessões, como
   antes).
 - **Sessão**: igual à do login por senha (30 dias, tabela `sessao`), com
   auditoria `[auditoria] usuario.login_google usuario=<id>`, e
   `usuario.google_vinculado` / `usuario.convite_resolvido_google` no 1º login.
-- **Limite**: 20 inícios ou recusas por IP em 15 min (`limitadorGoogle`, em
-  memória, depende do IP do Caddy/Coolify como no §9).
+- **Limite** por IP (em memória, depende do IP do Caddy/Coolify como no §9),
+  folgado porque no campus todos podem sair pelo mesmo NAT: 120 inícios em 15
+  min (`limitadorGoogleInicio`) e 30 recusas no callback em 15 min
+  (`limitadorGoogleFalhas`; login concluído zera). O callback do próprio fluxo
+  nunca é recusado pelo contador de inícios.
 - **state/nonce/PKCE**: guardados na memória do processo por 10 min (o
   navegador só leva o `state` num cookie httpOnly `ij_google_state`, path
   `/api/auth/google`) e consumidos no callback (uso único). Redeploy no meio de
   um login = "O login com Google expirou", basta clicar de novo. Exige um
   processo só do app (é o caso hoje); com réplicas, mova isso para o banco.
+  Risco conhecido: o mapa guarda no máximo 5000 pedidos e despeja os mais
+  antigos; alguém com muitos IPs (cada um até 120 inícios/15 min) pode despejar
+  pedidos legítimos, e quem estava no meio do login vê "expirou". É negação de
+  serviço do login Google, não acesso: a senha continua funcionando.
 - **Erros**: a tela mostra `ref: <8 hex>`. No log:
   - `[auth.google] ref=<ref> recusado erro=<código> motivo=<causa>` (recusa
     esperada; email mascarado `a***@dominio`). Motivos: `desconhecido`,

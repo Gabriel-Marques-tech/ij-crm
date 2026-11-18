@@ -271,6 +271,8 @@ export async function listarUsuarios() {
       // Quem já entrou com Google não tem convite pendente, mesmo sem senha.
       convitePendente: senhaHash === null && googleSub === null,
       entraComGoogle: googleSub !== null,
+      // Sem senha (convite pendente ou só Google): a gestão pode gerar o link para definir senha.
+      semSenha: senhaHash === null,
       redefinicaoLinkAtivo: u.redefinicaoExpiraEm !== null && u.redefinicaoExpiraEm.getTime() > Date.now(),
       fotoEm: foto?.atualizadoEm.getTime() ?? null,
     })),

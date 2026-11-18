@@ -2,7 +2,7 @@
 
 import { useActionState, useState, useTransition } from "react";
 import type { Area, AreaEntrada, Cargo, Papel } from "@prisma/client";
-import { KeyRound, Pencil, RefreshCw } from "lucide-react";
+import { KeyRound, Pencil, RefreshCw, Unlink } from "lucide-react";
 import { Avatar } from "@/components/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,7 @@ import { Switch } from "@/components/ui/switch";
 import { descreverLado, ROTULO_AREA_ENTRADA } from "@/lib/auth/areas";
 import { areaDeEntrada } from "@/lib/auth/visibilidade";
 import { ROTULO_PAPEL, podeAtribuirPapel, podeGerarRedefinicao } from "@/lib/auth/papeis";
-import { alternarAtivoAction, editarUsuarioAction, gerarLinkRedefinicaoAction, reemitirConviteAction, type EstadoConvite } from "./actions";
+import { alternarAtivoAction, desligarGoogleAction, editarUsuarioAction, gerarLinkRedefinicaoAction, reemitirConviteAction, type EstadoConvite } from "./actions";
 import { LinkGerado } from "./convidar-dialog";
 import { CamposPapelLado } from "./campos-lado";
 
@@ -29,6 +29,7 @@ type Usuario = {
   ativo: boolean;
   convitePendente: boolean;
   entraComGoogle: boolean;
+  semSenha: boolean;
   conviteExpiraEm: Date | null;
   redefinicaoPedidaEm: Date | null;
   redefinicaoLinkAtivo: boolean;
@@ -75,9 +76,24 @@ export function TabelaUsuarios({ usuarios, ator, googleAtivo = false }: { usuari
     });
   }
 
-  // Gestor só para vendedor; admin para qualquer um; ninguém para si (usa Meu perfil); só conta ativa com senha.
+  // Gestor só para vendedor; admin para qualquer um; ninguém para si (usa Meu perfil); só conta ativa com senha
+  // (o servidor recusa sem senha: aí o caminho é o link de convite, que define a senha).
   function podeRedefinir(u: Usuario) {
-    return podeGerarRedefinicao(ator.papel, u.papel) && u.id !== ator.id && u.ativo && !u.convitePendente;
+    return podeGerarRedefinicao(ator.papel, u.papel) && u.id !== ator.id && u.ativo && !u.semSenha;
+  }
+
+  // Mesma regra do servidor (`desligarGoogle`): é tomada de conta, como a redefinição.
+  function podeDesligarGoogle(u: Usuario) {
+    return u.entraComGoogle && podeGerarRedefinicao(ator.papel, u.papel) && u.id !== ator.id;
+  }
+
+  function desligar(u: Usuario) {
+    if (!window.confirm(`Desligar a conta Google de ${u.nome}? O próximo login com Google (com o mesmo email) liga a conta de novo.`)) return;
+    setErroLinha(null);
+    startTransition(async () => {
+      const r = await desligarGoogleAction(u.id);
+      if (r?.erro) setErroLinha(r.erro);
+    });
   }
 
   return (
@@ -150,9 +166,21 @@ export function TabelaUsuarios({ usuarios, ator, googleAtivo = false }: { usuari
                 </td>
                 <td className="px-4 py-3 text-right">
                   <div className="flex justify-end gap-1">
-                    {u.convitePendente && podeMexer(u) ? (
-                      <Button variant="ghost" size="icon" title="Reemitir convite" aria-label="Reemitir convite" disabled={pendente} onClick={() => reemitir(u)}>
+                    {u.semSenha && podeMexer(u) ? (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        title={u.entraComGoogle ? "Gerar link para definir senha" : "Reemitir convite"}
+                        aria-label={u.entraComGoogle ? "Gerar link para definir senha" : "Reemitir convite"}
+                        disabled={pendente}
+                        onClick={() => reemitir(u)}
+                      >
                         <RefreshCw className="h-4 w-4" />
+                      </Button>
+                    ) : null}
+                    {podeDesligarGoogle(u) ? (
+                      <Button variant="ghost" size="icon" title="Desligar Google" aria-label="Desligar Google" disabled={pendente} onClick={() => desligar(u)}>
+                        <Unlink className="h-4 w-4" />
                       </Button>
                     ) : null}
                     {podeRedefinir(u) ? (

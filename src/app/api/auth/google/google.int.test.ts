@@ -33,7 +33,8 @@ beforeAll(() => {
     if (url === GOOGLE_ENDPOINTS.token) {
       corpoToken = new URLSearchParams(String(init?.body));
       if (respostaToken) return Response.json(respostaToken.json, { status: respostaToken.status });
-      const idToken = await assinarIdToken(chaves.privada, claimsTeste({ nonce: claimsDaVez.nonce, ...claimsDaVez }));
+      // Conta do Workspace por padrão (`hd` do domínio); `hd: undefined` simula conta pessoal.
+      const idToken = await assinarIdToken(chaves.privada, claimsTeste({ hd: DOMINIO, nonce: claimsDaVez.nonce, ...claimsDaVez }));
       return Response.json({ id_token: idToken, access_token: "nao-usado", token_type: "Bearer" });
     }
     if (url === GOOGLE_ENDPOINTS.jwks) return Response.json({ keys: [chaves.jwk] }, { headers: { "cache-control": "public, max-age=3600" } });
@@ -200,6 +201,37 @@ describe("Entrar com Google", () => {
     expect((await db.usuario.findFirst())?.googleSub).toBeNull();
   });
 
+  it("conta Google pessoal (sem hd) com email do domínio é recusada", async () => {
+    await criarUsuario({ email: `ana@${DOMINIO}` });
+    const p = await iniciar();
+    claimsDaVez = { ...claimsDaVez, email: `ana@${DOMINIO}`, hd: undefined, sub: "sub-ana" };
+    expect(destino(await voltarDoGoogle(p)).searchParams.get("erro")).toBe("dominio");
+    expect(await db.sessao.count()).toBe(0);
+  });
+
+  it.each([
+    ["_ (curinga de um caractere no LIKE)", "jo_o.silva", "joao.silva"],
+    ["% (curinga de vários no LIKE)", "jo%", "joao.silva"],
+    ["sinal Kelvin U+212A", "\u212Aarla", "karla"],
+  ])("email com %s não casa com outro usuário", async (_n, localGoogle, localCadastrado) => {
+    const u = await criarUsuario({ email: `${localCadastrado}@${DOMINIO}` });
+    const p = await iniciar();
+    claimsDaVez = { ...claimsDaVez, email: `${localGoogle}@${DOMINIO}`, sub: "sub-intruso" };
+    const res = await voltarDoGoogle(p);
+    expect(destino(res).searchParams.get("erro")).toBe("nao_cadastrado");
+    expect(await db.sessao.count()).toBe(0);
+    expect((await db.usuario.findUnique({ where: { id: u.id } }))?.googleSub).toBeNull();
+  });
+
+  it("email com _ entra no próprio usuário (igualdade exata)", async () => {
+    const certo = await criarUsuario({ email: `jo_o@${DOMINIO}` });
+    await criarUsuario({ email: `joao@${DOMINIO}` });
+    const p = await iniciar();
+    claimsDaVez = { ...claimsDaVez, email: `jo_o@${DOMINIO}`, sub: "sub-jo" };
+    const valor = cookieSessao(await voltarDoGoogle(p));
+    expect((await db.sessao.findUnique({ where: { id: hashSessao(valor!) } }))?.usuarioId).toBe(certo.id);
+  });
+
   it("hd de outro Workspace com email do domínio permitido é recusado", async () => {
     await criarUsuario({ email: `ana@${DOMINIO}` });
     const p = await iniciar();
@@ -275,8 +307,25 @@ describe("Entrar com Google", () => {
     expect(await db.sessao.count()).toBe(0);
   });
 
-  it("limitador: muitas tentativas por IP bloqueiam o início", async () => {
-    for (let i = 0; i < 20; i++) await iniciar();
+  it("limitador: vários inícios no mesmo IP (NAT do campus) não recusam o callback do próprio fluxo", async () => {
+    await criarUsuario({ email: `ana@${DOMINIO}` });
+    for (let i = 0; i < 40; i++) await iniciar();
+    const p = await iniciar();
+    claimsDaVez = { ...claimsDaVez, email: `ana@${DOMINIO}`, sub: "sub-ana" };
+    expect(cookieSessao(await voltarDoGoogle(p))).not.toBeNull();
+  });
+
+  it("limitador: 30 recusas por IP bloqueiam início e callback", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    for (let i = 0; i < 30; i++) await voltarDoGoogle({ state: "inventado", cookie: "ij_google_state=inventado" });
+    const res = await iniciarGET(new Request(`${BASE}/api/auth/google`, { headers: { "x-forwarded-for": ip } }));
+    expect(new URL(res.headers.get("location")!).searchParams.get("erro")).toBe("limite");
+    expect(destino(await voltarDoGoogle({ state: "x", cookie: "ij_google_state=x" })).searchParams.get("erro")).toBe("limite");
+    vi.restoreAllMocks();
+  });
+
+  it("limitador: 120 inícios por IP em 15 min bloqueiam o início", async () => {
+    for (let i = 0; i < 120; i++) await iniciar();
     const res = await iniciarGET(new Request(`${BASE}/api/auth/google`, { headers: { "x-forwarded-for": ip } }));
     expect(new URL(res.headers.get("location")!).searchParams.get("erro")).toBe("limite");
   });

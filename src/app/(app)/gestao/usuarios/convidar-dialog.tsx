@@ -78,7 +78,7 @@ function CorpoConvite({ papelAtor, googleAtivo, onFechar }: { papelAtor: Papel; 
 /** Com o Google configurado: a pessoa já pode entrar; o link de convite (senha) fica opcional. */
 function CadastroComGoogle({ email, link, expiraEm, onFechar }: { email?: string; link: string; expiraEm?: string; onFechar: () => void }) {
   const [mostrarLink, setMostrarLink] = useState(false);
-  if (mostrarLink) return <LinkGerado link={link} expiraEm={expiraEm} onFechar={onFechar} />;
+  if (mostrarLink) return <LinkGerado link={link} expiraEm={expiraEm} onFechar={onFechar} aviso="Mostrado só uma vez. Deixa de valer depois do primeiro login com Google." />;
   return (
     <div className="space-y-4">
       <div className="rounded-lg border border-border bg-muted p-3 text-sm">
@@ -87,7 +87,9 @@ function CadastroComGoogle({ email, link, expiraEm, onFechar }: { email?: string
           {email ? <span className="font-mono text-fg-soft">{email}</span> : "A pessoa"} já pode entrar no CRM com <strong>Entrar com Google</strong>. Não precisa mandar link.
         </p>
       </div>
-      <p className="text-xs text-fg-faint">Prefere que ela use senha? Mostre o link de convite (vale 7 dias, aparece uma vez só).</p>
+      <p className="text-xs text-fg-faint">
+        Prefere que ela use senha? Mostre o link de convite (vale 7 dias, aparece uma vez só). Ele deixa de valer depois do primeiro login com Google.
+      </p>
       <div className="flex gap-2">
         <Button onClick={onFechar} className="flex-1">
           Fechar

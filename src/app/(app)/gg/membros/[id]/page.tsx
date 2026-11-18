@@ -25,7 +25,7 @@ export default async function FichaPage({ params }: { params: Promise<{ id: stri
   if (!m) notFound();
   const gestao = temPapelMinimo(ator.papel, "GESTOR");
   const [conta, hist, projetos, saldo, faltas, responsavelDe] = await Promise.all([
-    m.usuarioId ? db.usuario.findUnique({ where: { id: m.usuarioId }, select: { papel: true, area: true, cargos: true, ativo: true, senhaHash: true } }) : null,
+    m.usuarioId ? db.usuario.findUnique({ where: { id: m.usuarioId }, select: { papel: true, area: true, cargos: true, ativo: true, senhaHash: true, googleSub: true } }) : null,
     historicoDe(id),
     m.usuarioId ? projetosDe(m.usuarioId) : [],
     saldoDemandas(id),
@@ -67,7 +67,7 @@ export default async function FichaPage({ params }: { params: Promise<{ id: stri
       <PonteCrm
         membroId={id}
         temEmail={!!m.email}
-        conta={conta ? { papel: conta.papel, area: conta.area, cargos: conta.cargos, ativo: conta.ativo, conviteAberto: !conta.senhaHash } : null}
+        conta={conta ? { papel: conta.papel, area: conta.area, cargos: conta.cargos, ativo: conta.ativo, conviteAberto: !conta.senhaHash && !conta.googleSub } : null}
         derivado={d}
         difere={conta ? contaDifere(conta, d) : false}
         podeMudarConta={gestao}

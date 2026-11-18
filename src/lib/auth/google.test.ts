@@ -112,9 +112,9 @@ describe("GuardaPedidosGoogle (state/nonce)", () => {
 describe("validarClaims", () => {
   const esperado = { clientId: CLIENT_ID_TESTE, nonce: NONCE };
 
-  it("aceita token válido e normaliza o email", () => {
+  it("aceita token válido; email sai como veio (a busca normaliza com segurança)", () => {
     const r = validarClaims(claimsTeste({ nonce: NONCE, email: "Ana@IJ.test", hd: "IJ.test" }), esperado);
-    expect(r).toEqual({ ok: true, claims: { sub: "1000000000001", email: "ana@ij.test", hd: "ij.test" } });
+    expect(r).toEqual({ ok: true, claims: { sub: "1000000000001", email: "Ana@IJ.test", hd: "ij.test" } });
   });
 
   it("aceita o emissor sem https e email_verified string", () => {
@@ -125,6 +125,7 @@ describe("validarClaims", () => {
     ["emissor", { iss: "https://evil.example" }, "EMISSOR"],
     ["audiência de outro cliente", { aud: "outro" }, "AUDIENCIA"],
     ["aud em lista sem azp", { aud: [CLIENT_ID_TESTE, "x"], azp: "x" }, "AUDIENCIA"],
+    ["azp de outro cliente com aud string", { azp: "outro-cliente" }, "AUDIENCIA"],
     ["expirado", { exp: Math.floor(Date.now() / 1000) - 120 }, "EXPIRADO"],
     ["emitido no futuro", { iat: Math.floor(Date.now() / 1000) + 3600 }, "EXPIRADO"],
     ["nonce errado", { nonce: "outro-nonce-de-teste" }, "NONCE"],
@@ -135,6 +136,10 @@ describe("validarClaims", () => {
     ["sem sub", { sub: "" }, "FORMATO"],
   ])("recusa %s", (_n, extra, erro) => {
     expect(validarClaims(claimsTeste({ nonce: NONCE, ...extra }), esperado)).toEqual({ ok: false, erro });
+  });
+
+  it("sem azp e aud string = cliente é aceito", () => {
+    expect(validarClaims(claimsTeste({ nonce: NONCE, azp: undefined }), esperado).ok).toBe(true);
   });
 
   it("aud em lista com azp = cliente é aceito", () => {
@@ -192,17 +197,20 @@ describe("dominioPermitido", () => {
   });
 
   it("domínio do email precisa estar na lista", () => {
-    expect(dominioPermitido({ email: "a@ij.org.br", hd: null }, ["ij.org.br"])).toBe(true);
-    expect(dominioPermitido({ email: "a@gmail.com", hd: null }, ["ij.org.br"])).toBe(false);
+    expect(dominioPermitido({ email: "a@ij.org.br", hd: "ij.org.br" }, ["ij.org.br"])).toBe(true);
+    expect(dominioPermitido({ email: "a@gmail.com", hd: "ij.org.br" }, ["ij.org.br"])).toBe(false);
   });
 
-  it("hd, quando vem, também precisa estar", () => {
-    expect(dominioPermitido({ email: "a@ij.org.br", hd: "ij.org.br" }, ["ij.org.br"])).toBe(true);
+  it("com lista, hd é obrigatório: conta pessoal (sem hd) com email do domínio é recusada", () => {
+    expect(dominioPermitido({ email: "a@ij.org.br", hd: null }, ["ij.org.br"])).toBe(false);
+  });
+
+  it("hd de outro Workspace é recusado", () => {
     expect(dominioPermitido({ email: "a@ij.org.br", hd: "outra.com" }, ["ij.org.br"])).toBe(false);
   });
 
   it("não aceita subdomínio nem sufixo parecido", () => {
-    expect(dominioPermitido({ email: "a@evil-ij.org.br", hd: null }, ["ij.org.br"])).toBe(false);
-    expect(dominioPermitido({ email: "a@x.ij.org.br", hd: null }, ["ij.org.br"])).toBe(false);
+    expect(dominioPermitido({ email: "a@evil-ij.org.br", hd: "evil-ij.org.br" }, ["ij.org.br"])).toBe(false);
+    expect(dominioPermitido({ email: "a@x.ij.org.br", hd: "ij.org.br" }, ["ij.org.br"])).toBe(false);
   });
 });
