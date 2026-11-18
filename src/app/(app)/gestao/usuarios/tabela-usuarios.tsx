@@ -28,6 +28,7 @@ type Usuario = {
   telefoneWhatsapp: string | null;
   ativo: boolean;
   convitePendente: boolean;
+  entraComGoogle: boolean;
   conviteExpiraEm: Date | null;
   redefinicaoPedidaEm: Date | null;
   redefinicaoLinkAtivo: boolean;
@@ -37,7 +38,7 @@ type Usuario = {
 type Ator = { id: string; papel: Papel };
 
 
-export function TabelaUsuarios({ usuarios, ator }: { usuarios: Usuario[]; ator: Ator }) {
+export function TabelaUsuarios({ usuarios, ator, googleAtivo = false }: { usuarios: Usuario[]; ator: Ator; googleAtivo?: boolean }) {
   const [editando, setEditando] = useState<Usuario | null>(null);
   const [reemitido, setReemitido] = useState<EstadoConvite>(undefined);
   const [redefinicao, setRedefinicao] = useState<(EstadoConvite & { nome?: string }) | undefined>(undefined);
@@ -109,8 +110,13 @@ export function TabelaUsuarios({ usuarios, ator }: { usuarios: Usuario[]; ator: 
                       <div className="font-medium">{u.nome}</div>
                       <div className="text-xs text-fg-faint md:hidden">{u.email}</div>
                       {u.convitePendente ? (
-                        <Badge variant="outline" className="mt-1 border-warn/50 text-warn">
-                          convite pendente
+                        <Badge variant="outline" className="mt-1 border-warn/50 text-warn" title={googleAtivo ? "Ainda não entrou. Pode entrar com Google usando este email ou pelo link de convite." : undefined}>
+                          {googleAtivo ? "ainda não entrou" : "convite pendente"}
+                        </Badge>
+                      ) : null}
+                      {u.entraComGoogle ? (
+                        <Badge variant="outline" className="mt-1 text-fg-soft" title="Conta Google ligada no primeiro login com Google">
+                          Google
                         </Badge>
                       ) : null}
                       {u.redefinicaoPedidaEm ? (
