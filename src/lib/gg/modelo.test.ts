@@ -124,9 +124,9 @@ describe("cupula (organograma)", () => {
     expect(cupula(itens, "pres")).toEqual({ ids: ["pres", "vp"], filhos: ["assessoria", "dir"] });
   });
 
-  it("cadeia longa e ciclo não travam", () => {
+  it("linha tem no máximo 2 (o 3º institucional fica abaixo); ciclo não trava", () => {
     const longa = [no("a", null, true), no("b", "a", true), no("c", "b", true), no("d", "c")];
-    expect(cupula(longa, "a")).toEqual({ ids: ["a", "b", "c"], filhos: ["d"] });
+    expect(cupula(longa, "a")).toEqual({ ids: ["a", "b"], filhos: ["c"] });
     const ciclo = [no("a", "b", true), no("b", "a", true)];
     expect(cupula(ciclo, "a")).toEqual({ ids: ["a", "b"], filhos: [] });
   });

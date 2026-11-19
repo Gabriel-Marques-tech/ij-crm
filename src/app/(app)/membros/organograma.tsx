@@ -117,10 +117,11 @@ function Raiz({ p, ctx }: { p: PosicaoB; ctx: Contexto }) {
   if (ids.length === 1) return <No p={p} ctx={ctx} />;
   const linha = ids.map((id) => posicoes.find((x) => x.id === id)!);
   const filhos = idsFilhos.map((id) => posicoes.find((x) => x.id === id)!);
-  // A linha recolhe como um galho só, pela raiz; o total conta tudo abaixo da linha.
-  const fechado = fechados.has(p.id);
+  // A linha recolhe como um galho só: basta um id dela em `?fechado=` (link antigo com a VP);
+  // reabrir limpa todos. O total conta tudo abaixo da linha.
+  const fechado = ids.some((id) => fechados.has(id));
   const abaixo = filhos.reduce((n, f) => n + contarAbaixo(f.id, posicoes) + 1, 0);
-  const alternar = filhos.length ? { href: hrefAlternar(p.id, fechados, escopo), fechado, abaixo } : null;
+  const alternar = filhos.length ? { href: hrefAlternar(ids, fechados, escopo), fechado, abaixo } : null;
   return (
     <li>
       <div className={cn("org-cupula", filhos.length && !fechado && "org-cupula-desce")}>
@@ -146,7 +147,7 @@ function No({ p, ctx }: { p: PosicaoB; ctx: Contexto }) {
   const { posicoes, fechados, escopo } = ctx;
   const filhos = posicoes.filter((x) => x.liderancaId === p.id);
   const fechado = fechados.has(p.id);
-  const alternar = filhos.length ? { href: hrefAlternar(p.id, fechados, escopo), fechado, abaixo: contarAbaixo(p.id, posicoes) } : null;
+  const alternar = filhos.length ? { href: hrefAlternar([p.id], fechados, escopo), fechado, abaixo: contarAbaixo(p.id, posicoes) } : null;
   return (
     <li>
       <Cartao p={p} ctx={ctx} temFilhos={filhos.length > 0} alternar={alternar} />
@@ -228,10 +229,11 @@ function Cartao({ p, ctx, temFilhos, alternar }: { p: PosicaoB; ctx: Contexto; t
   );
 }
 
-function hrefAlternar(id: string, fechados: Set<string>, escopo?: string): string {
+/** Alterna o galho de `ids` (um nó, ou a linha da cúpula pela raiz `ids[0]`): recolhido → tira todos; aberto → recolhe pela raiz. */
+function hrefAlternar(ids: string[], fechados: Set<string>, escopo?: string): string {
   const n = new Set(fechados);
-  if (n.has(id)) n.delete(id);
-  else n.add(id);
+  if (ids.some((id) => n.has(id))) for (const id of ids) n.delete(id);
+  else n.add(ids[0]);
   // `fechado` vazio ainda vai na URL: diz "nenhum recolhido", diferente de "o padrão" (G&G recolhido).
   const q = new URLSearchParams({ visao: "organograma" });
   if (escopo) q.set("escopo", escopo);

@@ -43,16 +43,16 @@ export function descendentes(areas: { id: string; superiorId: string | null }[],
 }
 
 /**
- * Cúpula do organograma (só exibição; a hierarquia guardada não muda): a partir de uma raiz,
- * enquanto o nó atual é institucional e tem exatamente UM filho institucional, esse filho sobe
- * para a mesma linha (Presidência e Vice-Presidência lado a lado). Os filhos da linha são os do
+ * Cúpula do organograma (só exibição; a hierarquia guardada não muda): a partir de uma raiz
+ * institucional com exatamente UM filho institucional, esse filho sobe para a mesma linha
+ * (Presidência e Vice-Presidência lado a lado). No máximo 2 na linha: um 3º institucional fica abaixo. Os filhos da linha são os do
  * último nó puxado, depois dos filhos não institucionais dos anteriores (nada some do desenho).
  */
 export function cupula(itens: { id: string; superiorId: string | null; institucional: boolean }[], raiz: string): { ids: string[]; filhos: string[] } {
   const ids = [raiz];
   const sobras: string[] = [];
   let atual = itens.find((x) => x.id === raiz);
-  while (atual?.institucional) {
+  while (ids.length < 2 && atual?.institucional) {
     const filhos = itens.filter((x) => x.superiorId === atual!.id && !ids.includes(x.id));
     const inst = filhos.filter((x) => x.institucional);
     if (inst.length !== 1) break;
