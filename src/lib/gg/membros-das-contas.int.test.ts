@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * GAB-108: migration 20261119120000_membros_das_contas. O schema de teste já está migrado (global
  * setup, banco vazio: a migration não fez nada); aqui o banco é montado como produção estava (contas
@@ -8,6 +9,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import { dbTeste, limparBanco } from "@/test/db";
+import { validarImportacao } from "./modelo";
+import { importarMembros, type AtorGG } from "./organizacao";
 
 const db = dbTeste();
 const raiz = path.resolve(import.meta.dirname, "../../..");
@@ -36,7 +39,9 @@ async function foto() {
   return { membros, vinculos, historico };
 }
 
-beforeEach(() => limparBanco(["usuario", "membro", "vinculo_ij", "historico_org"]));
+beforeEach(() => limparBanco(["historico_org", "importacao_membros", "ocupacao", "vinculo_ij", "membro", "posicao", "cargo_org", "area_org", "usuario"]));
+
+const HOJE = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date());
 
 describe("migration membros_das_contas (GAB-108)", () => {
   it("cria/liga um membro para cada conta, sem violar membro_email_unico, e rodar 2x é no-op", async () => {
@@ -143,5 +148,74 @@ describe("migration membros_das_contas (GAB-108)", () => {
     const antes = await foto();
     await rodarMigracao();
     expect(await foto()).toEqual(antes);
+  });
+
+  it("nome no CHECK membro_nome (corta em 200; vazio vira a parte local do e-mail), VISUALIZADOR fica de fora, homônimo sem e-mail não duplica", async () => {
+    const longo = await db.usuario.create({ data: { nome: `  ${"x".repeat(250)}  `, email: "longo@ij.test" } });
+    const vazio = await db.usuario.create({ data: { nome: "   ", email: " Zeca.Silva@ij.test" } });
+    const visu = await db.usuario.create({ data: { nome: "Visu", email: "visu@ij.test", papel: "VISUALIZADOR" } });
+    // VISUALIZADOR nem liga ao órfão de mesmo e-mail
+    const visuOrfao = await db.membro.create({ data: { nome: "Visu Planilha", email: "visu@ij.test" } });
+    const homonimoOrfao = await db.membro.create({ data: { nome: "José  Souza", status: "ATIVO" } });
+    const jose = await db.usuario.create({ data: { nome: " jose souza", email: "jose@ij.test" } });
+    // homônimo COM e-mail (é outra pessoa, ou já tem ficha) não bloqueia
+    await db.membro.create({ data: { nome: "Rita", email: "rita.antiga@ij.test" } });
+    const rita = await db.usuario.create({ data: { nome: "Rita", email: "rita@ij.test" } });
+
+    await rodarMigracao();
+
+    const mLongo = await db.membro.findUniqueOrThrow({ where: { usuarioId: longo.id } });
+    expect(mLongo.nome).toBe("x".repeat(200));
+    expect(await db.membro.findUniqueOrThrow({ where: { usuarioId: vazio.id } })).toMatchObject({ nome: "Zeca.Silva", email: "zeca.silva@ij.test" });
+    expect(await db.membro.findUnique({ where: { usuarioId: visu.id } })).toBeNull();
+    expect(await db.membro.findUniqueOrThrow({ where: { id: visuOrfao.id } })).toMatchObject({ usuarioId: null });
+    expect(await db.membro.findUnique({ where: { usuarioId: jose.id } })).toBeNull();
+    expect(await db.membro.findUniqueOrThrow({ where: { id: homonimoOrfao.id } })).toMatchObject({ usuarioId: null, email: null });
+    expect(await db.membro.findUniqueOrThrow({ where: { usuarioId: rita.id } })).toMatchObject({ nome: "Rita", email: "rita@ij.test" });
+
+    const depois1 = await foto();
+    await rodarMigracao();
+    expect(await foto()).toEqual(depois1);
+  });
+});
+
+describe("importação depois da migration (GAB-108)", () => {
+  async function semear() {
+    await db.areaOrg.create({ data: { id: "vend", nome: "Vendas", ladoCrm: "VENDAS" } });
+    await db.cargoOrg.create({ data: { id: "mem", nome: "Membro regular", categoria: "MEMBRO" } });
+    const admin = await db.usuario.create({ data: { nome: "Alice", email: "alice@ij.test", papel: "ADMIN" } });
+    const ator: AtorGG = { id: admin.id, nome: admin.nome, papel: admin.papel };
+    return ator;
+  }
+
+  it("linha com o e-mail de quem tem conta completa o membro criado pela migration (área, cargo, entrada)", async () => {
+    const ator = await semear();
+    const ana = await db.usuario.create({ data: { nome: "Ana", email: "ana@ij.test" } });
+    await rodarMigracao();
+    const criado = await db.membro.findUniqueOrThrow({ where: { usuarioId: ana.id } });
+
+    const lote = validarImportacao([{ nome: "Ana Lima", email: "ANA@ij.test", status: "ativo", area: "Vendas", cargo: "Membro regular", entrada: "2025-03-03" }], HOJE);
+    expect(await importarMembros(lote, "00000000-0000-0000-0000-000000000108", ator)).toEqual({ ok: true, quantidade: 1 });
+
+    expect(await db.membro.count({ where: { usuarioId: ana.id } })).toBe(1);
+    const m = await db.membro.findUniqueOrThrow({ where: { id: criado.id }, include: { ocupacoes: { include: { posicao: true } }, vinculos: true } });
+    expect(m.status).toBe("ATIVO");
+    expect(m.ocupacoes.map((o) => [o.posicao.areaId, o.posicao.cargoId, o.principal])).toEqual([["vend", "mem", true]]);
+    expect(m.vinculos.map((v) => [v.entrada?.toISOString().slice(0, 10), v.saida])).toEqual([["2025-03-03", null]]);
+  });
+
+  it("linha sem e-mail com o nome de quem tem conta completa o mesmo membro; depois de completo, repetir recusa", async () => {
+    const ator = await semear();
+    const bia = await db.usuario.create({ data: { nome: "Bia Souza", email: "bia@ij.test" } });
+    await rodarMigracao();
+    const criado = await db.membro.findUniqueOrThrow({ where: { usuarioId: bia.id } });
+
+    const lote = validarImportacao([{ nome: "bia souza", area: "Vendas", cargo: "Membro regular", entrada: "2025-04-01" }], HOJE);
+    expect(await importarMembros(lote, "00000000-0000-0000-0000-000000000109", ator)).toEqual({ ok: true, quantidade: 1 });
+    expect(await db.membro.count()).toBe(2); // Bia + Alice
+    expect(await db.ocupacao.count({ where: { membroId: criado.id } })).toBe(1);
+    expect((await db.vinculoIj.findMany({ where: { membroId: criado.id } })).map((v) => v.entrada?.toISOString().slice(0, 10))).toEqual(["2025-04-01"]);
+
+    expect(await importarMembros(lote, "00000000-0000-0000-0000-000000000110", ator)).toMatchObject({ ok: false, detalhe: "Linha 1: membro já cadastrado." });
   });
 });
