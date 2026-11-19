@@ -72,7 +72,7 @@ export default async function MembrosPage({ searchParams }: { searchParams: Prom
       {visao === "lista" ? (
         <ListaMembros ator={ator} base={base} editor={editor} filtros={{ q: um(sp.q), area: um(sp.area), cargo: um(sp.cargo), status: um(sp.status) }} />
       ) : (
-        <Organograma base={base} editor={editor} cadastra={cadastra} escopo={um(sp.escopo)} fechado={um(sp.fechado)} />
+        <Organograma base={base} editor={editor} cadastra={cadastra} fechado={um(sp.fechado)} />
       )}
     </div>
   );

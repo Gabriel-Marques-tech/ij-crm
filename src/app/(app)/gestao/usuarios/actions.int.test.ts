@@ -1,8 +1,7 @@
 // @vitest-environment node
 /**
- * GAB-82 (revisão de segurança do PR #47): a exceção "admin define o próprio
- * lado" não abre brecha para o admin mudar o próprio papel ou se desativar
- * mandando um FormData forjado direto na server action.
+ * Server actions da Gestão → Usuários com FormData de verdade (inclusive forjado). GAB-107: papel,
+ * lado e área de entrada nunca vêm de form; só nome, telefone e, do admin, "Administrador".
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { dbTeste, limparBanco } from "@/test/db";
@@ -26,90 +25,8 @@ beforeEach(async () => {
   exigirPapel.mockReset();
 });
 
-describe("editarUsuarioAction: admin editando a si mesmo", () => {
-  it("FormData forjado com papel=GESTOR e ativo=false → bloqueado, nada muda", async () => {
-    const a = await db.usuario.create({ data: { nome: "Admin", email: "admin@ij.test", papel: "ADMIN" } });
-    exigirPapel.mockResolvedValue({ id: a.id, papel: "ADMIN" });
-    const r = await editarUsuarioAction(
-      undefined,
-      form({ usuarioId: a.id, nome: "Admin", papel: "GESTOR", ativo: "false", ladoNoForm: "1", area: "VENDAS", cargos: ["GP"] }),
-    );
-    expect(r).toEqual({ erro: "Você não pode alterar seu próprio papel ou se desativar." });
-    expect(await db.usuario.findUniqueOrThrow({ where: { id: a.id }, select: { papel: true, ativo: true, area: true, cargos: true } })).toEqual({
-      papel: "ADMIN",
-      ativo: true,
-      area: null,
-      cargos: [],
-    });
-  });
-
-  it("`ativo` não é campo do form de edição (é ignorado); desativar a si mesmo pela action própria → bloqueado", async () => {
-    const a = await db.usuario.create({ data: { nome: "Admin", email: "admin@ij.test", papel: "ADMIN", area: "VENDAS" } });
-    exigirPapel.mockResolvedValue({ id: a.id, papel: "ADMIN" });
-    expect(await editarUsuarioAction(undefined, form({ usuarioId: a.id, nome: "Admin", ativo: "false", ladoNoForm: "1", area: "" }))).toEqual({ ok: true });
-    expect(await alternarAtivoAction(a.id, false)).toEqual({ erro: "Você não pode alterar seu próprio papel ou se desativar." });
-    expect(await db.usuario.findUniqueOrThrow({ where: { id: a.id }, select: { ativo: true, area: true } })).toEqual({ ativo: true, area: null });
-  });
-
-  it("form da tela (só lado, sem papel) → admin passa a ter lado vendas", async () => {
-    const a = await db.usuario.create({ data: { nome: "Admin", email: "admin@ij.test", papel: "ADMIN" } });
-    exigirPapel.mockResolvedValue({ id: a.id, papel: "ADMIN" });
-    expect(await editarUsuarioAction(undefined, form({ usuarioId: a.id, nome: "Admin", ladoNoForm: "1", area: "VENDAS" }))).toEqual({ ok: true });
-    expect(await db.usuario.findUniqueOrThrow({ where: { id: a.id }, select: { area: true, cargos: true } })).toEqual({ area: "VENDAS", cargos: [] });
-  });
-});
-
-describe("cargos de Projetos (PM, PO, Diretor) pela server action", () => {
-  const ladoDe = (id: string) => db.usuario.findUniqueOrThrow({ where: { id }, select: { papel: true, area: true, cargos: true } });
-  const porEmail = (email: string) => db.usuario.findUniqueOrThrow({ where: { email }, select: { papel: true, area: true, cargos: true } });
-
-  async function comGestor() {
-    const g = await db.usuario.create({ data: { nome: "Gestor", email: "gestor@ij.test", papel: "GESTOR" } });
-    exigirPapel.mockResolvedValue({ id: g.id, papel: "GESTOR" });
-    return g;
-  }
-
-  it("GAB-107: papel, área, cargos e área de entrada forjados no convite são ignorados (sem posição = Visualizador, Geral)", async () => {
-    await comGestor();
-    expect(await criarConviteAction(undefined, form({ nome: "Dora", email: "dora@ij.test", papel: "GESTOR", ladoNoForm: "1", area: "PROJETOS", cargos: ["DIRETOR"], areaEntrada: "PROJETOS" }))).toHaveProperty("link");
-    expect(await db.usuario.findUniqueOrThrow({ where: { email: "dora@ij.test" }, select: { papel: true, area: true, cargos: true, areaEntrada: true } })).toEqual({ papel: "VISUALIZADOR", area: null, cargos: [], areaEntrada: "GERAL" });
-  });
-
-  it("GAB-107: Administrador só vale de quem é admin", async () => {
-    await comGestor();
-    expect(await criarConviteAction(undefined, form({ nome: "Ari", email: "ari@ij.test", administrador: "1" }))).toEqual({ erro: "Você não pode atribuir esse papel." });
-    expect(await db.usuario.count({ where: { email: "ari@ij.test" } })).toBe(0);
-    const a = await db.usuario.create({ data: { nome: "Admin", email: "admin@ij.test", papel: "ADMIN" } });
-    exigirPapel.mockResolvedValue({ id: a.id, papel: "ADMIN" });
-    expect(await criarConviteAction(undefined, form({ nome: "Ari", email: "ari@ij.test", administrador: "1" }))).toHaveProperty("link");
-    expect(await porEmail("ari@ij.test")).toEqual({ papel: "ADMIN", area: null, cargos: [] });
-  });
-
-  it("GAB-107: gestor não muda papel/lado à mão pela edição (campos ignorados; nome passa)", async () => {
-    await comGestor();
-    const v = await db.usuario.create({ data: { nome: "Vini", email: "vini@ij.test", papel: "VENDEDOR", area: "VENDAS" } });
-    expect(await editarUsuarioAction(undefined, form({ usuarioId: v.id, nome: "Vini Novo", papel: "GESTOR", ladoNoForm: "1", area: "PROJETOS", cargos: ["DIRETOR"] }))).toEqual({ ok: true });
-    expect(await db.usuario.findUniqueOrThrow({ where: { id: v.id }, select: { nome: true, papel: true, area: true, cargos: true } })).toEqual({ nome: "Vini Novo", papel: "VENDEDOR", area: "VENDAS", cargos: [] });
-  });
-
-  it("edição (exceção do admin): conta antiga com GP em Projetos reeditada pelo form grava PM; marcar Diretor com papel Gestor grava; rebaixar tira", async () => {
-    const a = await db.usuario.create({ data: { nome: "Admin", email: "admin@ij.test", papel: "ADMIN" } });
-    exigirPapel.mockResolvedValue({ id: a.id, papel: "ADMIN" });
-    const p = await db.usuario.create({ data: { nome: "Pat", email: "pat@ij.test", papel: "PROJETOS", area: "PROJETOS", cargos: ["GP"] } });
-    // O form mostra PM marcado (sinônimo) e manda PM.
-    expect(await editarUsuarioAction(undefined, form({ usuarioId: p.id, nome: "Pat", papel: "PROJETOS", ladoNoForm: "1", area: "PROJETOS", cargos: ["PM"] }))).toEqual({ ok: true });
-    expect(await ladoDe(p.id)).toEqual({ papel: "PROJETOS", area: "PROJETOS", cargos: ["PM"] });
-    // Marcar Diretor: o form já trocou o papel para Gestor; o servidor confere de novo.
-    expect(await editarUsuarioAction(undefined, form({ usuarioId: p.id, nome: "Pat", papel: "GESTOR", ladoNoForm: "1", area: "PROJETOS", cargos: ["PM", "DIRETOR"] }))).toEqual({ ok: true });
-    expect(await ladoDe(p.id)).toEqual({ papel: "GESTOR", area: "PROJETOS", cargos: ["PM", "DIRETOR"] });
-    // Form forjado: Diretor com papel PROJETOS não eleva nada.
-    expect(await editarUsuarioAction(undefined, form({ usuarioId: p.id, nome: "Pat", papel: "PROJETOS", ladoNoForm: "1", area: "PROJETOS", cargos: ["DIRETOR"] }))).toEqual({ ok: true });
-    expect(await ladoDe(p.id)).toEqual({ papel: "PROJETOS", area: "PROJETOS", cargos: [] });
-  });
-});
-
-describe("área de entrada (GAB-97)", () => {
-  const entradaDe = async (id: string) => (await db.usuario.findUniqueOrThrow({ where: { id }, select: { areaEntrada: true } })).areaEntrada;
+describe("editarUsuarioAction (GAB-107): nome, telefone e Administrador; papel/lado nunca à mão", () => {
+  const conta = (id: string) => db.usuario.findUniqueOrThrow({ where: { id }, select: { nome: true, papel: true, ativo: true, area: true, cargos: true, areaEntrada: true } });
 
   async function comAdmin() {
     const a = await db.usuario.create({ data: { nome: "Admin", email: "admin@ij.test", papel: "ADMIN" } });
@@ -117,109 +34,114 @@ describe("área de entrada (GAB-97)", () => {
     return a;
   }
 
-  it("GAB-107: convite não pergunta área de entrada; o valor forjado é ignorado e vale a derivada (sem lado = Geral)", async () => {
-    await comAdmin();
-    expect(await criarConviteAction(undefined, form({ nome: "Vis", email: "vis@ij.test", areaEntrada: "PROJETOS" }))).toHaveProperty("link");
-    expect((await db.usuario.findUniqueOrThrow({ where: { email: "vis@ij.test" }, select: { areaEntrada: true } })).areaEntrada).toBe("GERAL");
+  beforeEach(async () => {
+    await limparBanco(["historico_org", "ocupacao", "vinculo_ij", "membro", "posicao", "cargo_org", "area_org"]);
   });
 
-  it("edição grava; valor fora da lista é recusado sem mudar nada", async () => {
-    await comAdmin();
-    const g = await db.usuario.create({ data: { nome: "Gestor", email: "g@ij.test", papel: "GESTOR" } });
-    expect(await editarUsuarioAction(undefined, form({ usuarioId: g.id, nome: "Gestor", ladoNoForm: "1", area: "", areaEntrada: "VENDAS" }))).toEqual({ ok: true });
-    expect(await entradaDe(g.id)).toBe("VENDAS");
-    expect(await editarUsuarioAction(undefined, form({ usuarioId: g.id, nome: "Gestor", ladoNoForm: "1", area: "", areaEntrada: "TABELA" }))).toEqual({ erro: "Dados inválidos." });
-    expect(await entradaDe(g.id)).toBe("VENDAS");
-  });
-
-  it("não mexe em usuario.area nem no lado", async () => {
-    await comAdmin();
-    const v = await db.usuario.create({ data: { nome: "Vis", email: "v@ij.test", papel: "VISUALIZADOR" } });
-    await editarUsuarioAction(undefined, form({ usuarioId: v.id, nome: "Vis", ladoNoForm: "1", area: "", areaEntrada: "PROJETOS" }));
-    expect(await db.usuario.findUniqueOrThrow({ where: { id: v.id }, select: { area: true, cargos: true, areaEntrada: true } })).toEqual({ area: null, cargos: [], areaEntrada: "PROJETOS" });
-  });
-
-  it("gestor sem área que ganha área perde o valor: passa a entrar na própria", async () => {
-    await comAdmin();
-    const g = await db.usuario.create({ data: { nome: "Gestor", email: "g@ij.test", papel: "GESTOR", areaEntrada: "PROJETOS" } });
-    expect(await editarUsuarioAction(undefined, form({ usuarioId: g.id, nome: "Gestor", ladoNoForm: "1", area: "VENDAS", areaEntrada: "" }))).toEqual({ ok: true });
-    expect(await entradaDe(g.id)).toBeNull();
-  });
-
-  it("mudar o papel para vendedor zera", async () => {
-    await comAdmin();
-    const v = await db.usuario.create({ data: { nome: "Vis", email: "v@ij.test", papel: "VISUALIZADOR", areaEntrada: "PROJETOS" } });
-    expect(await editarUsuarioAction(undefined, form({ usuarioId: v.id, nome: "Vis", papel: "VENDEDOR", ladoNoForm: "1", area: "VENDAS" }))).toEqual({ ok: true });
-    expect(await entradaDe(v.id)).toBeNull();
-  });
-
-  it("admin define a própria", async () => {
+  it("papel, área, cargos, área de entrada e ativo forjados são ignorados para todos (admin e gestor); nome passa", async () => {
     const a = await comAdmin();
-    expect(await editarUsuarioAction(undefined, form({ usuarioId: a.id, nome: "Admin", ladoNoForm: "1", area: "", areaEntrada: "PROJETOS" }))).toEqual({ ok: true });
-    expect(await entradaDe(a.id)).toBe("PROJETOS");
-  });
-
-  it("gestor sem área não muda a própria com FormData forjado (GAB-107: o campo é ignorado); admin é quem define", async () => {
+    const v = await db.usuario.create({ data: { nome: "Vini", email: "vini@ij.test", papel: "VENDEDOR", area: "VENDAS" } });
+    const forjado = { papel: "GESTOR", ativo: "false", ladoNoForm: "1", area: "PROJETOS", cargos: ["DIRETOR"], areaEntrada: "PROJETOS" };
+    expect(await editarUsuarioAction(undefined, form({ usuarioId: v.id, nome: "Vini Novo", ...forjado }))).toEqual({ ok: true });
+    expect(await conta(v.id)).toEqual({ nome: "Vini Novo", papel: "VENDEDOR", ativo: true, area: "VENDAS", cargos: [], areaEntrada: null });
+    // Admin na própria conta: idem (nada de lado à mão).
+    expect(await editarUsuarioAction(undefined, form({ usuarioId: a.id, nome: "Admin", ...forjado, papel: "ADMIN" }))).toEqual({ ok: true });
+    expect(await conta(a.id)).toMatchObject({ papel: "ADMIN", ativo: true, area: null, cargos: [] });
     const g = await db.usuario.create({ data: { nome: "Gestor", email: "g@ij.test", papel: "GESTOR" } });
     exigirPapel.mockResolvedValue({ id: g.id, papel: "GESTOR" });
-    expect(await editarUsuarioAction(undefined, form({ usuarioId: g.id, nome: "Gestor", ladoNoForm: "1", area: "", areaEntrada: "VENDAS" }))).toEqual({ ok: true });
-    expect(await entradaDe(g.id)).toBeNull();
+    expect(await editarUsuarioAction(undefined, form({ usuarioId: v.id, nome: "Vini", ...forjado }))).toEqual({ ok: true });
+    expect(await conta(v.id)).toMatchObject({ nome: "Vini", papel: "VENDEDOR", area: "VENDAS" });
   });
 
-  it("editar nome sem os campos de lado mantém o valor", async () => {
+  it("desativar a si mesmo pela action própria continua bloqueado", async () => {
+    const a = await comAdmin();
+    expect(await alternarAtivoAction(a.id, false)).toEqual({ erro: "Você não pode alterar seu próprio papel ou se desativar." });
+    expect((await conta(a.id)).ativo).toBe(true);
+  });
+
+  it("Administrador vindo de gestor é ignorado", async () => {
+    const g = await db.usuario.create({ data: { nome: "Gestor", email: "g@ij.test", papel: "GESTOR" } });
+    exigirPapel.mockResolvedValue({ id: g.id, papel: "GESTOR" });
+    const v = await db.usuario.create({ data: { nome: "Vini", email: "vini@ij.test", papel: "VENDEDOR", area: "VENDAS" } });
+    expect(await editarUsuarioAction(undefined, form({ usuarioId: v.id, nome: "Vini", adminNoForm: "1", administrador: "1" }))).toEqual({ ok: true });
+    expect((await conta(v.id)).papel).toBe("VENDEDOR");
+  });
+
+  it("admin marca Administrador (mantém o lado); desmarcar volta às posições só com confirmação da conta resultante", async () => {
     await comAdmin();
-    const g = await db.usuario.create({ data: { nome: "Gestor", email: "g@ij.test", papel: "GESTOR", areaEntrada: "VENDAS" } });
-    expect(await editarUsuarioAction(undefined, form({ usuarioId: g.id, nome: "Gestor Novo" }))).toEqual({ ok: true });
-    expect(await entradaDe(g.id)).toBe("VENDAS");
+    await db.areaOrg.create({ data: { id: "vend", nome: "Vendas", ladoCrm: "VENDAS" } });
+    await db.cargoOrg.create({ data: { id: "gpv", nome: "GP", categoria: "LIDERANCA", ehGp: true } });
+    await db.posicao.create({ data: { id: "p_gpv", nome: "GP de Vendas", areaId: "vend", cargoId: "gpv" } });
+    const v = await db.usuario.create({ data: { nome: "Vini", email: "vini@ij.test", papel: "VENDEDOR", area: "VENDAS", cargos: ["GP"] } });
+    const m = await db.membro.create({ data: { nome: "Vini", email: "vini@ij.test", status: "ATIVO", usuarioId: v.id } });
+    await db.ocupacao.create({ data: { membroId: m.id, posicaoId: "p_gpv", principal: true } });
+
+    expect(await editarUsuarioAction(undefined, form({ usuarioId: v.id, nome: "Vini", adminNoForm: "1", administrador: "1" }))).toEqual({ ok: true, conta: "Administrador · Vendas · GP" });
+    expect(await conta(v.id)).toMatchObject({ papel: "ADMIN", area: "VENDAS", cargos: ["GP"], areaEntrada: "VENDAS" });
+
+    // Desmarcar: pede confirmação mostrando a conta que sai das posições; sem ela, continua admin.
+    expect(await editarUsuarioAction(undefined, form({ usuarioId: v.id, nome: "Vini", adminNoForm: "1" }))).toMatchObject({
+      confirmarConta: { atual: "Administrador · Vendas · GP", conta: "Membro de Vendas · GP", posicoes: ["Vendas · GP"] },
+    });
+    expect((await conta(v.id)).papel).toBe("ADMIN");
+    expect(await editarUsuarioAction(undefined, form({ usuarioId: v.id, nome: "Vini", adminNoForm: "1", confirmarConta: "Visualizador (só leitura)" }))).toHaveProperty("confirmarConta");
+    expect(await editarUsuarioAction(undefined, form({ usuarioId: v.id, nome: "Vini", adminNoForm: "1", confirmarConta: "Membro de Vendas · GP" }))).toEqual({ ok: true, conta: "Membro de Vendas · GP" });
+    expect(await conta(v.id)).toMatchObject({ papel: "VENDEDOR", area: "VENDAS", cargos: ["GP"] });
   });
 
-  describe("auditoria", () => {
-    const logsDeEntrada = (espiao: { mock: { calls: unknown[][] } }, evento: string) => espiao.mock.calls.map((c) => String(c[0])).filter((l) => l.includes(evento));
+  it("admin não tira o próprio Administrador", async () => {
+    const a = await comAdmin();
+    expect(await editarUsuarioAction(undefined, form({ usuarioId: a.id, nome: "Admin", adminNoForm: "1" }))).toEqual({ erro: "Você não pode alterar seu próprio papel ou se desativar." });
+    expect((await conta(a.id)).papel).toBe("ADMIN");
+  });
+});
 
-    it("editar só o nome reenvia GERAL do form sobre null: sem log, sem gravar e sem barrar", async () => {
-      await comAdmin();
-      const g = await db.usuario.create({ data: { nome: "Gestor", email: "g@ij.test", papel: "GESTOR" } });
-      const info = vi.spyOn(console, "info").mockImplementation(() => {});
-      expect(await editarUsuarioAction(undefined, form({ usuarioId: g.id, nome: "Gestor Novo", ladoNoForm: "1", area: "", areaEntrada: "GERAL" }))).toEqual({ ok: true });
-      expect(logsDeEntrada(info, "usuario.area_entrada_alterada")).toEqual([]);
-      expect(await entradaDe(g.id)).toBeNull();
-      info.mockRestore();
-    });
+describe("área de entrada (GAB-97): não é mais perguntada", () => {
+  it("GAB-107: convite não pergunta área de entrada; o valor forjado é ignorado e vale a derivada (sem lado = Geral)", async () => {
+    const a = await db.usuario.create({ data: { nome: "Admin", email: "admin@ij.test", papel: "ADMIN" } });
+    exigirPapel.mockResolvedValue({ id: a.id, papel: "ADMIN" });
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    expect(await criarConviteAction(undefined, form({ nome: "Vis", email: "vis@ij.test", areaEntrada: "PROJETOS" }))).toHaveProperty("link");
+    expect((await db.usuario.findUniqueOrThrow({ where: { email: "vis@ij.test" }, select: { areaEntrada: true } })).areaEntrada).toBe("GERAL");
+    const logs = info.mock.calls.map((c) => String(c[0])).filter((l) => l.includes("usuario.convidado"));
+    expect(logs[0]).toContain("entrada=GERAL");
+    expect(logs[0]).toContain("papel=VISUALIZADOR");
+    info.mockRestore();
+  });
+});
 
-    it("gestor sem área salvando o próprio form com GERAL não é barrado", async () => {
-      const g = await db.usuario.create({ data: { nome: "Gestor", email: "g@ij.test", papel: "GESTOR" } });
-      exigirPapel.mockResolvedValue({ id: g.id, papel: "GESTOR" });
-      expect(await editarUsuarioAction(undefined, form({ usuarioId: g.id, nome: "Gestor", ladoNoForm: "1", area: "", areaEntrada: "GERAL" }))).toEqual({ ok: true });
-    });
+describe("cadastro pela action (GAB-107)", () => {
+  const porEmail = (email: string) => db.usuario.findUniqueOrThrow({ where: { email }, select: { papel: true, area: true, cargos: true, areaEntrada: true } });
 
-    it("mudança real gera log", async () => {
-      await comAdmin();
-      const g = await db.usuario.create({ data: { nome: "Gestor", email: "g@ij.test", papel: "GESTOR" } });
-      const info = vi.spyOn(console, "info").mockImplementation(() => {});
-      await editarUsuarioAction(undefined, form({ usuarioId: g.id, nome: "Gestor", ladoNoForm: "1", area: "", areaEntrada: "PROJETOS" }));
-      expect(logsDeEntrada(info, "usuario.area_entrada_alterada")).toEqual([expect.stringContaining("de=nenhuma para=PROJETOS")]);
-      info.mockRestore();
-    });
+  async function comGestor() {
+    const g = await db.usuario.create({ data: { nome: "Gestor", email: "gestor@ij.test", papel: "GESTOR" } });
+    exigirPapel.mockResolvedValue({ id: g.id, papel: "GESTOR" });
+    return g;
+  }
 
-    it("quem deixa de usar a coluna fica sem valor, mesmo com GERAL, sem log", async () => {
-      await comAdmin();
-      const v = await db.usuario.create({ data: { nome: "Vis", email: "v@ij.test", papel: "VISUALIZADOR", areaEntrada: "GERAL" } });
-      const info = vi.spyOn(console, "info").mockImplementation(() => {});
-      await editarUsuarioAction(undefined, form({ usuarioId: v.id, nome: "Vis", papel: "VENDEDOR", ladoNoForm: "1", area: "VENDAS" }));
-      expect(await entradaDe(v.id)).toBeNull();
-      expect(logsDeEntrada(info, "usuario.area_entrada_alterada")).toEqual([]);
-      info.mockRestore();
-    });
+  it("papel, área, cargos e área de entrada forjados no convite são ignorados (sem posição = Visualizador, Geral)", async () => {
+    await comGestor();
+    expect(await criarConviteAction(undefined, form({ nome: "Dora", email: "dora@ij.test", papel: "GESTOR", ladoNoForm: "1", area: "PROJETOS", cargos: ["DIRETOR"], areaEntrada: "PROJETOS" }))).toHaveProperty("link");
+    expect(await porEmail("dora@ij.test")).toEqual({ papel: "VISUALIZADOR", area: null, cargos: [], areaEntrada: "GERAL" });
+  });
 
-    it("usuario.convidado traz entrada=", async () => {
-      await comAdmin();
-      const info = vi.spyOn(console, "info").mockImplementation(() => {});
-      await criarConviteAction(undefined, form({ nome: "Vis", email: "vis@ij.test", areaEntrada: "PROJETOS" }));
-      const logs = logsDeEntrada(info, "usuario.convidado");
-      expect(logs[0]).toContain("entrada=GERAL");
-      expect(logs[0]).toContain("papel=VISUALIZADOR");
-      info.mockRestore();
+  it("Administrador só vale de quem é admin", async () => {
+    await comGestor();
+    expect(await criarConviteAction(undefined, form({ nome: "Ari", email: "ari@ij.test", administrador: "1" }))).toEqual({ erro: "Você não pode atribuir esse papel." });
+    expect(await db.usuario.count({ where: { email: "ari@ij.test" } })).toBe(0);
+    const a = await db.usuario.create({ data: { nome: "Admin", email: "admin@ij.test", papel: "ADMIN" } });
+    exigirPapel.mockResolvedValue({ id: a.id, papel: "ADMIN" });
+    expect(await criarConviteAction(undefined, form({ nome: "Ari", email: "ari@ij.test", administrador: "1" }))).toHaveProperty("link");
+    expect(await porEmail("ari@ij.test")).toMatchObject({ papel: "ADMIN", area: null, cargos: [] });
+  });
+
+  it("prévia mandada pela tela diferente da conta resultante pede confirmação", async () => {
+    await comGestor();
+    expect(await criarConviteAction(undefined, form({ nome: "Bia", email: "bia@ij.test", previaConta: "Membro de Vendas" }))).toMatchObject({
+      confirmarConta: { atual: "Membro de Vendas", conta: "Visualizador (só leitura)" },
     });
+    expect(await db.usuario.count({ where: { email: "bia@ij.test" } })).toBe(0);
+    expect(await criarConviteAction(undefined, form({ nome: "Bia", email: "bia@ij.test", previaConta: "Visualizador (só leitura)" }))).toMatchObject({ conta: "Visualizador (só leitura)" });
   });
 });
 

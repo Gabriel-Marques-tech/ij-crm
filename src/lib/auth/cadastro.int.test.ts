@@ -365,7 +365,9 @@ describe("edição: adicionar e encerrar posição", () => {
     const { gestor } = await semear();
     const u = await db.usuario.create({ data: { nome: "Lia", email: "lia@ij.test", papel: "PROJETOS", area: "PROJETOS" } });
     const m = await db.membro.create({ data: { nome: "Lia", email: "LIA@ij.test", status: "ATIVO" } });
-    expect(await adicionarPosicaoAoUsuario(u.id, "p_pm", gestor)).toMatchObject({ ok: true });
+    // Mesmo papel, mas ganha o cargo PM: também é mudança na conta, então confirma (GAB-107).
+    expect(await adicionarPosicaoAoUsuario(u.id, "p_pm", gestor)).toMatchObject({ erro: "CONFIRMAR_CONTA", confirmarConta: { atual: "Membro de Projetos", conta: "Membro de Projetos · PM" } });
+    expect(await adicionarPosicaoAoUsuario(u.id, "p_pm", gestor, { confirmarConta: "Membro de Projetos · PM" })).toMatchObject({ ok: true });
     expect(await adicionarPosicaoAoUsuario(u.id, "p_agg", gestor)).toMatchObject({ ok: true });
     expect((await db.membro.findUniqueOrThrow({ where: { id: m.id } })).usuarioId).toBe(u.id);
     const ocs = await db.ocupacao.findMany({ where: { membroId: m.id }, orderBy: { criadoEm: "asc" } });
@@ -383,8 +385,8 @@ describe("edição: adicionar e encerrar posição", () => {
     // Admin pode na própria conta (como no lado/cargo).
     expect(await adicionarPosicaoAoUsuario(admin.id, "p_agg", admin)).toMatchObject({ ok: true });
 
-    const a = await db.usuario.create({ data: { nome: "Ana", email: "ana@ij.test", papel: "VENDEDOR" } });
-    const b = await db.usuario.create({ data: { nome: "Bia", email: "bia@ij.test", papel: "VENDEDOR" } });
+    const a = await db.usuario.create({ data: { nome: "Ana", email: "ana@ij.test", papel: "VENDEDOR", area: "VENDAS" } });
+    const b = await db.usuario.create({ data: { nome: "Bia", email: "bia@ij.test", papel: "VENDEDOR", area: "VENDAS" } });
     await adicionarPosicaoAoUsuario(a.id, "p_mv", gestor);
     await adicionarPosicaoAoUsuario(b.id, "p_mv", gestor);
     const daBia = ocupacoesPorConta(await carregarBase())[b.id][0];

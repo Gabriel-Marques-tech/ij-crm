@@ -70,3 +70,21 @@ describe("tabela de usuários × Google", () => {
     expect(screen.queryByRole("button", { name: /Reemitir convite|definir senha/ })).toBeNull();
   });
 });
+
+describe("editar usuário (GAB-107)", () => {
+  it("sem papel/área/cargo à mão: o admin vê só o checkbox Administrador e a conta em leitura; o gestor nem o checkbox", () => {
+    const v = usuario({ id: "v", papel: "VENDEDOR", area: "VENDAS", cargos: ["GP"] });
+    const { unmount } = render(<TabelaUsuarios ator={{ id: "a", papel: "ADMIN" }} usuarios={[v]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Editar" }));
+    expect(screen.queryByLabelText("Papel")).toBeNull();
+    expect(screen.queryByLabelText("Área")).toBeNull();
+    expect(screen.queryByLabelText("Área de entrada")).toBeNull();
+    expect((screen.getByLabelText("Administrador") as HTMLInputElement).checked).toBe(false);
+    expect(screen.getByText("Membro de Vendas · GP")).toBeInTheDocument();
+    unmount();
+    render(<TabelaUsuarios ator={{ id: "g", papel: "GESTOR" }} usuarios={[v]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Editar" }));
+    expect(screen.queryByLabelText("Administrador")).toBeNull();
+    expect(screen.queryByLabelText("Papel")).toBeNull();
+  });
+});

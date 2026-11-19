@@ -100,7 +100,8 @@ describe("URLs", () => {
 
   it("rotas antigas do G&G levam à nova com os parâmetros que ainda valem", () => {
     expect(destinoAntigo("lista", { q: "ana", area: "gg", status: "ATIVO", outro: "x" })).toBe("/membros?visao=lista&q=ana&area=gg&status=ATIVO");
-    expect(destinoAntigo("organograma", { escopo: "gg", fechado: "a,b" })).toBe("/membros?visao=organograma&escopo=gg&fechado=a%2Cb");
+    // O recorte "só G&G" saiu: o link antigo com escopo=gg mostra o organograma inteiro.
+    expect(destinoAntigo("organograma", { escopo: "gg", fechado: "a,b" })).toBe("/membros?visao=organograma&fechado=a%2Cb");
     expect(destinoAntigo("organograma", {})).toBe("/membros?visao=organograma");
   });
 });

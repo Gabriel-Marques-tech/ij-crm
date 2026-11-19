@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { exigirPapel } from "@/lib/auth/atual";
 import { atualizarUsuario, reemitirConvite, type ErroUsuario } from "@/lib/auth/usuarios";
-import { adicionarPosicaoAoUsuario, cadastrarPessoa, encerrarOcupacaoDoUsuario, type ContaAConfirmar, type ErroCadastro, type FalhaCadastro, type FichaLigada } from "@/lib/auth/cadastro";
+import { adicionarPosicaoAoUsuario, cadastrarPessoa, definirAdministrador, encerrarOcupacaoDoUsuario, type ContaAConfirmar, type ErroCadastro, type FalhaCadastro, type FichaLigada } from "@/lib/auth/cadastro";
 import { descreverConta } from "@/lib/gg/modelo";
 import { MENSAGEM_ERRO_ORG } from "@/lib/gg/organizacao";
 import { MENSAGEM_REDEFINICAO, gerarLinkRedefinicao } from "@/lib/auth/redefinicao";
@@ -73,14 +73,6 @@ function confirmacaoDoForm(form: FormData) {
   };
 }
 
-const papelSchema = z.enum(["ADMIN", "GESTOR", "VENDEDOR", "PROJETOS", "VISUALIZADOR"]);
-// "" = nenhuma área. Coerência com o papel é resolvida no serviço (lib/auth/areas).
-const areaSchema = z.enum(["VENDAS", "PROJETOS", ""]).transform((a) => (a === "" ? null : a));
-// Qualquer cargo do enum entra aqui; "é da área" e "Diretor só com gestão" é o serviço que resolve (lib/auth/areas).
-const cargosSchema = z.array(z.enum(["GP", "PM", "PO", "DIRETOR"]));
-// "" = campo fora do form (papel não usa área de entrada). Coerência no serviço, como a área.
-const areaEntradaSchema = z.enum(["VENDAS", "PROJETOS", "GERAL", ""]).transform((a) => (a === "" ? null : a));
-
 // GAB-107: papel, área, cargos e área de entrada NÃO vêm do form do cadastro: saem da posição
 // (`cadastrarPessoa`). Só "Administrador" (checkbox), que o serviço recusa se quem cadastra não é admin.
 const conviteSchema = z.object({
@@ -90,17 +82,9 @@ const conviteSchema = z.object({
   // "" = sem posição (campo opcional).
   posicaoId: z.string().max(64).optional(),
   administrador: z.boolean(),
+  // O texto "Conta no CRM: …" que a tela mostrava: se a conta gravada for outra, o serviço pede confirmação.
+  previa: z.string().max(200).optional(),
 });
-
-/**
- * Campos de lado do form (CamposLado): `area` + checkboxes `cargos` + `areaEntrada`. O hidden
- * `ladoNoForm` diferencia "nenhum cargo marcado" de "form sem esses campos"
- * (editar a si mesmo não mostra lado/cargo).
- */
-function ladoDoForm(form: FormData): { area?: unknown; cargos?: unknown[]; areaEntrada?: unknown } {
-  if (form.get("ladoNoForm") !== "1") return {};
-  return { area: form.get("area") ?? "", cargos: form.getAll("cargos"), areaEntrada: form.get("areaEntrada") ?? "" };
-}
 
 function linkConvite(token: string, caminho: "convite" | "redefinir" = "convite"): string {
   const base = process.env.APP_URL?.replace(/\/+$/, "");
@@ -133,6 +117,7 @@ export async function criarConviteAction(_prev: EstadoConvite, form: FormData): 
       telefone: form.get("telefone") ?? undefined,
       posicaoId: form.get("posicaoId") ?? undefined,
       administrador: form.get("administrador") === "1",
+      previa: form.get("previaConta") || undefined,
     });
     if (!parsed.success) return { erro: parsed.error.issues[0]?.message ?? "Dados inválidos." };
     // Conta (+ membro do G&G e posição, quando há posição), numa transação só.
@@ -162,37 +147,36 @@ export async function reemitirConviteAction(usuarioId: string): Promise<EstadoCo
   });
 }
 
+// GAB-107: a edição é nome, telefone e (só para o admin) "Administrador". Papel, área, cargos e área de
+// entrada não vêm de form nenhum: saem das posições (atribuir/encerrar recalcula a conta).
 const edicaoSchema = z.object({
   usuarioId: z.string().min(1),
   nome: z.string().trim().min(2).optional(),
   telefone: z.string().trim().optional(),
-  papel: papelSchema.optional(),
-  area: areaSchema.optional(),
-  cargos: cargosSchema.optional(),
-  areaEntrada: areaEntradaSchema.optional(),
 });
 
-export type EstadoEdicao = { erro?: string; ok?: true } | undefined;
+/** `confirmarConta`: desmarcar "Administrador" devolve a conta às posições; a tela mostra e confirma. */
+export type EstadoEdicao = { erro?: string; ok?: true; confirmarConta?: ContaAConfirmar; conta?: string } | undefined;
 
 export async function editarUsuarioAction(_prev: EstadoEdicao, form: FormData): Promise<EstadoEdicao> {
   return comTratamentoForm("gestao.usuarios.editarUsuario", async (): Promise<EstadoEdicao> => {
     const ator = await exigirPapel("GESTOR");
-    const parsed = edicaoSchema.safeParse({
-      usuarioId: form.get("usuarioId"),
-      nome: form.get("nome") ?? undefined,
-      telefone: form.get("telefone") ?? undefined,
-      papel: form.get("papel") ?? undefined,
-      ...ladoDoForm(form),
-    });
+    const parsed = edicaoSchema.safeParse({ usuarioId: form.get("usuarioId"), nome: form.get("nome") ?? undefined, telefone: form.get("telefone") ?? undefined });
     if (!parsed.success) return { erro: "Dados inválidos." };
-    const { usuarioId, papel, area, cargos, areaEntrada, ...perfil } = parsed.data;
-    // GAB-107: papel e lado vêm da posição. Mudar à mão (papel, área, cargos, área de entrada) é
-    // exceção do admin; do gestor, só nome e telefone passam (o resto é ignorado).
-    const dados = ator.papel === "ADMIN" ? { ...perfil, papel, area, cargos, areaEntrada } : perfil;
-    const r = await atualizarUsuario(usuarioId, dados, ator);
+    const { usuarioId, ...perfil } = parsed.data;
+    // Campos de papel/lado num FormData forjado são ignorados: só nome e telefone vão para a conta.
+    const r = await atualizarUsuario(usuarioId, perfil, ator);
     if (!r.ok) return { erro: MENSAGEM[r.erro] };
+    let conta: string | undefined;
+    // "Administrador" só é lido do admin (o serviço confere de novo); de outro ator, o campo é ignorado.
+    if (ator.papel === "ADMIN" && form.get("adminNoForm") === "1") {
+      const a = await definirAdministrador(usuarioId, form.get("administrador") === "1", ator, { confirmarConta: textoCurto(form.get("confirmarConta")) });
+      if (!a.ok) return falha(a);
+      conta = a.conta;
+    }
     revalidatePath("/gestao/usuarios");
-    return { ok: true };
+    revalidatePath("/membros", "layout");
+    return { ok: true, ...(conta ? { conta } : {}) };
   });
 }
 

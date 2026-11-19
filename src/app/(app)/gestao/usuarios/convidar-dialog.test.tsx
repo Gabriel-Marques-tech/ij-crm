@@ -77,6 +77,8 @@ describe("cadastro: Posição na IJ em cascata", () => {
     escolher("Cargo na IJ", "p_pm");
     expect(previa()).toBe("Conta no CRM: Membro de Projetos · PM");
     expect(dados().get("posicaoId")).toBe("p_pm");
+    // O servidor recebe a prévia que a tela mostrou, para pedir confirmação se gravar outra conta.
+    expect(dados().get("previaConta")).toBe("Membro de Projetos · PM");
     semCamposDeConta(dados());
   });
 

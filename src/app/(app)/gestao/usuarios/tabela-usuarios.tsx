@@ -16,7 +16,7 @@ import { areaDeEntrada } from "@/lib/auth/visibilidade";
 import { ROTULO_PAPEL, podeAtribuirPapel, podeGerarRedefinicao } from "@/lib/auth/papeis";
 import { alternarAtivoAction, desligarGoogleAction, editarUsuarioAction, gerarLinkRedefinicaoAction, reemitirConviteAction, type EstadoConvite } from "./actions";
 import { LinkGerado } from "./convidar-dialog";
-import { CamposPapelLado } from "./campos-lado";
+import { ConfirmarConta } from "./confirmar-conta";
 import { PosicoesUsuario } from "./posicoes-usuario";
 import type { AreaPosicoes, OcupacaoDaConta } from "@/lib/auth/cadastro";
 
@@ -291,6 +291,8 @@ function EditarForm({
     return r;
   }, undefined);
   const souEu = usuario.id === ator.id;
+  // Controlado: o React limpa campos não controlados depois da action, e a confirmação reenvia este valor.
+  const [administrador, setAdministrador] = useState(usuario.papel === "ADMIN");
 
   return (
     <form action={action} className="space-y-4">
@@ -306,20 +308,23 @@ function EditarForm({
       </div>
       {/* Posição dá poder como o cargo: na própria conta, só o admin (o servidor reaplica). */}
       {!souEu || ator.papel === "ADMIN" ? <PosicoesUsuario usuarioId={usuario.id} ocupacoes={ocupacoes} areas={posicoes.areas} temAreaGG={posicoes.temAreaGG} /> : null}
-      {/* GAB-107: papel, área e cargos vêm da posição (recalculados ao atribuir/encerrar). Mudar à mão é exceção do admin; o servidor ignora do gestor. */}
+      {/* GAB-107: papel, área e cargos vêm das posições (recalculados ao atribuir/encerrar); não há edição à mão. */}
+      <p className="text-sm text-fg-soft">
+        Conta no CRM: <strong>{descreverConta(usuario)}</strong>
+        <span className="block text-xs text-fg-faint">Vem da posição na IJ.</span>
+      </p>
+      {/* Só o admin vê e o servidor só lê do admin. Na própria conta não muda (ninguém se rebaixa). */}
+      {ator.papel === "ADMIN" && !souEu ? <input type="hidden" name="adminNoForm" value="1" /> : null}
       {ator.papel === "ADMIN" ? (
-        <>
-          <p className="text-xs text-fg-faint">Exceção de admin: o papel normalmente vem da posição e é recalculado quando ela muda.</p>
-          {/* Admin define o próprio lado (ex.: admin que atua em vendas); fica na auditoria. Ver usuarios.ts. */}
-          <CamposPapelLado papelAtor={ator.papel} papel={usuario.papel} area={usuario.area} cargos={usuario.cargos} areaEntrada={usuario.areaEntrada} mostrarPapel={!souEu} />
-        </>
-      ) : (
-        <p className="text-sm text-fg-soft">
-          Conta no CRM: <strong>{descreverConta(usuario)}</strong>
-          <span className="block text-xs text-fg-faint">Vem da posição na IJ. Só um admin muda à mão.</span>
-        </p>
-      )}
-      {estado?.erro ? (
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" name="administrador" value="1" checked={administrador} onChange={(e) => setAdministrador(e.currentTarget.checked)} disabled={souEu} />
+          Administrador
+          {souEu ? <span className="text-xs text-fg-faint">(não muda na própria conta)</span> : null}
+        </label>
+      ) : null}
+      {estado?.confirmarConta ? (
+        <ConfirmarConta pedido={estado.confirmarConta} pendente={pendente} rotuloAtual="Hoje a conta é" nomeCampo="confirmarConta" />
+      ) : estado?.erro ? (
         <p role="alert" className="text-sm text-danger">
           {estado.erro}
         </p>

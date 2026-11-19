@@ -158,6 +158,8 @@ export function CorpoConvite({
       <p className="-mt-2 text-xs text-fg-faint" aria-live="polite">
         Conta no CRM: {previaDaConta(posicao, administrador)}
       </p>
+      {/* O servidor compara a conta que vai gravar com o que a tela mostrou; se for outra, pede confirmação. */}
+      <input type="hidden" name="previaConta" value={previaDaConta(posicao, administrador)} />
       {podeDarAdmin ? (
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" name="administrador" value="1" checked={administrador} onChange={(e) => setAdministrador(e.currentTarget.checked)} />

@@ -170,9 +170,11 @@ async function gravarConta(
  * de uma ficha já existente que foi ligada); o que o cliente mandar disso é ignorado. Homônimo
  * sem e-mail no G&G: falha com `homonimos` até a tela confirmar (`confirmacao`).
  * `administrador`: só um admin cadastra admin; de outro ator, recusa.
+ * `previa`: o texto "Conta no CRM: …" que a tela mostrava. Se a conta gravada não for essa, pede
+ * confirmação (sem `previa`, compara com a conta só da posição escolhida).
  */
 export async function cadastrarPessoa(
-  dados: Pick<DadosConvite, "nome" | "email" | "telefone"> & { posicaoId?: string | null; administrador?: boolean },
+  dados: Pick<DadosConvite, "nome" | "email" | "telefone"> & { posicaoId?: string | null; administrador?: boolean; previa?: string | null },
   por: Ator,
   confirmacao: ConfirmacaoMembro = {},
 ): Promise<ResultadoCadastro<{ usuarioId: string; membroId: string; fichaLigada: FichaLigada | null; token: string; expiraEm: Date; conta: ContaDerivada }>> {
@@ -193,11 +195,12 @@ export async function cadastrarPessoa(
       const conta = contaDaDerivacao(derivarDoOrganograma(postos), { administrador });
       if (!conta) throw new Desfaz("CONFLITO_DE_LADO");
       // A prévia da tela é só da posição escolhida (sem posição: Visualizador). Ficha ligada com outras
-      // posições (ex.: já colocada numa diretoria pelo G&G) pode dar mais que isso: só com confirmação.
+      // posições (ex.: já colocada numa diretoria pelo G&G) pode dar outra conta: só com confirmação.
       const escolhida = postos.filter((p) => p.posicaoId === posicaoId).map((p) => ({ ...p, principal: true }));
-      const daTela = contaDaDerivacao(derivarDoOrganograma(escolhida), { administrador })!;
-      if (!mesmaConta(conta, daTela) && confirmacao.confirmarConta !== descreverConta(conta))
-        throw new RecusaConfirmarConta({ atual: descreverConta(daTela), conta: descreverConta(conta), posicoes: postos.filter((p) => p.posicaoId !== posicaoId).map((p) => p.rotulo) });
+      const mostrada = dados.previa || descreverConta(contaDaDerivacao(derivarDoOrganograma(escolhida), { administrador })!);
+      const resultado = descreverConta(conta);
+      if (resultado !== mostrada && confirmacao.confirmarConta !== resultado)
+        throw new RecusaConfirmarConta({ atual: mostrada, conta: resultado, posicoes: postos.filter((p) => p.posicaoId !== posicaoId).map((p) => p.rotulo) });
       if (!podeAtribuirPapel(por.papel, conta.papel)) throw new Desfaz("PAPEL_NAO_PERMITIDO");
       await tx.usuario.update({ where: { id: c.usuarioId }, data: { papel: conta.papel, area: conta.area, cargos: conta.cargos, areaEntrada: conta.areaEntrada } });
       return { ...c, conta, membroId: m.id, fichaLigada: m.ligado ? await fichaLigada(tx, m.id) : null };
@@ -232,9 +235,9 @@ async function papelMantido(tx: Prisma.TransactionClient, alvo: { id: string; pa
  * última posição não tranca ninguém fora (nem vira Visualizador sozinho); a gestão decide.
  * Conflito de lado: ao atribuir, recusa (marque uma principal); ao encerrar, mantém a conta, para
  * o encerramento não ficar travado.
- * Mudança de PAPEL (promover a gestor, desfazer uma exceção que o admin pôs à mão) só com
- * `confirmado` igual à conta resultante: sem isso, desfaz tudo e devolve o pedido de confirmação. Lado/cargo no mesmo papel
- * acompanham sem perguntar. Devolve a conta como fica (para a tela) e a linha de auditoria, se mudou.
+ * Qualquer mudança na conta (papel, lado ou cargo) só com `confirmado` igual à conta resultante:
+ * sem isso, desfaz tudo e devolve o pedido de confirmação. Devolve a conta como fica (para a tela) e a
+ * linha de auditoria, se mudou.
  */
 async function recalcularContaTx(
   tx: Prisma.TransactionClient,
@@ -254,7 +257,7 @@ async function recalcularContaTx(
     return fica;
   }
   if (!podeAtribuirPapel(por.papel, conta.papel)) throw new RecusaConta("PAPEL_NAO_PERMITIDO");
-  if (conta.papel !== atual.papel && confirmado !== descreverConta(conta)) throw new RecusaConfirmarConta({ atual: descreverConta(atual), conta: descreverConta(conta), posicoes: postos.map((p) => p.rotulo) });
+  if (!mesmaConta(conta, atual) && confirmado !== descreverConta(conta)) throw new RecusaConfirmarConta({ atual: descreverConta(atual), conta: descreverConta(conta), posicoes: postos.map((p) => p.rotulo) });
   const mudou = await gravarConta(tx, usuarioId, conta, por.id, atual);
   return { conta: descreverConta(conta), auditoria: mudou ? `${conta.papel} lado=${formatarLado(conta)}${confirmado ? " confirmada=1" : ""}` : null };
 }
@@ -289,6 +292,41 @@ export async function encerrarOcupacaoDoUsuario(usuarioId: string, ocupacaoId: s
     });
     console.info(`[auditoria] usuario.ocupacao_encerrada usuario=${alvo.id} por=${por.id} ocupacao=${ocupacaoId}${conta.auditoria ? ` conta=${conta.auditoria}` : ""}`);
     return { ok: true, conta: conta.conta };
+  } catch (e) {
+    return traduzir(e);
+  }
+}
+
+/**
+ * "Administrador" na edição de usuário (GAB-107): só o admin marca ou desmarca, e nunca na própria conta
+ * (ninguém se rebaixa; com um admin só, não há outro admin para rebaixá-lo). Marcar: papel ADMIN,
+ * mantendo o lado e os cargos. Desmarcar: a conta volta a sair das posições vigentes (sem posição,
+ * Visualizador), e só com `confirmarConta` igual à conta resultante. Devolve como a conta ficou.
+ */
+export async function definirAdministrador(usuarioId: string, administrador: boolean, por: Ator, { confirmarConta = null }: { confirmarConta?: string | null } = {}): Promise<ResultadoCadastro<{ conta: string }>> {
+  try {
+    if (por.papel !== "ADMIN") throw new RecusaConta("PAPEL_NAO_PERMITIDO");
+    const alvo = await db.usuario.findUnique({ where: { id: usuarioId }, select: { id: true, papel: true, area: true, cargos: true, areaEntrada: true } });
+    if (!alvo) throw new RecusaConta("USUARIO_NAO_ENCONTRADO");
+    if ((alvo.papel === "ADMIN") === administrador) return { ok: true, conta: descreverConta(alvo) };
+    if (alvo.id === por.id) throw new RecusaConta("NAO_PODE_ALTERAR_A_SI");
+    const conta = await db.$transaction(async (tx) => {
+      await papelMantido(tx, alvo);
+      if (administrador) {
+        const areaEntrada = resolverAreaEntrada("ADMIN", alvo.area, alvo.areaEntrada ?? alvo.area ?? "GERAL");
+        await tx.usuario.update({ where: { id: alvo.id }, data: { papel: "ADMIN", areaEntrada } });
+        return { papel: "ADMIN" as const, area: alvo.area, cargos: alvo.cargos };
+      }
+      const m = await tx.membro.findUnique({ where: { usuarioId: alvo.id }, select: { id: true } });
+      const nova = contaDaDerivacao(derivarDoOrganograma(m ? await postosVigentesTx(tx, m.id) : []));
+      if (!nova) throw new Desfaz("CONFLITO_DE_LADO");
+      const resultado = descreverConta(nova);
+      if (confirmarConta !== resultado) throw new RecusaConfirmarConta({ atual: descreverConta(alvo), conta: resultado, posicoes: m ? (await postosVigentesTx(tx, m.id)).map((x) => x.rotulo) : [] });
+      await gravarConta(tx, alvo.id, nova, por.id, alvo);
+      return nova;
+    });
+    console.info(`[auditoria] usuario.papel_alterado usuario=${alvo.id} por=${por.id} de=${alvo.papel} para=${conta.papel} lado=${formatarLado(conta)} origem=administrador`);
+    return { ok: true, conta: descreverConta(conta) };
   } catch (e) {
     return traduzir(e);
   }
