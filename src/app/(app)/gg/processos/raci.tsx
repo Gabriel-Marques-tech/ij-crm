@@ -1,13 +1,14 @@
 "use client";
 
 import { useState } from "react";
+import { Trash2 } from "lucide-react";
 import type { PapelRaci } from "@prisma/client";
 import { cn } from "cn";
 import { MensagemErro } from "@/components/erros/mensagem-erro";
 import { CAMPO } from "@/components/gg/ui";
 import { useAcao } from "@/components/gg/use-acao";
 import { Button } from "@/components/ui/button";
-import { criarProcessoAction, definirRaciAction } from "../actions";
+import { criarProcessoAction, definirRaciAction, excluirProcessoAction } from "../actions";
 
 const ORDEM: (PapelRaci | null)[] = [null, "R", "A", "C", "I"];
 const COR: Record<PapelRaci, string> = { R: "border-chart-5 bg-chart-5/10 text-chart-5", A: "border-primary bg-primary-soft text-primary", C: "border-warn/60 text-warn", I: "border-border-strong text-fg-soft" };
@@ -44,5 +45,38 @@ export function NovoProcesso() {
       </Button>
       <MensagemErro falha={erro} className="text-xs" />
     </form>
+  );
+}
+
+/** Excluir processo (só editores G&G): o ícone vira "Confirmar exclusão" / "Cancelar" na própria linha. */
+export function ExcluirProcesso({ processoId, nome }: { processoId: string; nome: string }) {
+  const [confirmar, setConfirmar] = useState(false);
+  const { pendente, erro, setErro, rodar } = useAcao();
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1.5">
+      {confirmar ? (
+        <>
+          <Button size="xs" variant="destructive" disabled={pendente} onClick={() => rodar(() => excluirProcessoAction(processoId), "excluir o processo")}>
+            Confirmar exclusão
+          </Button>
+          <Button
+            size="xs"
+            variant="ghost"
+            disabled={pendente}
+            onClick={() => {
+              setConfirmar(false);
+              setErro(null);
+            }}
+          >
+            Cancelar
+          </Button>
+        </>
+      ) : (
+        <Button size="icon-xs" variant="ghost" aria-label={`Excluir processo ${nome}`} title="Excluir processo" className="text-fg-faint hover:text-destructive" onClick={() => setConfirmar(true)}>
+          <Trash2 />
+        </Button>
+      )}
+      <MensagemErro falha={erro} className="text-xs" />
+    </span>
   );
 }

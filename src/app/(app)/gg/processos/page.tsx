@@ -4,7 +4,7 @@ import { exigirUsuario } from "@/lib/auth/atual";
 import { ROTULO_CATEGORIA } from "@/lib/gg/modelo";
 import { ehEditorGG } from "@/lib/gg/organizacao";
 import { carregarRaci } from "@/lib/gg/rotina";
-import { CelulaRaci, NovoProcesso } from "./raci";
+import { CelulaRaci, ExcluirProcesso, NovoProcesso } from "./raci";
 
 export const metadata = { title: "Papéis e processos · G&G" };
 
@@ -34,7 +34,10 @@ export default async function ProcessosPage() {
               {processos.map((p) => (
                 <tr key={p.id} className="border-b border-border/60 last:border-0">
                   <td className="px-4 py-2">
-                    {p.nome} {Object.values(p.papeis).includes("A") ? null : <Chip tom="aviso">sem aprovador</Chip>}
+                    <span className="flex flex-wrap items-center gap-1.5">
+                      {p.nome} {Object.values(p.papeis).includes("A") ? null : <Chip tom="aviso">sem aprovador</Chip>}
+                      {editor ? <ExcluirProcesso processoId={p.id} nome={p.nome} /> : null}
+                    </span>
                   </td>
                   {cargos.map((c) => (
                     <td key={c.id} className="px-2 py-1.5 text-center">

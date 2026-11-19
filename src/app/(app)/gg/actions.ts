@@ -195,6 +195,9 @@ export async function concluirIniciativaAction(iniciativaId: string, concluida: 
 export async function criarProcessoAction(nome: string): Promise<EstadoGG> {
   return parse(z.string().max(200), nome) !== null ? rodar("gg.processo", (a) => rot.criarProcesso(nome, a)) : INVALIDO;
 }
+export async function excluirProcessoAction(processoId: string): Promise<EstadoGG> {
+  return parse(id, processoId) ? rodar("gg.processo.excluir", (a) => rot.excluirProcesso(processoId, a)) : INVALIDO;
+}
 export async function definirRaciAction(processoId: string, cargoId: string, papel: string | null): Promise<EstadoGG> {
   const p = papel === null ? null : (parse(z.enum(["R", "A", "C", "I"]), papel) as PapelRaci | null);
   if (papel !== null && !p) return INVALIDO;
