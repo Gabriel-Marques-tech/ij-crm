@@ -21,7 +21,7 @@ const AREAS: AreaPosicoes[] = [
     nome: "Gente & Gestão",
     ehGG: true,
     pareceGG: true,
-    posicoes: [op("p_dgg", "Gente & Gestão · Diretor", "Diretor", { papel: "GESTOR", area: null, cargos: [] }, true)],
+    posicoes: [op("p_dgg", "Gente & Gestão · Diretor", "Diretor", VIS, true)],
     frentes: [{ id: "rh", nome: "RH", posicoes: [op("p_arh", "RH · Analista", "Analista", VIS, true), op("p_grh", "RH · Gerente", "Gerente", VIS, true)] }],
   },
   {
@@ -95,7 +95,8 @@ describe("cadastro: Posição na IJ em cascata", () => {
     expect(opcoes("Subárea ou frente")).toEqual(["A própria área", "RH"]);
     // A própria área tem um cargo só (Diretor): já vem escolhido.
     expect(dados().get("posicaoId")).toBe("p_dgg");
-    expect(previa()).toBe("Conta no CRM: Gestor de Vendas e Projetos");
+    // Diretoria de área sem lado no CRM não dá gestão (GAB-107).
+    expect(previa()).toBe("Conta no CRM: Visualizador (só leitura)");
     escolher("Subárea ou frente", "rh");
     expect(opcoes("Cargo na IJ")).toEqual(["Escolha o cargo", "Analista", "Gerente"]);
     expect(dados().get("posicaoId")).toBe("");

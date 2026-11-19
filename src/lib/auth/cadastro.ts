@@ -100,7 +100,8 @@ async function postosVigentesTx(tx: Prisma.TransactionClient, membroId: string):
   const areas = await tx.areaOrg.findMany({ where: { ativo: true }, select: { id: true, nome: true, tipo: true, superiorId: true, ladoCrm: true, ehGG: true } });
   return vigentes.map((o) => {
     const c = o.posicao.cargo;
-    return { ladoCrm: raizDe(areas, o.posicao.areaId)?.ladoCrm ?? null, categoria: c.categoria, ehGp: c.ehGp, ehPo: ehCargoPo(c), principal: o.principal };
+    const raiz = raizDe(areas, o.posicao.areaId);
+    return { ladoCrm: raiz?.ladoCrm ?? null, institucional: raiz?.tipo === "INSTITUCIONAL", categoria: c.categoria, ehGp: c.ehGp, ehPo: ehCargoPo(c), principal: o.principal };
   });
 }
 
@@ -267,7 +268,7 @@ export function opcoesDePosicao(base: BaseOrg): { areas: AreaPosicoes[]; temArea
     return ps
       .map((p) => {
         const c = cargo(p.cargoId)!;
-        const d = derivarDoOrganograma([{ ladoCrm: raiz.ladoCrm, categoria: c.categoria, ehGp: c.ehGp, ehPo: ehCargoPo(c), principal: true }]);
+        const d = derivarDoOrganograma([{ ladoCrm: raiz.ladoCrm, institucional: raiz.tipo === "INSTITUCIONAL", categoria: c.categoria, ehGp: c.ehGp, ehPo: ehCargoPo(c), principal: true }]);
         const nomeCargo = (contagem.get(p.cargoId) ?? 0) > 1 ? `${c.nome} (${p.nome})` : c.nome;
         return {
           id: p.id,

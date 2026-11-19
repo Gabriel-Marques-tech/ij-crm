@@ -110,8 +110,11 @@ export function validarImportacao(input: unknown, hoje: string): LinhaImportacao
 
 // ---------------------------------------------------------------- ponte organograma → CRM
 
-/** O que o organograma diz sobre uma ocupação vigente: lado da área-raiz, categoria e marcas do cargo (GP = PM/GP; PO). */
-export type PostoDerivavel = { ladoCrm: Area | null; categoria: CategoriaCargo; ehGp: boolean; ehPo: boolean; principal: boolean };
+/**
+ * O que o organograma diz sobre uma ocupação vigente: lado da área-raiz, se a área-raiz é
+ * institucional (Presidência, Vice), categoria e marcas do cargo (GP = PM/GP; PO).
+ */
+export type PostoDerivavel = { ladoCrm: Area | null; institucional: boolean; categoria: CategoriaCargo; ehGp: boolean; ehPo: boolean; principal: boolean };
 
 export type Derivado = { area: Area | null; papel: Papel | null; cargos: Cargo[]; conflito: Area[] | null };
 
@@ -120,8 +123,13 @@ const ordenarCargos = (cs: Iterable<Cargo>): Cargo[] => CARGOS.filter((c) => [..
 
 /**
  * Área, papel e cargos que o organograma sugere para a conta do CRM (decisões da spec §3
- * e cargos de Projetos): diretoria → GESTOR (e, se a diretoria é da área de Projetos, cargo
- * DIRETOR); lado da área (Projetos/Vendas) → PROJETOS/VENDEDOR; outra área → VISUALIZADOR;
+ * e cargos de Projetos). Regra (GAB-107): a diretoria vê e edita tudo da ÁREA DELA, então
+ * - diretoria de área institucional (Presidência, Vice) → GESTOR sem área (conta nas duas áreas);
+ * - diretoria do lado da conta (Vendas/Projetos) → GESTOR desse lado (em Projetos, com cargo DIRETOR);
+ * - diretoria de área sem lado no CRM (G&G, Marketing, ADM-FIN) não dá gestão: segue a regra de
+ *   membro (a caneta do G&G vem de `ehGG`, não do papel), e diretoria do outro lado (não principal)
+ *   também não dá gestão do lado da conta;
+ * lado da área (Projetos/Vendas) → PROJETOS/VENDEDOR; outra área → VISUALIZADOR;
  * cargo marcado como GP → o GP do lado (PM em Projetos, GP em Vendas); cargo PO em Projetos → PO.
  * Só contam cargos de postos no lado escolhido. Duas áreas: vale a ocupação principal; sem
  * principal entre elas, conflito (e nenhum cargo).
@@ -136,7 +144,7 @@ export function derivarDoOrganograma(postos: PostoDerivavel[]): Derivado {
     if (principal) area = principal;
     else conflito = lados;
   }
-  const gestor = postos.some((p) => p.categoria === "DIRETORIA");
+  const gestor = postos.some((p) => p.categoria === "DIRETORIA" && (p.institucional || (area !== null && p.ladoCrm === area)));
   const papel: Papel = gestor ? "GESTOR" : area === "PROJETOS" ? "PROJETOS" : area === "VENDAS" ? "VENDEDOR" : "VISUALIZADOR";
   const cargos = new Set<Cargo>();
   if (area !== null) {

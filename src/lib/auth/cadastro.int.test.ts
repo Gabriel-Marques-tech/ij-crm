@@ -425,6 +425,16 @@ describe("GAB-107: conta derivada da posição", () => {
     expect(await conta("dora@ij.test")).toMatchObject({ papel: "GESTOR", area: "PROJETOS", cargos: ["DIRETOR"], areaEntrada: null });
   });
 
+  it("diretoria de área sem lado (G&G) não vira gestor das duas áreas: Visualizador (a caneta do G&G vem de ehGG)", async () => {
+    const { gestor } = await semear();
+    await db.posicao.create({ data: { id: "p_dgg", nome: "Diretoria de G&G", areaId: "gg", cargoId: "dir" } });
+    expect((await opcao("p_dgg")).sugestao).toEqual({ papel: "VISUALIZADOR", area: null, cargos: [] });
+    await cadastrarPessoa({ nome: "Dani", email: "dani@ij.test", posicaoId: "p_dgg" }, gestor);
+    const u = await conta("dani@ij.test");
+    expect(u).toMatchObject({ papel: "VISUALIZADOR", area: null, cargos: [], areaEntrada: "GERAL" });
+    expect(await ehEditorGG(u!)).toBe(true);
+  });
+
   it("só G&G (sem lado): Visualizador, entra no Geral", async () => {
     const { gestor } = await semear();
     await cadastrarPessoa({ nome: "Gabi", email: "gabi@ij.test", posicaoId: "p_arh" }, gestor);
@@ -455,9 +465,9 @@ describe("GAB-107: conta derivada da posição", () => {
     const u = await db.usuario.create({ data: { nome: "Edu", email: "edu@ij.test", papel: "VISUALIZADOR" } });
     expect(await adicionarPosicaoAoUsuario(u.id, "p_mv", gestor)).toEqual({ ok: true });
     expect(await conta("edu@ij.test")).toMatchObject({ papel: "VENDEDOR", area: "VENDAS", cargos: [] });
-    // Segunda posição (não principal): diretoria dá Gestor; o lado segue a principal (Vendas).
+    // Segunda posição (não principal): o lado segue a principal (Vendas), e a diretoria de Projetos não dá gestão de Vendas.
     expect(await adicionarPosicaoAoUsuario(u.id, "p_dproj", gestor)).toEqual({ ok: true });
-    expect(await conta("edu@ij.test")).toMatchObject({ papel: "GESTOR", area: "VENDAS", cargos: [] });
+    expect(await conta("edu@ij.test")).toMatchObject({ papel: "VENDEDOR", area: "VENDAS", cargos: [] });
     const ocs = ocupacoesPorConta(await carregarBase())[u.id];
     const vendas = ocs.find((o) => o.rotulo === "Vendas · Membro regular")!;
     expect(await encerrarOcupacaoDoUsuario(u.id, vendas.ocupacaoId, gestor)).toEqual({ ok: true });

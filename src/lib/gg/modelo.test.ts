@@ -41,7 +41,15 @@ describe("validarImportacao", () => {
 });
 
 describe("derivarDoOrganograma (ponte com o CRM)", () => {
-  const posto = (ladoCrm: "PROJETOS" | "VENDAS" | null, categoria: "DIRETORIA" | "LIDERANCA" | "MEMBRO", ehGp = false, principal = true, ehPo = false) => ({ ladoCrm, categoria, ehGp, ehPo, principal });
+  // "INST" = área institucional (Presidência, Vice): sem lado no CRM.
+  const posto = (lado: "PROJETOS" | "VENDAS" | "INST" | null, categoria: "DIRETORIA" | "LIDERANCA" | "MEMBRO", ehGp = false, principal = true, ehPo = false) => ({
+    ladoCrm: lado === "INST" ? null : lado,
+    institucional: lado === "INST",
+    categoria,
+    ehGp,
+    ehPo,
+    principal,
+  });
   it("diretoria de Projetos vira GESTOR + Diretor; PM vira PM de Projetos; membro de Vendas vira VENDEDOR", () => {
     expect(derivarDoOrganograma([posto("PROJETOS", "DIRETORIA")])).toEqual({ area: "PROJETOS", papel: "GESTOR", cargos: ["DIRETOR"], conflito: null });
     expect(derivarDoOrganograma([posto("PROJETOS", "LIDERANCA", true)])).toEqual({ area: "PROJETOS", papel: "PROJETOS", cargos: ["PM"], conflito: null });
@@ -61,8 +69,8 @@ describe("derivarDoOrganograma (ponte com o CRM)", () => {
       cargos: ["PM", "PO", "DIRETOR"],
       conflito: null,
     });
-    // Diretor de G&G (sem lado) que também é PM em Projetos: gestor com PM, sem Diretor (a diretoria não é de Projetos).
-    expect(derivarDoOrganograma([posto(null, "DIRETORIA"), posto("PROJETOS", "LIDERANCA", true)])).toEqual({ area: "PROJETOS", papel: "GESTOR", cargos: ["PM"], conflito: null });
+    // Diretor de G&G (sem lado) que também é PM em Projetos: a diretoria de G&G não dá gestão (GAB-107), fica PM de Projetos.
+    expect(derivarDoOrganograma([posto(null, "DIRETORIA"), posto("PROJETOS", "LIDERANCA", true)])).toEqual({ area: "PROJETOS", papel: "PROJETOS", cargos: ["PM"], conflito: null });
   });
   it("área sem lado (G&G, Marketing) vira VISUALIZADOR; sem posição, nada", () => {
     expect(derivarDoOrganograma([posto(null, "MEMBRO")])).toMatchObject({ area: null, papel: "VISUALIZADOR", cargos: [] });
@@ -88,9 +96,17 @@ describe("derivarDoOrganograma (ponte com o CRM)", () => {
 });
 
 describe("cadastro derivado da posição (GAB-107)", () => {
-  const posto = (ladoCrm: "PROJETOS" | "VENDAS" | null, categoria: "DIRETORIA" | "LIDERANCA" | "MEMBRO", ehGp = false, principal = true, ehPo = false) => ({ ladoCrm, categoria, ehGp, ehPo, principal });
-  it("presidência (institucional, sem lado, cargo de diretoria) = GESTOR sem área, que conta nas duas áreas; entra no Geral", () => {
-    const d = derivarDoOrganograma([posto(null, "DIRETORIA")]);
+  // "INST" = área institucional (Presidência, Vice): sem lado no CRM.
+  const posto = (lado: "PROJETOS" | "VENDAS" | "INST" | null, categoria: "DIRETORIA" | "LIDERANCA" | "MEMBRO", ehGp = false, principal = true, ehPo = false) => ({
+    ladoCrm: lado === "INST" ? null : lado,
+    institucional: lado === "INST",
+    categoria,
+    ehGp,
+    ehPo,
+    principal,
+  });
+  it("presidência/vice (institucional, sem lado, cargo de diretoria) = GESTOR sem área, que conta nas duas áreas; entra no Geral", () => {
+    const d = derivarDoOrganograma([posto("INST", "DIRETORIA")]);
     expect(d).toEqual({ area: null, papel: "GESTOR", cargos: [], conflito: null });
     expect(contaDaDerivacao(d)).toEqual({ papel: "GESTOR", area: null, cargos: [], areaEntrada: "GERAL" });
     expect(descreverConta(contaDaDerivacao(d)!)).toBe("Gestor de Vendas e Projetos");
@@ -102,6 +118,23 @@ describe("cadastro derivado da posição (GAB-107)", () => {
     const p = contaDaDerivacao(derivarDoOrganograma([posto("PROJETOS", "DIRETORIA")]));
     expect(p).toEqual({ papel: "GESTOR", area: "PROJETOS", cargos: ["DIRETOR"], areaEntrada: null });
     expect(descreverConta(p!)).toBe("Gestor de Projetos · Diretor");
+  });
+  it("diretoria de área sem lado no CRM (G&G, Marketing, ADM-FIN) NÃO vira gestor das duas áreas: Visualizador", () => {
+    const d = derivarDoOrganograma([posto(null, "DIRETORIA")]);
+    expect(d).toEqual({ area: null, papel: "VISUALIZADOR", cargos: [], conflito: null });
+    expect(descreverConta(contaDaDerivacao(d)!)).toBe("Visualizador (só leitura)");
+    // Liderança institucional (não diretoria) também não dá gestão.
+    expect(derivarDoOrganograma([posto("INST", "LIDERANCA")])).toMatchObject({ papel: "VISUALIZADOR" });
+  });
+  it("diretoria do outro lado (não principal) não dá gestão do lado da conta", () => {
+    expect(derivarDoOrganograma([posto("VENDAS", "MEMBRO", false, true), posto("PROJETOS", "DIRETORIA", false, false)])).toEqual({ area: "VENDAS", papel: "VENDEDOR", cargos: [], conflito: null });
+    // Presidência + membro de Vendas: gestor, com o lado de Vendas.
+    expect(derivarDoOrganograma([posto("INST", "DIRETORIA"), posto("VENDAS", "MEMBRO")])).toMatchObject({ area: "VENDAS", papel: "GESTOR" });
+  });
+  it("contaDifere segue a mesma regra: diretor de G&G com conta Gestor difere (sugere Visualizador)", () => {
+    const d = derivarDoOrganograma([posto(null, "DIRETORIA")]);
+    expect(contaDifere({ papel: "GESTOR", area: null, cargos: [] }, d)).toBe(true);
+    expect(contaDifere({ papel: "VISUALIZADOR", area: null, cargos: [] }, d)).toBe(false);
   });
   it("membro e GP: papel do lado, cargo do lado", () => {
     expect(descreverConta(contaDaDerivacao(derivarDoOrganograma([posto("PROJETOS", "MEMBRO")]))!)).toBe("Membro de Projetos");
