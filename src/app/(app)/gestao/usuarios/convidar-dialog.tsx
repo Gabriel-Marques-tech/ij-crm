@@ -1,17 +1,16 @@
 "use client";
 
 import { startTransition, useActionState, useRef, useState } from "react";
-import type { Area, Cargo, Papel } from "@prisma/client";
+import type { Papel } from "@prisma/client";
 import { Copy, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { AreaPosicoes, FichaLigada, OpcaoPosicao } from "@/lib/auth/cadastro";
-import { podeAtribuirPapel } from "@/lib/auth/papeis";
+import { descreverConta } from "@/lib/gg/modelo";
 import { criarConviteAction } from "./actions";
 import { CampoPosicao, localizarPosicao } from "./campo-posicao";
-import { CamposPapelLado } from "./campos-lado";
 
 type Posicoes = { areas: readonly AreaPosicoes[]; temAreaGG: boolean };
 const SEM_POSICOES: Posicoes = { areas: [], temAreaGG: false };
@@ -71,13 +70,13 @@ export function ConvidarDialog({
   );
 }
 
-type Lado = { papel: Papel; area: Area | null; cargos: readonly Cargo[] };
-const LADO_PADRAO: Lado = { papel: "VENDEDOR", area: null, cargos: [] };
-
-/** Papel/área/cargos que a posição sugere, se quem cadastra pode dar esse papel; senão a nota explica. */
-function sugestaoDaPosicao(papelAtor: Papel, o: OpcaoPosicao): { lado: Lado | null; nota: string } {
-  if (!podeAtribuirPapel(papelAtor, o.sugestao.papel)) return { lado: null, nota: "O organograma sugere um papel que você não pode atribuir: escolha o papel abaixo." };
-  return { lado: o.sugestao, nota: "Papel, área e cargo preenchidos pela posição. Ajuste se precisar." };
+/**
+ * Prévia da conta (GAB-107): o que a posição dá no CRM, numa linha. Sem posição, Visualizador.
+ * Mesmo cálculo do servidor (`contaDaDerivacao`), que é quem grava; aqui é só para quem cadastra ver.
+ */
+function previaDaConta(o: OpcaoPosicao | null, administrador: boolean): string {
+  const s = o?.sugestao ?? { papel: "VISUALIZADOR" as const, area: null, cargos: [] };
+  return descreverConta(administrador ? { ...s, papel: "ADMIN" } : s);
 }
 
 export function CorpoConvite({
@@ -95,18 +94,13 @@ export function CorpoConvite({
 }) {
   const [estado, action, pendente] = useActionState(criarConviteAction, undefined);
   // Envio por onSubmit (não `<form action>`): o React não limpa o form depois da action, então o que a
-  // tela mostra (cascata, papel, campos) é sempre o que vai no próximo envio, inclusive na confirmação.
+  // tela mostra (cascata, administrador) é sempre o que vai no próximo envio, inclusive na confirmação.
   const formRef = useRef<HTMLFormElement>(null);
-  // A posição pré-preenche papel/área/cargos (`derivarDoOrganograma`, calculado no servidor); quem
-  // cadastra ajusta depois. Remontar os campos (key) aplica o novo valor inicial; o servidor reaplica a régua.
-  // Aberto por um cargo vago (GAB-106): a posição já vem na cascata e aplica a sugestão como se tivesse sido escolhida.
-  const [inicial] = useState(() => {
-    const o = localizarPosicao(posicoes.areas, posicaoInicial)?.opcao;
-    return o ? sugestaoDaPosicao(papelAtor, o) : null;
-  });
-  const [lado, setLado] = useState<Lado>(inicial?.lado ?? LADO_PADRAO);
-  const [versao, setVersao] = useState(0);
-  const [nota, setNota] = useState<string | null>(inicial?.nota ?? null);
+  // GAB-107: papel, área e cargos saem da posição (no servidor). A tela só mostra a prévia.
+  // Aberto por um cargo vago (GAB-106): a posição já vem na cascata.
+  const [posicao, setPosicao] = useState<OpcaoPosicao | null>(() => localizarPosicao(posicoes.areas, posicaoInicial)?.opcao ?? null);
+  const [administrador, setAdministrador] = useState(false);
+  const podeDarAdmin = papelAtor === "ADMIN";
 
   function enviar(extra?: [campo: "ligarMembroId" | "criarMembroNovo", valor: string]) {
     const form = formRef.current;
@@ -116,16 +110,6 @@ export function CorpoConvite({
     const f = new FormData(form);
     if (extra) f.set(extra[0], extra[1]);
     startTransition(() => action(f));
-  }
-
-  function escolherPosicao(o: OpcaoPosicao | null) {
-    // Sem posição (ou cargo ainda por escolher): o que já está nos campos fica como está.
-    if (!o) return setNota(null);
-    const s = sugestaoDaPosicao(papelAtor, o);
-    setNota(s.nota);
-    if (!s.lado) return;
-    setLado(s.lado);
-    setVersao((v) => v + 1);
   }
 
   if (estado?.link && googleAtivo) return <CadastroComGoogle email={estado.email} link={estado.link} expiraEm={estado.expiraEm} fichaLigada={estado.fichaLigada} onFechar={onFechar} />;
@@ -159,9 +143,16 @@ export function CorpoConvite({
         <Label htmlFor="telefone">WhatsApp (DDD + número)</Label>
         <Input id="telefone" name="telefone" placeholder="11 99999-8888" inputMode="tel" />
       </div>
-      <CampoPosicao areas={posicoes.areas} temAreaGG={posicoes.temAreaGG} onEscolher={escolherPosicao} posicaoInicial={posicaoInicial} />
-      {nota ? <p className="-mt-2 text-xs text-fg-faint">{nota}</p> : null}
-      <CamposPapelLado key={versao} papelAtor={papelAtor} papel={lado.papel} area={lado.area} cargos={lado.cargos} />
+      <CampoPosicao areas={posicoes.areas} temAreaGG={posicoes.temAreaGG} onEscolher={setPosicao} posicaoInicial={posicaoInicial} />
+      <p className="-mt-2 text-xs text-fg-faint" aria-live="polite">
+        Conta no CRM: {previaDaConta(posicao, administrador)}
+      </p>
+      {podeDarAdmin ? (
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" name="administrador" value="1" checked={administrador} onChange={(e) => setAdministrador(e.currentTarget.checked)} />
+          Administrador
+        </label>
+      ) : null}
       {homonimos.length ? (
         <div role="alert" className="space-y-2 rounded-lg border border-warn/50 bg-muted p-3 text-sm">
           <p>

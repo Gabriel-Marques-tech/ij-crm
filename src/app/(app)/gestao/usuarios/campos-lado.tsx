@@ -21,7 +21,7 @@ const CLASSE_SELECT =
   "h-9 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:opacity-60";
 
 /**
- * Papel + área + cargos (GAB-82) + área de entrada (GAB-97), no convite e na edição. A área acompanha o
+ * Papel + área + cargos (GAB-82) + área de entrada (GAB-97), na edição de usuário, só para o admin (GAB-107: no cadastro tudo vem da posição). A área acompanha o
  * papel (vendedor → vendas, projetos → projetos, visualizador → nenhuma); só
  * gestor/admin escolhem, e só explicitamente: começam em "Nenhuma" e, ao
  * trocar para gestor/admin vindo de papel com área fixa, a área e os cargos zeram.

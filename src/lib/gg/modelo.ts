@@ -4,8 +4,8 @@
  * temCiclo, validarImportacao); o resto é a ponte com o CRM e a rotina (fase B).
  * Spec: docs/superpowers/specs/2026-11-05-gg-no-crm-design.md
  */
-import type { Area, Cargo, CategoriaCargo, CategoriaEvento, FuncaoProjeto, Papel, StatusMembro, TipoAreaOrg, TipoDemanda } from "@prisma/client";
-import { CARGO_GP_DO_LADO, CARGOS, resolverAreaCargos } from "@/lib/auth/areas";
+import type { Area, AreaEntrada, Cargo, CategoriaCargo, CategoriaEvento, FuncaoProjeto, Papel, StatusMembro, TipoAreaOrg, TipoDemanda } from "@prisma/client";
+import { CARGO_GP_DO_LADO, CARGOS, resolverAreaCargos, resolverAreaEntrada, ROTULO_AREA, ROTULO_CARGO } from "@/lib/auth/areas";
 
 export const ROTULO_STATUS_MEMBRO: Record<StatusMembro, string> = { NAO_INFORMADO: "Não informado", ATIVO: "Ativo", AFASTADO: "Afastado", INATIVO: "Desligado" };
 export const STATUS_MEMBRO = Object.keys(ROTULO_STATUS_MEMBRO) as StatusMembro[];
@@ -158,6 +158,41 @@ export function contaDifere(conta: { papel: Papel; area: Area | null; cargos: re
   if (d.papel === null || d.conflito || conta.papel === "ADMIN") return false;
   const daConta = ordenarCargos(resolverAreaCargos(conta.papel, conta.area, conta.cargos).cargos);
   return conta.papel !== d.papel || conta.area !== d.area || daConta.join() !== d.cargos.join();
+}
+
+/** A conta do CRM que o cadastro grava (GAB-107): tudo vem da posição; `areaEntrada` já normalizada. */
+export type ContaDerivada = { papel: Papel; area: Area | null; cargos: Cargo[]; areaEntrada: AreaEntrada | null };
+
+/**
+ * Conta que o cadastro grava a partir do organograma (GAB-107): papel, lado e cargos de
+ * `derivarDoOrganograma` (sem posição ou só em área sem lado = VISUALIZADOR; presidência e
+ * diretorias = GESTOR). `administrador` (só o admin marca, conferido no servidor) troca o papel por
+ * ADMIN e mantém o lado. Área de entrada não é perguntada: a área derivada, senão Geral (e quem
+ * entra pela própria área não guarda valor, `resolverAreaEntrada`). Conflito (dois lados sem
+ * principal): null, quem chama recusa.
+ */
+export function contaDaDerivacao(d: Derivado, { administrador = false }: { administrador?: boolean } = {}): ContaDerivada | null {
+  if (d.conflito) return null;
+  const papel: Papel = administrador ? "ADMIN" : (d.papel ?? "VISUALIZADOR");
+  const lado = resolverAreaCargos(papel, d.area, d.cargos);
+  return { papel, area: lado.area, cargos: ordenarCargos(lado.cargos), areaEntrada: resolverAreaEntrada(papel, lado.area, lado.area ?? "GERAL") };
+}
+
+/** Uma linha para a prévia do cadastro: "Gestor de Vendas", "Membro de Projetos · PM", "Visualizador (só leitura)". */
+export function descreverConta(c: { papel: Papel; area: Area | null; cargos: readonly Cargo[] }): string {
+  const cargos = c.cargos.length ? ` · ${c.cargos.map((x) => ROTULO_CARGO[x]).join(", ")}` : "";
+  const lado = c.area ? ROTULO_AREA[c.area] : null;
+  switch (c.papel) {
+    case "ADMIN":
+      return `Administrador${lado ? ` · ${lado}` : ""}${cargos}`;
+    case "GESTOR":
+      return `Gestor de ${lado ?? "Vendas e Projetos"}${cargos}`;
+    case "VENDEDOR":
+    case "PROJETOS":
+      return `Membro de ${lado ?? ROTULO_AREA[c.papel === "VENDEDOR" ? "VENDAS" : "PROJETOS"]}${cargos}`;
+    default:
+      return "Visualizador (só leitura)";
+  }
 }
 
 // ---------------------------------------------------------------- rotina (fase B)

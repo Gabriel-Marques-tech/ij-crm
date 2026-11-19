@@ -9,7 +9,10 @@ vi.mock("./actions", () => acoes);
 const { CorpoConvite } = await import("./convidar-dialog");
 const { AVISO_SEM_AREA_GG } = await import("./campo-posicao");
 
-/** GAB-105: "Posição na IJ" em cascata (área → frente → cargo) pré-preenche papel/área/cargos e manda o id da posição. */
+/**
+ * GAB-105: "Posição na IJ" em cascata (área → frente → cargo) manda o id da posição. GAB-107: papel, área,
+ * cargos e área de entrada saem da posição no servidor; a tela só mostra a prévia e, para o admin, "Administrador".
+ */
 const op = (id: string, rotulo: string, cargo: string, sugestao: OpcaoPosicao["sugestao"], gg = false): OpcaoPosicao => ({ id, rotulo, cargo, ehGG: gg, pareceGG: gg, sugestao });
 const VIS = { papel: "VISUALIZADOR" as const, area: null, cargos: [] };
 const AREAS: AreaPosicoes[] = [
@@ -40,7 +43,11 @@ function montar({ papelAtor = "GESTOR" as Papel, areas = AREAS, temAreaGG = true
 const sel = (rotulo: string) => screen.getByLabelText(rotulo) as HTMLSelectElement;
 const opcoes = (rotulo: string) => Array.from(sel(rotulo).options).map((o) => o.textContent);
 const escolher = (rotulo: string, value: string) => fireEvent.change(sel(rotulo), { target: { value } });
-const papel = () => sel("Papel").value;
+const previa = () => screen.getByText(/^Conta no CRM:/).textContent;
+/** Nada de papel/área/cargo/área de entrada no form (GAB-107). */
+function semCamposDeConta(f: FormData) {
+  for (const campo of ["papel", "area", "cargos", "areaEntrada", "ladoNoForm"]) expect(f.get(campo)).toBeNull();
+}
 
 describe("cadastro: Posição na IJ em cascata", () => {
   it("só os três selects, sem caixa de busca; começa só com a área (áreas de topo + Sem posição)", () => {
@@ -51,10 +58,14 @@ describe("cadastro: Posição na IJ em cascata", () => {
     expect(screen.queryByLabelText("Cargo na IJ")).toBeNull();
   });
 
-  it("sem escolher: papel padrão e posicaoId vazio", () => {
+  it("sem escolher: prévia Visualizador, posicaoId vazio, sem campos de papel/área/cargo/área de entrada", () => {
     const { dados } = montar();
-    expect(papel()).toBe("VENDEDOR");
+    expect(previa()).toBe("Conta no CRM: Visualizador (só leitura)");
     expect(dados().get("posicaoId")).toBe("");
+    semCamposDeConta(dados());
+    expect(screen.queryByLabelText("Papel")).toBeNull();
+    expect(screen.queryByLabelText("Área de entrada")).toBeNull();
+    expect(screen.queryByLabelText("Administrador")).toBeNull();
   });
 
   it("área sem frentes: vai direto para o cargo; PM preenche Projetos + PM e manda a posição", () => {
@@ -63,12 +74,10 @@ describe("cadastro: Posição na IJ em cascata", () => {
     expect(screen.queryByLabelText("Subárea ou frente")).toBeNull();
     expect(opcoes("Cargo na IJ")).toEqual(["Escolha o cargo", "Diretor", "PM"]);
     expect(dados().get("posicaoId")).toBe("");
-    expect(papel()).toBe("VENDEDOR");
     escolher("Cargo na IJ", "p_pm");
-    expect(papel()).toBe("PROJETOS");
-    expect(dados().get("area")).toBe("PROJETOS");
-    expect(dados().getAll("cargos")).toEqual(["PM"]);
+    expect(previa()).toBe("Conta no CRM: Membro de Projetos · PM");
     expect(dados().get("posicaoId")).toBe("p_pm");
+    semCamposDeConta(dados());
   });
 
   it("cargo único no nó vem escolhido sozinho", () => {
@@ -77,8 +86,7 @@ describe("cadastro: Posição na IJ em cascata", () => {
     expect(sel("Cargo na IJ").value).toBe("p_mv");
     expect(opcoes("Cargo na IJ")).toEqual(["Membro"]);
     expect(dados().get("posicaoId")).toBe("p_mv");
-    expect(papel()).toBe("VENDEDOR");
-    expect(dados().get("area")).toBe("VENDAS");
+    expect(previa()).toBe("Conta no CRM: Membro de Vendas");
   });
 
   it("área com frentes: frente opcional com 'A própria área'; trocar a frente limpa o cargo", () => {
@@ -87,13 +95,13 @@ describe("cadastro: Posição na IJ em cascata", () => {
     expect(opcoes("Subárea ou frente")).toEqual(["A própria área", "RH"]);
     // A própria área tem um cargo só (Diretor): já vem escolhido.
     expect(dados().get("posicaoId")).toBe("p_dgg");
-    expect(papel()).toBe("GESTOR");
+    expect(previa()).toBe("Conta no CRM: Gestor de Vendas e Projetos");
     escolher("Subárea ou frente", "rh");
     expect(opcoes("Cargo na IJ")).toEqual(["Escolha o cargo", "Analista", "Gerente"]);
     expect(dados().get("posicaoId")).toBe("");
     escolher("Cargo na IJ", "p_arh");
     expect(dados().get("posicaoId")).toBe("p_arh");
-    expect(papel()).toBe("VISUALIZADOR");
+    expect(previa()).toBe("Conta no CRM: Visualizador (só leitura)");
     expect(screen.getByText(/passa a editar o G&G/)).toBeTruthy();
     escolher("Subárea ou frente", "");
     expect(dados().get("posicaoId")).toBe("p_dgg");
@@ -115,31 +123,21 @@ describe("cadastro: Posição na IJ em cascata", () => {
     expect(dados().get("posicaoId")).toBe("");
   });
 
-  it("quem cadastra ajusta depois de escolher (o servidor reaplica a régua)", () => {
-    const { dados } = montar();
-    escolher("Área da IJ", "proj");
-    escolher("Cargo na IJ", "p_pm");
-    fireEvent.click(screen.getByLabelText("PO de projetos"));
-    expect(dados().getAll("cargos")).toEqual(["PM", "PO"]);
-    fireEvent.change(sel("Papel"), { target: { value: "VISUALIZADOR" } });
-    expect(dados().getAll("cargos")).toEqual([]);
-    expect(dados().get("posicaoId")).toBe("p_pm");
-  });
-
-  it("diretoria de Projetos preenche Gestor + Diretor", () => {
-    const { dados } = montar();
+  it("diretoria de Projetos: prévia Gestor de Projetos · Diretor", () => {
+    montar();
     escolher("Área da IJ", "proj");
     escolher("Cargo na IJ", "p_dproj");
-    expect(papel()).toBe("GESTOR");
-    expect(dados().getAll("cargos")).toEqual(["DIRETOR"]);
+    expect(previa()).toBe("Conta no CRM: Gestor de Projetos · Diretor");
   });
 
-  it("sugestão de papel que o ator não pode atribuir não é aplicada", () => {
-    const areas: AreaPosicoes[] = [{ id: "x", nome: "X", ehGG: false, pareceGG: false, posicoes: [op("p_x", "X · Admin", "Admin", { papel: "ADMIN", area: null, cargos: [] })], frentes: [] }];
-    montar({ areas });
-    escolher("Área da IJ", "x");
-    expect(papel()).toBe("VENDEDOR");
-    expect(screen.getByText(/não pode atribuir/)).toBeTruthy();
+  it("Administrador: só aparece para o admin; marcado vai no form e muda a prévia", () => {
+    const { dados } = montar({ papelAtor: "ADMIN" });
+    escolher("Área da IJ", "vend");
+    expect(dados().get("administrador")).toBeNull();
+    fireEvent.click(screen.getByLabelText("Administrador"));
+    expect(dados().get("administrador")).toBe("1");
+    expect(previa()).toBe("Conta no CRM: Administrador · Vendas");
+    semCamposDeConta(dados());
   });
 
   it("sem área marcada ehGG: aviso ao escolher a área de G&G, e some ao trocar", () => {
@@ -188,7 +186,7 @@ describe("cadastro: homônimo e ficha ligada", () => {
     expect(await screen.findByText("outra coisa")).toBeTruthy();
   });
 
-  it("depois de um erro, o form mantém o que mostra (cascata, papel, campos) e é isso que vai no reenvio e na confirmação", async () => {
+  it("depois de um erro, o form mantém o que mostra (cascata, campos) e é isso que vai no reenvio e na confirmação", async () => {
     acoes.criarConviteAction.mockReset();
     acoes.criarConviteAction
       .mockResolvedValueOnce({ erro: "Esse telefone já está em outro usuário." })
@@ -204,7 +202,7 @@ describe("cadastro: homônimo e ficha ligada", () => {
     // Nada foi limpo: a tela mostra o que o próximo envio leva.
     expect(sel("Área da IJ").value).toBe("proj");
     expect(sel("Cargo na IJ").value).toBe("p_pm");
-    expect(papel()).toBe("PROJETOS");
+    expect(previa()).toBe("Conta no CRM: Membro de Projetos · PM");
     expect((screen.getByLabelText("Nome") as HTMLInputElement).value).toBe("Ana Souza");
     // Muda a posição e reenvia: vai a nova.
     escolher("Área da IJ", "vend");
@@ -220,7 +218,7 @@ describe("cadastro: homônimo e ficha ligada", () => {
     expect(terceiro.get("ligarMembroId")).toBe("m1");
     expect(terceiro.get("telefone")).toBe("11 98888-7777");
     expect(terceiro.get("posicaoId")).toBe("p_mv");
-    expect(terceiro.get("papel")).toBe("VENDEDOR");
+    expect(terceiro.get("papel")).toBeNull();
   });
 
   it("com mais de um homônimo, mostra um botão para cada", async () => {
@@ -251,19 +249,12 @@ describe("cadastro aberto por um cargo vago (posicaoInicial)", () => {
     expect(dados().get("posicaoId")).toBe("p_grh");
   });
 
-  it("posição direto na área: aplica a sugestão de papel, área e cargo como se tivesse sido escolhida", () => {
+  it("posição direto na área: a prévia já mostra o que a posição dá", () => {
     const { dados } = abrirEm("p_pm");
     expect(sel("Área da IJ").value).toBe("proj");
     expect(sel("Cargo na IJ").value).toBe("p_pm");
-    expect(papel()).toBe("PROJETOS");
-    expect(dados().getAll("cargos")).toEqual(["PM"]);
-    expect(screen.getByText(/preenchidos pela posição/)).toBeTruthy();
-  });
-
-  it("sugestão que o ator não pode dar: mantém a posição, avisa e não troca o papel", () => {
-    const { dados } = abrirEm("p_dgg", "VENDEDOR");
-    expect(dados().get("posicaoId")).toBe("p_dgg");
-    expect(screen.getByText(/não pode atribuir/)).toBeTruthy();
+    expect(previa()).toBe("Conta no CRM: Membro de Projetos · PM");
+    semCamposDeConta(dados());
   });
 
   it("posição que não está na lista (desativada): cascata vazia, sem posição", () => {

@@ -8,7 +8,7 @@ import { temPapelMinimo } from "@/lib/auth/papeis";
 import { exigirUsuario } from "@/lib/auth/atual";
 import { db } from "@/lib/db";
 import { contaDifere, LIMITE_DEMANDA, ROTULO_CATEGORIA, ROTULO_FUNCAO, ROTULO_STATUS_MEMBRO, semestreDe, vigente } from "@/lib/gg/modelo";
-import { carregarBase, derivadoDe, ehEditorGG, historicoDe, lideresDe } from "@/lib/gg/organizacao";
+import { carregarBase, derivadoDe, ehEditorGG, historicoDe, lideresDe, type BaseOrg } from "@/lib/gg/organizacao";
 import { HREF_MEMBROS, veFichaCompleta } from "@/lib/gg/membros";
 import { listarAusencias, saldoDemandas } from "@/lib/gg/rotina";
 import { diaEmFuso } from "@/lib/projetos/aging";
@@ -23,6 +23,20 @@ const TOM_STATUS = { ATIVO: "ok", AFASTADO: "aviso", INATIVO: "perigo", NAO_INFO
  * (e-mail, conta do CRM, períodos, projetos, demandas, faltas, histórico) é de quem edita G&G, da
  * gestão e da própria pessoa (`veFichaCompleta`). Os demais veem nome, área, cargo e status.
  */
+
+// Posição, área ou cargo desativados saem da base (`carregarBase`): a ficha mostra o que der, sem quebrar.
+function nomeDaPosicao(base: BaseOrg, pid: string): string {
+  return base.posicoes.find((x) => x.id === pid)?.nome ?? "Posição desativada";
+}
+
+/** "Área · Cargo · categoria", tolerante a posição/área/cargo fora da base. */
+function rotuloDaPosicao(base: BaseOrg, pid: string): string {
+  const p = base.posicoes.find((x) => x.id === pid);
+  if (!p) return "Posição desativada";
+  const c = base.cargos.find((x) => x.id === p.cargoId);
+  const area = base.areas.find((a) => a.id === p.areaId)?.nome ?? "Área desativada";
+  return c ? `${area} · ${c.nome} · ${ROTULO_CATEGORIA[c.categoria]}` : `${area} · ${p.nome}`;
+}
 
 export default async function FichaPage({ params }: { params: Promise<{ id: string }> }) {
   const ator = await exigirUsuario();
@@ -48,12 +62,8 @@ export default async function FichaPage({ params }: { params: Promise<{ id: stri
   const vincs = base.vinculos.filter((v) => v.membroId === id);
   const d = derivadoDe(base, id);
   const lideres = lideresDe(base, id);
-  const pos = (pid: string) => base.posicoes.find((p) => p.id === pid)!;
-  const rotuloPos = (pid: string) => {
-    const p = pos(pid);
-    const c = base.cargos.find((x) => x.id === p.cargoId)!;
-    return `${base.areas.find((a) => a.id === p.areaId)?.nome} · ${c.nome} · ${ROTULO_CATEGORIA[c.categoria]}`;
-  };
+  const nomePos = (pid: string) => nomeDaPosicao(base, pid);
+  const rotuloPos = (pid: string) => rotuloDaPosicao(base, pid);
   const semestre = semestreDe(base.hoje);
 
   return (
@@ -89,13 +99,13 @@ export default async function FichaPage({ params }: { params: Promise<{ id: stri
             {atuais.map((o) => (
               <li key={o.id} className="flex items-center gap-3 px-4 py-3 text-sm">
                 <span className="min-w-0 flex-1">
-                  {pos(o.posicaoId).nome} {o.principal ? <Chip tom="gg">principal</Chip> : null}
+                  {nomePos(o.posicaoId)} {o.principal ? <Chip tom="gg">principal</Chip> : null}
                   <span className="block text-xs text-fg-faint">{rotuloPos(o.posicaoId)}</span>
                 </span>
                 <span className="font-mono text-xs text-fg-soft">
                   {o.inicio ? diaBR(o.inicio) : "início ?"} → hoje
                 </span>
-                {editor ? <MenuOcupacao posicao={{ id: o.posicaoId, nome: pos(o.posicaoId).nome }} ocupantes={[{ ocupacaoId: o.id, nome: m.nome, principal: o.principal }]} posicoes={base.posicoes.map((p) => ({ id: p.id, nome: p.nome }))} hoje={base.hoje} /> : null}
+                {editor ? <MenuOcupacao posicao={{ id: o.posicaoId, nome: nomePos(o.posicaoId) }} ocupantes={[{ ocupacaoId: o.id, nome: m.nome, principal: o.principal }]} posicoes={base.posicoes.map((p) => ({ id: p.id, nome: p.nome }))} hoje={base.hoje} /> : null}
               </li>
             ))}
             {!atuais.length ? (
@@ -129,7 +139,7 @@ export default async function FichaPage({ params }: { params: Promise<{ id: stri
               {encerradas.map((o) => (
                 <li key={o.id} className="flex items-center gap-3 px-4 py-2.5">
                   <span className="min-w-0 flex-1">
-                    {pos(o.posicaoId).nome}
+                    {nomePos(o.posicaoId)}
                     <span className="block text-xs text-fg-faint">{rotuloPos(o.posicaoId)}</span>
                   </span>
                   <span className="font-mono text-xs text-fg-mute">
@@ -140,7 +150,7 @@ export default async function FichaPage({ params }: { params: Promise<{ id: stri
               {invalidas.map((o) => (
                 <li key={o.id} className="flex items-center gap-3 px-4 py-2.5 opacity-70">
                   <span className="min-w-0 flex-1">
-                    <span className="line-through">{pos(o.posicaoId).nome}</span> <Chip>retirada por erro</Chip>
+                    <span className="line-through">{nomePos(o.posicaoId)}</span> <Chip>retirada por erro</Chip>
                     <span className="block text-xs text-fg-faint">{o.motivoInvalidacao}</span>
                   </span>
                 </li>
@@ -240,14 +250,10 @@ function FichaResumida({ base, membroId }: { base: Awaited<ReturnType<typeof car
       <Painel titulo="Posições atuais" contagem={atuais.length}>
         <ul className="divide-y divide-border/60">
           {atuais.map((o) => {
-            const p = base.posicoes.find((x) => x.id === o.posicaoId)!;
-            const c = base.cargos.find((x) => x.id === p.cargoId);
             return (
               <li key={o.id} className="px-4 py-3 text-sm">
-                {p.nome} {o.principal ? <Chip tom="gg">principal</Chip> : null}
-                <span className="block text-xs text-fg-faint">
-                  {base.areas.find((a) => a.id === p.areaId)?.nome} · {c ? `${c.nome} · ${ROTULO_CATEGORIA[c.categoria]}` : ""}
-                </span>
+                {nomeDaPosicao(base, o.posicaoId)} {o.principal ? <Chip tom="gg">principal</Chip> : null}
+                <span className="block text-xs text-fg-faint">{rotuloDaPosicao(base, o.posicaoId)}</span>
               </li>
             );
           })}

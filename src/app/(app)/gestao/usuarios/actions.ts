@@ -31,6 +31,8 @@ const MENSAGEM_CADASTRO: Record<ErroCadastro, string> = {
   SEM_PERMISSAO: "Você não pode atribuir posição a esta pessoa.",
   NAO_ENCONTRADO: "Posição ou ocupação não encontrada (pode ter sido desativada ou já encerrada). Recarregue a página.",
   JA_OCUPA: "Essa pessoa já ocupa essa posição.",
+  CONFLITO_DE_LADO:
+    "A pessoa ficaria com posições em Vendas e em Projetos sem uma principal, e o papel no CRM sai da posição principal. Marque uma das posições como principal no G&G (Membros → ficha) e tente de novo.",
 };
 
 /** Membro sem e-mail e sem conta com o mesmo nome no G&G: a tela pergunta se é a mesma pessoa. */
@@ -61,16 +63,15 @@ const cargosSchema = z.array(z.enum(["GP", "PM", "PO", "DIRETOR"]));
 // "" = campo fora do form (papel não usa área de entrada). Coerência no serviço, como a área.
 const areaEntradaSchema = z.enum(["VENDAS", "PROJETOS", "GERAL", ""]).transform((a) => (a === "" ? null : a));
 
+// GAB-107: papel, área, cargos e área de entrada NÃO vêm do form do cadastro: saem da posição
+// (`cadastrarPessoa`). Só "Administrador" (checkbox), que o serviço recusa se quem cadastra não é admin.
 const conviteSchema = z.object({
   nome: z.string().trim().min(2, "Nome muito curto."),
   email: z.string().trim().min(3),
-  papel: papelSchema,
   telefone: z.string().trim().optional(),
-  area: areaSchema.optional(),
-  cargos: cargosSchema,
-  areaEntrada: areaEntradaSchema.optional(),
   // "" = sem posição (campo opcional).
   posicaoId: z.string().max(64).optional(),
+  administrador: z.boolean(),
 });
 
 /**
@@ -111,11 +112,9 @@ export async function criarConviteAction(_prev: EstadoConvite, form: FormData): 
     const parsed = conviteSchema.safeParse({
       nome: form.get("nome"),
       email: form.get("email"),
-      papel: form.get("papel"),
       telefone: form.get("telefone") ?? undefined,
-      cargos: [],
       posicaoId: form.get("posicaoId") ?? undefined,
-      ...ladoDoForm(form),
+      administrador: form.get("administrador") === "1",
     });
     if (!parsed.success) return { erro: parsed.error.issues[0]?.message ?? "Dados inválidos." };
     // Conta (+ membro do G&G e posição, quando há posição), numa transação só.
@@ -167,7 +166,10 @@ export async function editarUsuarioAction(_prev: EstadoEdicao, form: FormData): 
       ...ladoDoForm(form),
     });
     if (!parsed.success) return { erro: "Dados inválidos." };
-    const { usuarioId, ...dados } = parsed.data;
+    const { usuarioId, papel, area, cargos, areaEntrada, ...perfil } = parsed.data;
+    // GAB-107: papel e lado vêm da posição. Mudar à mão (papel, área, cargos, área de entrada) é
+    // exceção do admin; do gestor, só nome e telefone passam (o resto é ignorado).
+    const dados = ator.papel === "ADMIN" ? { ...perfil, papel, area, cargos, areaEntrada } : perfil;
     const r = await atualizarUsuario(usuarioId, dados, ator);
     if (!r.ok) return { erro: MENSAGEM[r.erro] };
     revalidatePath("/gestao/usuarios");

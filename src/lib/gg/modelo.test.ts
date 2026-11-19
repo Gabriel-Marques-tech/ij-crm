@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { contaDifere, cupula, derivarDoOrganograma, descendentes, progresso, semestreDe, temCiclo, validarImportacao, vigente } from "./modelo";
+import { contaDaDerivacao, contaDifere, cupula, derivarDoOrganograma, descendentes, descreverConta, progresso, semestreDe, temCiclo, validarImportacao, vigente } from "./modelo";
 
 describe("vigente [início, fim)", () => {
   it("o dia do fim já não conta; início vazio não limita; invalidada nunca vale", () => {
@@ -84,6 +84,48 @@ describe("derivarDoOrganograma (ponte com o CRM)", () => {
     expect(contaDifere({ papel: "GESTOR", area: "PROJETOS", cargos: ["DIRETOR"] }, derivarDoOrganograma([posto("PROJETOS", "DIRETORIA")]))).toBe(false);
     // Conta com sujeira (DIRETOR em papel PROJETOS) é lida sem o cargo: difere do que a diretoria sugere.
     expect(contaDifere({ papel: "PROJETOS", area: "PROJETOS", cargos: ["DIRETOR"] }, derivarDoOrganograma([posto("PROJETOS", "DIRETORIA")]))).toBe(true);
+  });
+});
+
+describe("cadastro derivado da posição (GAB-107)", () => {
+  const posto = (ladoCrm: "PROJETOS" | "VENDAS" | null, categoria: "DIRETORIA" | "LIDERANCA" | "MEMBRO", ehGp = false, principal = true, ehPo = false) => ({ ladoCrm, categoria, ehGp, ehPo, principal });
+  it("presidência (institucional, sem lado, cargo de diretoria) = GESTOR sem área, que conta nas duas áreas; entra no Geral", () => {
+    const d = derivarDoOrganograma([posto(null, "DIRETORIA")]);
+    expect(d).toEqual({ area: null, papel: "GESTOR", cargos: [], conflito: null });
+    expect(contaDaDerivacao(d)).toEqual({ papel: "GESTOR", area: null, cargos: [], areaEntrada: "GERAL" });
+    expect(descreverConta(contaDaDerivacao(d)!)).toBe("Gestor de Vendas e Projetos");
+  });
+  it("diretoria de Vendas = Gestor de Vendas; diretoria de Projetos = Gestor de Projetos · Diretor (entra pela própria área)", () => {
+    const v = contaDaDerivacao(derivarDoOrganograma([posto("VENDAS", "DIRETORIA")]));
+    expect(v).toEqual({ papel: "GESTOR", area: "VENDAS", cargos: [], areaEntrada: null });
+    expect(descreverConta(v!)).toBe("Gestor de Vendas");
+    const p = contaDaDerivacao(derivarDoOrganograma([posto("PROJETOS", "DIRETORIA")]));
+    expect(p).toEqual({ papel: "GESTOR", area: "PROJETOS", cargos: ["DIRETOR"], areaEntrada: null });
+    expect(descreverConta(p!)).toBe("Gestor de Projetos · Diretor");
+  });
+  it("membro e GP: papel do lado, cargo do lado", () => {
+    expect(descreverConta(contaDaDerivacao(derivarDoOrganograma([posto("PROJETOS", "MEMBRO")]))!)).toBe("Membro de Projetos");
+    expect(descreverConta(contaDaDerivacao(derivarDoOrganograma([posto("PROJETOS", "LIDERANCA", true)]))!)).toBe("Membro de Projetos · PM");
+    const gp = contaDaDerivacao(derivarDoOrganograma([posto("VENDAS", "LIDERANCA", true)]));
+    expect(gp).toEqual({ papel: "VENDEDOR", area: "VENDAS", cargos: ["GP"], areaEntrada: null });
+    expect(descreverConta(gp!)).toBe("Membro de Vendas · GP");
+  });
+  it("só G&G (sem lado) ou sem posição = Visualizador, entra no Geral", () => {
+    const gg = contaDaDerivacao(derivarDoOrganograma([posto(null, "MEMBRO")]));
+    expect(gg).toEqual({ papel: "VISUALIZADOR", area: null, cargos: [], areaEntrada: "GERAL" });
+    expect(descreverConta(gg!)).toBe("Visualizador (só leitura)");
+    expect(contaDaDerivacao(derivarDoOrganograma([]))).toEqual({ papel: "VISUALIZADOR", area: null, cargos: [], areaEntrada: "GERAL" });
+  });
+  it("administrador: papel ADMIN, mantém o lado da posição e entra por ele", () => {
+    const a = contaDaDerivacao(derivarDoOrganograma([posto("VENDAS", "LIDERANCA", true)]), { administrador: true });
+    expect(a).toEqual({ papel: "ADMIN", area: "VENDAS", cargos: ["GP"], areaEntrada: "VENDAS" });
+    expect(descreverConta(a!)).toBe("Administrador · Vendas · GP");
+    expect(contaDaDerivacao(derivarDoOrganograma([]), { administrador: true })).toEqual({ papel: "ADMIN", area: null, cargos: [], areaEntrada: "GERAL" });
+  });
+  it("conflito (dois lados sem principal) não vira conta", () => {
+    const d = derivarDoOrganograma([posto("PROJETOS", "MEMBRO", false, false), posto("VENDAS", "MEMBRO", false, false)]);
+    expect(d.conflito).toEqual(["PROJETOS", "VENDAS"]);
+    expect(contaDaDerivacao(d)).toBeNull();
   });
 });
 

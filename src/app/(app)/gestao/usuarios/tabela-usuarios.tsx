@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { descreverLado, ROTULO_AREA_ENTRADA } from "@/lib/auth/areas";
+import { descreverConta } from "@/lib/gg/modelo";
 import { areaDeEntrada } from "@/lib/auth/visibilidade";
 import { ROTULO_PAPEL, podeAtribuirPapel, podeGerarRedefinicao } from "@/lib/auth/papeis";
 import { alternarAtivoAction, desligarGoogleAction, editarUsuarioAction, gerarLinkRedefinicaoAction, reemitirConviteAction, type EstadoConvite } from "./actions";
@@ -305,12 +306,19 @@ function EditarForm({
       </div>
       {/* Posição dá poder como o cargo: na própria conta, só o admin (o servidor reaplica). */}
       {!souEu || ator.papel === "ADMIN" ? <PosicoesUsuario usuarioId={usuario.id} ocupacoes={ocupacoes} areas={posicoes.areas} temAreaGG={posicoes.temAreaGG} /> : null}
-      {!souEu ? (
-        <CamposPapelLado papelAtor={ator.papel} papel={usuario.papel} area={usuario.area} cargos={usuario.cargos} areaEntrada={usuario.areaEntrada} />
-      ) : ator.papel === "ADMIN" ? (
-        // Admin define o próprio lado (ex.: admin que atua em vendas); fica na auditoria. Ver usuarios.ts.
-        <CamposPapelLado papelAtor={ator.papel} papel={usuario.papel} area={usuario.area} cargos={usuario.cargos} areaEntrada={usuario.areaEntrada} mostrarPapel={false} />
-      ) : null}
+      {/* GAB-107: papel, área e cargos vêm da posição (recalculados ao atribuir/encerrar). Mudar à mão é exceção do admin; o servidor ignora do gestor. */}
+      {ator.papel === "ADMIN" ? (
+        <>
+          <p className="text-xs text-fg-faint">Exceção de admin: o papel normalmente vem da posição e é recalculado quando ela muda.</p>
+          {/* Admin define o próprio lado (ex.: admin que atua em vendas); fica na auditoria. Ver usuarios.ts. */}
+          <CamposPapelLado papelAtor={ator.papel} papel={usuario.papel} area={usuario.area} cargos={usuario.cargos} areaEntrada={usuario.areaEntrada} mostrarPapel={!souEu} />
+        </>
+      ) : (
+        <p className="text-sm text-fg-soft">
+          Conta no CRM: <strong>{descreverConta(usuario)}</strong>
+          <span className="block text-xs text-fg-faint">Vem da posição na IJ. Só um admin muda à mão.</span>
+        </p>
+      )}
       {estado?.erro ? (
         <p role="alert" className="text-sm text-danger">
           {estado.erro}
