@@ -19,7 +19,7 @@
  */
 import type { Area, AreaEntrada, Cargo, Papel, Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { contaDaDerivacao, derivarDoOrganograma, descendentes, normalizar, pareceAreaGG, vigente, type ContaDerivada, type PostoDerivavel } from "@/lib/gg/modelo";
+import { contaDaDerivacao, derivarDoOrganograma, descendentes, descreverConta, normalizar, pareceAreaGG, vigente, type ContaDerivada, type PostoDerivavel } from "@/lib/gg/modelo";
 import {
   areasGG,
   atribuirPosicaoTx,
@@ -41,13 +41,25 @@ import { resolverAreaEntrada } from "./areas";
 import { podeAtribuirPapel } from "./papeis";
 import { criarConvite, formatarLado, type DadosConvite, type ErroUsuario } from "./usuarios";
 
-/** `CONFLITO_DE_LADO`: posições vigentes em Vendas e em Projetos sem uma principal entre elas. */
-export type ErroCadastro = ErroUsuario | ErroOrg | "CONFLITO_DE_LADO";
+/**
+ * `CONFLITO_DE_LADO`: posições vigentes em Vendas e em Projetos sem uma principal entre elas.
+ * `CONFIRMAR_CONTA`: a conta que vai ser gravada não é a que a tela mostrava (ver `ContaAConfirmar`).
+ */
+export type ErroCadastro = ErroUsuario | ErroOrg | "CONFLITO_DE_LADO" | "CONFIRMAR_CONTA";
+/**
+ * Pedido de confirmação (GAB-107, revisão): `atual` = o que a tela mostrava (ou a conta de hoje, na
+ * edição), `conta` = o que vai ser gravado, `posicoes` = as posições vigentes que levam a isso.
+ */
+export type ContaAConfirmar = { atual: string; conta: string; posicoes: string[] };
 /** Falha; `homonimos` = membros sem e-mail e sem conta com o mesmo nome, para a tela pedir confirmação. */
-export type FalhaCadastro = { ok: false; erro: ErroCadastro; detalhe?: string; homonimos?: { id: string; nome: string }[] };
+export type FalhaCadastro = { ok: false; erro: ErroCadastro; detalhe?: string; homonimos?: { id: string; nome: string }[]; confirmarConta?: ContaAConfirmar };
 export type ResultadoCadastro<T = object> = ({ ok: true } & T) | FalhaCadastro;
-/** Confirmação da tela quando há homônimo: ligar a ele (`ligarMembroId`) ou é outra pessoa (`criarMembroNovo`). */
-export type ConfirmacaoMembro = { ligarMembroId?: string | null; criarMembroNovo?: boolean };
+/**
+ * Confirmações da tela: homônimo (ligar a ele, `ligarMembroId`, ou é outra pessoa, `criarMembroNovo`)
+ * e `confirmarConta`: a conta resultante que quem cadastra/edita viu e aceitou (o texto de
+ * `descreverConta`). Só vale se for exatamente a que vai ser gravada: confirmação velha não serve.
+ */
+export type ConfirmacaoMembro = { ligarMembroId?: string | null; criarMembroNovo?: boolean; confirmarConta?: string | null };
 /** Ficha do G&G que já existia e foi ligada à conta, com as posições abertas dela (para o resultado do cadastro). */
 export type FichaLigada = { nome: string; posicoes: string[] };
 
@@ -63,12 +75,23 @@ class Desfaz extends Error {
 /** Recusa da régua da conta (alvo, papel), antes ou dentro da transação. */
 class RecusaConta extends Desfaz {}
 
+/** A conta resultante não é a que quem cadastra/edita viu: desfaz e pede confirmação explícita. */
+class RecusaConfirmarConta extends Error {
+  constructor(readonly pedido: ContaAConfirmar) {
+    super("CONFIRMAR_CONTA");
+  }
+}
+
+type ContaComparavel = { papel: Papel; area: Area | null; cargos: readonly Cargo[] };
+const mesmaConta = (a: ContaComparavel, b: ContaComparavel) => a.papel === b.papel && a.area === b.area && [...a.cargos].sort().join() === [...b.cargos].sort().join();
+
 const atorGG = (a: Ator): AtorGG => ({ id: a.id, nome: a.nome ?? "", papel: a.papel });
 const hoje = () => diaEmFuso(new Date());
 
 /** Exportada para o teste do P2002 real. */
 export function traduzir(e: unknown): FalhaCadastro {
   if (e instanceof Desfaz) return { ok: false, erro: e.erro };
+  if (e instanceof RecusaConfirmarConta) return { ok: false, erro: "CONFIRMAR_CONTA", confirmarConta: e.pedido };
   if (e instanceof RecusaHomonimo) return { ok: false, erro: e.erro, homonimos: e.membros };
   if (e instanceof Recusa) return { ok: false, erro: e.erro, ...(e.detalhe ? { detalhe: e.detalhe } : {}) };
   // Índice `membro_email_unico` (lower(trim(email))): outro membro com o e-mail em outra grafia.
@@ -85,23 +108,39 @@ async function fichaLigada(tx: Prisma.TransactionClient, membroId: string): Prom
   return { nome: m.nome, posicoes: m.ocupacoes.map((o) => `${o.posicao.area.nome} · ${o.posicao.cargo.nome}`) };
 }
 
+type PostoVigente = PostoDerivavel & { posicaoId: string; rotulo: string };
+
 /**
  * Posições vigentes hoje do membro, como o organograma as vê (`carregarBase`: posição, área e
- * cargo ativos), no formato de `derivarDoOrganograma`. Lado = o da área-raiz.
+ * cargo ativos), no formato de `derivarDoOrganograma`. Lado = o da área-raiz; institucional = a área
+ * da própria posição. `rotulo` = "Área · Cargo", para a tela de confirmação.
  */
-async function postosVigentesTx(tx: Prisma.TransactionClient, membroId: string): Promise<PostoDerivavel[]> {
+async function postosVigentesTx(tx: Prisma.TransactionClient, membroId: string): Promise<PostoVigente[]> {
   const dia = hoje();
   const ocs = await tx.ocupacao.findMany({
     where: { membroId, invalidadoEm: null, posicao: { ativo: true, area: { ativo: true }, cargo: { ativo: true } } },
-    select: { inicio: true, fim: true, principal: true, posicao: { select: { areaId: true, cargo: { select: { id: true, nome: true, categoria: true, ehGp: true } } } } },
+    select: {
+      inicio: true,
+      fim: true,
+      principal: true,
+      posicao: { select: { id: true, areaId: true, area: { select: { nome: true, tipo: true } }, cargo: { select: { id: true, nome: true, categoria: true, ehGp: true } } } },
+    },
   });
   const vigentes = ocs.filter((o) => vigente({ inicio: o.inicio ? diaDoPrazo(o.inicio) : null, fim: o.fim ? diaDoPrazo(o.fim) : null }, dia));
   if (!vigentes.length) return [];
   const areas = await tx.areaOrg.findMany({ where: { ativo: true }, select: { id: true, nome: true, tipo: true, superiorId: true, ladoCrm: true, ehGG: true } });
   return vigentes.map((o) => {
     const c = o.posicao.cargo;
-    const raiz = raizDe(areas, o.posicao.areaId);
-    return { ladoCrm: raiz?.ladoCrm ?? null, institucional: raiz?.tipo === "INSTITUCIONAL", categoria: c.categoria, ehGp: c.ehGp, ehPo: ehCargoPo(c), principal: o.principal };
+    return {
+      ladoCrm: raizDe(areas, o.posicao.areaId)?.ladoCrm ?? null,
+      institucional: o.posicao.area.tipo === "INSTITUCIONAL",
+      categoria: c.categoria,
+      ehGp: c.ehGp,
+      ehPo: ehCargoPo(c),
+      principal: o.principal,
+      posicaoId: o.posicao.id,
+      rotulo: `${o.posicao.area.nome} · ${c.nome}`,
+    };
   });
 }
 
@@ -150,14 +189,21 @@ export async function cadastrarPessoa(
         criarNovo: confirmacao.criarMembroNovo,
       });
       if (posicaoId) await atribuirPosicaoTx(tx, posicaoId, m.id, hoje(), atorGG(por), { principal: true });
-      const conta = contaDaDerivacao(derivarDoOrganograma(await postosVigentesTx(tx, m.id)), { administrador });
+      const postos = await postosVigentesTx(tx, m.id);
+      const conta = contaDaDerivacao(derivarDoOrganograma(postos), { administrador });
       if (!conta) throw new Desfaz("CONFLITO_DE_LADO");
+      // A prévia da tela é só da posição escolhida (sem posição: Visualizador). Ficha ligada com outras
+      // posições (ex.: já colocada numa diretoria pelo G&G) pode dar mais que isso: só com confirmação.
+      const escolhida = postos.filter((p) => p.posicaoId === posicaoId).map((p) => ({ ...p, principal: true }));
+      const daTela = contaDaDerivacao(derivarDoOrganograma(escolhida), { administrador })!;
+      if (!mesmaConta(conta, daTela) && confirmacao.confirmarConta !== descreverConta(conta))
+        throw new RecusaConfirmarConta({ atual: descreverConta(daTela), conta: descreverConta(conta), posicoes: postos.filter((p) => p.posicaoId !== posicaoId).map((p) => p.rotulo) });
       if (!podeAtribuirPapel(por.papel, conta.papel)) throw new Desfaz("PAPEL_NAO_PERMITIDO");
       await tx.usuario.update({ where: { id: c.usuarioId }, data: { papel: conta.papel, area: conta.area, cargos: conta.cargos, areaEntrada: conta.areaEntrada } });
       return { ...c, conta, membroId: m.id, fichaLigada: m.ligado ? await fichaLigada(tx, m.id) : null };
     });
     console.info(
-      `[auditoria] usuario.convidado usuario=${r.usuarioId} por=${por.id} papel=${r.conta.papel} lado=${formatarLado(r.conta)} entrada=${r.conta.areaEntrada ?? "nenhuma"} membro=${r.membroId}${r.fichaLigada ? " membro_ligado=1" : ""} posicao=${posicaoId ?? "nenhuma"} derivado=1`,
+      `[auditoria] usuario.convidado usuario=${r.usuarioId} por=${por.id} papel=${r.conta.papel} lado=${formatarLado(r.conta)} entrada=${r.conta.areaEntrada ?? "nenhuma"} membro=${r.membroId}${r.fichaLigada ? " membro_ligado=1" : ""} posicao=${posicaoId ?? "nenhuma"} derivado=1${confirmacao.confirmarConta ? " conta_confirmada=1" : ""}`,
     );
     return { ok: true, usuarioId: r.usuarioId, membroId: r.membroId, fichaLigada: r.fichaLigada, token: r.token, expiraEm: r.expiraEm, conta: r.conta };
   } catch (e) {
@@ -185,41 +231,53 @@ async function papelMantido(tx: Prisma.TransactionClient, alvo: { id: string; pa
  * transação). ADMIN nunca é rebaixado. Sem posição vigente, a conta fica como está: encerrar a
  * última posição não tranca ninguém fora (nem vira Visualizador sozinho); a gestão decide.
  * Conflito de lado: ao atribuir, recusa (marque uma principal); ao encerrar, mantém a conta, para
- * o encerramento não ficar travado. Devolve o papel novo quando mudou (para a auditoria).
+ * o encerramento não ficar travado.
+ * Mudança de PAPEL (promover a gestor, desfazer uma exceção que o admin pôs à mão) só com
+ * `confirmado` igual à conta resultante: sem isso, desfaz tudo e devolve o pedido de confirmação. Lado/cargo no mesmo papel
+ * acompanham sem perguntar. Devolve a conta como fica (para a tela) e a linha de auditoria, se mudou.
  */
-async function recalcularContaTx(tx: Prisma.TransactionClient, usuarioId: string, membroId: string, por: Ator, { recusarConflito }: { recusarConflito: boolean }): Promise<string | null> {
+async function recalcularContaTx(
+  tx: Prisma.TransactionClient,
+  usuarioId: string,
+  membroId: string,
+  por: Ator,
+  { recusarConflito, confirmado }: { recusarConflito: boolean; confirmado: string | null },
+): Promise<{ conta: string; auditoria: string | null }> {
   const atual = await tx.usuario.findUniqueOrThrow({ where: { id: usuarioId }, select: { papel: true, area: true, cargos: true, areaEntrada: true } });
-  if (atual.papel === "ADMIN") return null;
+  const fica = { conta: descreverConta(atual), auditoria: null };
+  if (atual.papel === "ADMIN") return fica;
   const postos = await postosVigentesTx(tx, membroId);
-  if (!postos.length) return null;
+  if (!postos.length) return fica;
   const conta = contaDaDerivacao(derivarDoOrganograma(postos));
   if (!conta) {
     if (recusarConflito) throw new Desfaz("CONFLITO_DE_LADO");
-    return null;
+    return fica;
   }
   if (!podeAtribuirPapel(por.papel, conta.papel)) throw new RecusaConta("PAPEL_NAO_PERMITIDO");
-  return (await gravarConta(tx, usuarioId, conta, por.id, atual)) ? `${conta.papel} lado=${formatarLado(conta)}` : null;
+  if (conta.papel !== atual.papel && confirmado !== descreverConta(conta)) throw new RecusaConfirmarConta({ atual: descreverConta(atual), conta: descreverConta(conta), posicoes: postos.map((p) => p.rotulo) });
+  const mudou = await gravarConta(tx, usuarioId, conta, por.id, atual);
+  return { conta: descreverConta(conta), auditoria: mudou ? `${conta.papel} lado=${formatarLado(conta)}${confirmado ? " confirmada=1" : ""}` : null };
 }
 
 /** Edição de usuário: atribui uma posição (início hoje). Sem membro ligado, liga ou cria como no cadastro. */
-export async function adicionarPosicaoAoUsuario(usuarioId: string, posicaoId: string, por: Ator, confirmacao: ConfirmacaoMembro = {}): Promise<ResultadoCadastro> {
+export async function adicionarPosicaoAoUsuario(usuarioId: string, posicaoId: string, por: Ator, confirmacao: ConfirmacaoMembro = {}): Promise<ResultadoCadastro<{ conta: string }>> {
   try {
     const alvo = await alvoDaGestao(usuarioId, por);
     const conta = await db.$transaction(async (tx) => {
       await papelMantido(tx, alvo);
       const m = await membroDaContaTx(tx, { usuarioId: alvo.id, nome: alvo.nome, email: alvo.email }, atorGG(por), { ligarMembroId: confirmacao.ligarMembroId, criarNovo: confirmacao.criarMembroNovo });
       await atribuirPosicaoTx(tx, posicaoId, m.id, hoje(), atorGG(por));
-      return recalcularContaTx(tx, alvo.id, m.id, por, { recusarConflito: true });
+      return recalcularContaTx(tx, alvo.id, m.id, por, { recusarConflito: true, confirmado: confirmacao.confirmarConta ?? null });
     });
-    console.info(`[auditoria] usuario.posicao_atribuida usuario=${alvo.id} por=${por.id} posicao=${posicaoId}${conta ? ` conta=${conta}` : ""}`);
-    return { ok: true };
+    console.info(`[auditoria] usuario.posicao_atribuida usuario=${alvo.id} por=${por.id} posicao=${posicaoId}${conta.auditoria ? ` conta=${conta.auditoria}` : ""}`);
+    return { ok: true, conta: conta.conta };
   } catch (e) {
     return traduzir(e);
   }
 }
 
 /** Edição de usuário: encerra hoje uma ocupação aberta do membro ligado a esta conta. */
-export async function encerrarOcupacaoDoUsuario(usuarioId: string, ocupacaoId: string, por: Ator): Promise<ResultadoCadastro> {
+export async function encerrarOcupacaoDoUsuario(usuarioId: string, ocupacaoId: string, por: Ator, { confirmarConta = null }: { confirmarConta?: string | null } = {}): Promise<ResultadoCadastro<{ conta: string }>> {
   try {
     const alvo = await alvoDaGestao(usuarioId, por);
     const conta = await db.$transaction(async (tx) => {
@@ -227,10 +285,10 @@ export async function encerrarOcupacaoDoUsuario(usuarioId: string, ocupacaoId: s
       const m = await tx.membro.findUnique({ where: { usuarioId: alvo.id }, select: { id: true } });
       if (!m) throw new Recusa("NAO_ENCONTRADO");
       await encerrarOcupacaoTx(tx, ocupacaoId, hoje(), atorGG(por), m.id);
-      return recalcularContaTx(tx, alvo.id, m.id, por, { recusarConflito: false });
+      return recalcularContaTx(tx, alvo.id, m.id, por, { recusarConflito: false, confirmado: confirmarConta });
     });
-    console.info(`[auditoria] usuario.ocupacao_encerrada usuario=${alvo.id} por=${por.id} ocupacao=${ocupacaoId}${conta ? ` conta=${conta}` : ""}`);
-    return { ok: true };
+    console.info(`[auditoria] usuario.ocupacao_encerrada usuario=${alvo.id} por=${por.id} ocupacao=${ocupacaoId}${conta.auditoria ? ` conta=${conta.auditoria}` : ""}`);
+    return { ok: true, conta: conta.conta };
   } catch (e) {
     return traduzir(e);
   }
@@ -268,7 +326,7 @@ export function opcoesDePosicao(base: BaseOrg): { areas: AreaPosicoes[]; temArea
     return ps
       .map((p) => {
         const c = cargo(p.cargoId)!;
-        const d = derivarDoOrganograma([{ ladoCrm: raiz.ladoCrm, institucional: raiz.tipo === "INSTITUCIONAL", categoria: c.categoria, ehGp: c.ehGp, ehPo: ehCargoPo(c), principal: true }]);
+        const d = derivarDoOrganograma([{ ladoCrm: raiz.ladoCrm, institucional: a.tipo === "INSTITUCIONAL", categoria: c.categoria, ehGp: c.ehGp, ehPo: ehCargoPo(c), principal: true }]);
         const nomeCargo = (contagem.get(p.cargoId) ?? 0) > 1 ? `${c.nome} (${p.nome})` : c.nome;
         return {
           id: p.id,

@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { exigirPapel } from "@/lib/auth/atual";
 import { atualizarUsuario, reemitirConvite, type ErroUsuario } from "@/lib/auth/usuarios";
-import { adicionarPosicaoAoUsuario, cadastrarPessoa, encerrarOcupacaoDoUsuario, type ErroCadastro, type FalhaCadastro, type FichaLigada } from "@/lib/auth/cadastro";
+import { adicionarPosicaoAoUsuario, cadastrarPessoa, encerrarOcupacaoDoUsuario, type ContaAConfirmar, type ErroCadastro, type FalhaCadastro, type FichaLigada } from "@/lib/auth/cadastro";
+import { descreverConta } from "@/lib/gg/modelo";
 import { MENSAGEM_ERRO_ORG } from "@/lib/gg/organizacao";
 import { MENSAGEM_REDEFINICAO, gerarLinkRedefinicao } from "@/lib/auth/redefinicao";
 import { desligarGoogle, type ErroDesligarGoogle } from "@/lib/auth/google-login";
@@ -33,26 +34,43 @@ const MENSAGEM_CADASTRO: Record<ErroCadastro, string> = {
   JA_OCUPA: "Essa pessoa já ocupa essa posição.",
   CONFLITO_DE_LADO:
     "A pessoa ficaria com posições em Vendas e em Projetos sem uma principal, e o papel no CRM sai da posição principal. Marque uma das posições como principal no G&G (Membros → ficha) e tente de novo.",
+  CONFIRMAR_CONTA: "A conta no CRM vai ficar diferente do que a tela mostrava. Confira e confirme.",
 };
 
 /** Membro sem e-mail e sem conta com o mesmo nome no G&G: a tela pergunta se é a mesma pessoa. */
 export type Homonimo = { id: string; nome: string };
 
-export type EstadoConvite = { erro?: string; link?: string; expiraEm?: string; email?: string; homonimos?: Homonimo[]; fichaLigada?: FichaLigada } | undefined;
+/**
+ * `confirmarConta`: a conta resultante não é a da prévia (ficha ligada com outras posições) ou a edição
+ * muda o papel; a tela mostra e só segue com confirmação explícita. `conta`: como a conta ficou.
+ */
+export type EstadoConvite =
+  | { erro?: string; link?: string; expiraEm?: string; email?: string; homonimos?: Homonimo[]; fichaLigada?: FichaLigada; confirmarConta?: ContaAConfirmar; conta?: string }
+  | undefined;
 
-function falha(r: FalhaCadastro): { erro: string; homonimos?: Homonimo[] } {
+function falha(r: FalhaCadastro): { erro: string; homonimos?: Homonimo[]; confirmarConta?: ContaAConfirmar } {
   if (r.homonimos?.length)
     return {
       erro: r.homonimos.length === 1 ? `Já existe "${r.homonimos[0].nome}" sem e-mail no G&G. É a mesma pessoa?` : `Há ${r.homonimos.length} membros sem e-mail no G&G com esse nome. É algum deles?`,
       homonimos: r.homonimos,
     };
+  if (r.confirmarConta) return { erro: MENSAGEM_CADASTRO.CONFIRMAR_CONTA, confirmarConta: r.confirmarConta };
   return { erro: r.detalhe ?? MENSAGEM_CADASTRO[r.erro] };
 }
 
-/** Resposta da tela ao homônimo: `ligarMembroId` (é a mesma pessoa) ou `criarMembroNovo=1` (é outra). */
+/**
+ * Respostas da tela: homônimo (`ligarMembroId` = é a mesma pessoa, `criarMembroNovo=1` = é outra) e
+ * `confirmarConta` = a conta resultante que a tela mostrou e foi confirmada (o serviço confere que é a mesma).
+ */
+const textoCurto = (v: unknown): string | null => (typeof v === "string" && v && v.length <= 200 ? v : null);
+
 function confirmacaoDoForm(form: FormData) {
   const ligar = form.get("ligarMembroId");
-  return { ligarMembroId: typeof ligar === "string" && ligar && ligar.length <= 64 ? ligar : null, criarMembroNovo: form.get("criarMembroNovo") === "1" };
+  return {
+    ligarMembroId: typeof ligar === "string" && ligar && ligar.length <= 64 ? ligar : null,
+    criarMembroNovo: form.get("criarMembroNovo") === "1",
+    confirmarConta: textoCurto(form.get("confirmarConta")),
+  };
 }
 
 const papelSchema = z.enum(["ADMIN", "GESTOR", "VENDEDOR", "PROJETOS", "VISUALIZADOR"]);
@@ -128,6 +146,7 @@ export async function criarConviteAction(_prev: EstadoConvite, form: FormData): 
       link: linkConvite(r.token),
       expiraEm: r.expiraEm.toISOString(),
       email: normalizarEmail(parsed.data.email) ?? parsed.data.email,
+      conta: descreverConta(r.conta),
       ...(r.fichaLigada ? { fichaLigada: r.fichaLigada } : {}),
     };
   });
@@ -208,36 +227,43 @@ export async function desligarGoogleAction(usuarioId: string): Promise<EstadoEdi
 
 const idSchema = z.string().min(1).max(64);
 
-/** Edição de usuário (GAB-105): atribui uma posição do organograma (início hoje). */
+/** Resultado de atribuir/encerrar posição: como a conta ficou, ou o pedido de confirmação (mudança de papel). */
+export type EstadoPosicao = EstadoEdicao & { homonimos?: Homonimo[]; confirmarConta?: ContaAConfirmar; conta?: string };
+
+/** Edição de usuário (GAB-105): atribui uma posição do organograma (início hoje). GAB-107: recalcula a conta. */
 export async function adicionarPosicaoUsuarioAction(
   usuarioId: string,
   posicaoId: string,
-  confirmacao: { ligarMembroId?: string | null; criarMembroNovo?: boolean } = {},
-): Promise<EstadoEdicao & { homonimos?: Homonimo[] }> {
-  return comTratamentoForm("gestao.usuarios.adicionarPosicao", async (): Promise<EstadoEdicao & { homonimos?: Homonimo[] }> => {
+  confirmacao: { ligarMembroId?: string | null; criarMembroNovo?: boolean; confirmarConta?: string | null } = {},
+): Promise<EstadoPosicao> {
+  return comTratamentoForm("gestao.usuarios.adicionarPosicao", async (): Promise<EstadoPosicao> => {
     const ator = await exigirPapel("GESTOR");
     if (!idSchema.safeParse(usuarioId).success || !idSchema.safeParse(posicaoId).success) return { erro: "Escolha uma posição." };
     const ligar = confirmacao?.ligarMembroId;
     if (ligar != null && !idSchema.safeParse(ligar).success) return { erro: "Dados inválidos." };
-    const r = await adicionarPosicaoAoUsuario(usuarioId, posicaoId, ator, { ligarMembroId: ligar ?? null, criarMembroNovo: confirmacao?.criarMembroNovo === true });
+    const r = await adicionarPosicaoAoUsuario(usuarioId, posicaoId, ator, {
+      ligarMembroId: ligar ?? null,
+      criarMembroNovo: confirmacao?.criarMembroNovo === true,
+      confirmarConta: textoCurto(confirmacao?.confirmarConta),
+    });
     if (!r.ok) return falha(r);
     revalidatePath("/gestao/usuarios");
     revalidatePath("/gg", "layout");
     revalidatePath("/membros", "layout");
-    return { ok: true };
+    return { ok: true, conta: r.conta };
   });
 }
 
-/** Edição de usuário (GAB-105): encerra hoje uma ocupação aberta da pessoa. */
-export async function encerrarOcupacaoUsuarioAction(usuarioId: string, ocupacaoId: string): Promise<EstadoEdicao> {
-  return comTratamentoForm("gestao.usuarios.encerrarOcupacao", async (): Promise<EstadoEdicao> => {
+/** Edição de usuário (GAB-105): encerra hoje uma ocupação aberta da pessoa. GAB-107: recalcula a conta. */
+export async function encerrarOcupacaoUsuarioAction(usuarioId: string, ocupacaoId: string, confirmarConta: string | null = null): Promise<EstadoPosicao> {
+  return comTratamentoForm("gestao.usuarios.encerrarOcupacao", async (): Promise<EstadoPosicao> => {
     const ator = await exigirPapel("GESTOR");
     if (!idSchema.safeParse(usuarioId).success || !idSchema.safeParse(ocupacaoId).success) return { erro: "Dados inválidos." };
-    const r = await encerrarOcupacaoDoUsuario(usuarioId, ocupacaoId, ator);
-    if (!r.ok) return { erro: MENSAGEM_CADASTRO[r.erro] };
+    const r = await encerrarOcupacaoDoUsuario(usuarioId, ocupacaoId, ator, { confirmarConta: textoCurto(confirmarConta) });
+    if (!r.ok) return falha(r);
     revalidatePath("/gestao/usuarios");
     revalidatePath("/gg", "layout");
     revalidatePath("/membros", "layout");
-    return { ok: true };
+    return { ok: true, conta: r.conta };
   });
 }

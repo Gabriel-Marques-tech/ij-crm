@@ -328,12 +328,12 @@ describe("edição: adicionar e encerrar posição", () => {
   it("conta sem membro ganha membro e posição; encerrar fecha hoje e tira a caneta do G&G", async () => {
     const { gestor } = await semear();
     const u = await db.usuario.create({ data: { nome: "Edu", email: "edu@ij.test", papel: "VISUALIZADOR" } });
-    expect(await adicionarPosicaoAoUsuario(u.id, "p_agg", gestor)).toEqual({ ok: true });
+    expect(await adicionarPosicaoAoUsuario(u.id, "p_agg", gestor)).toMatchObject({ ok: true });
     expect(await ehEditorGG(u)).toBe(true);
     const ocs = ocupacoesPorConta(await carregarBase())[u.id];
     expect(ocs).toEqual([expect.objectContaining({ rotulo: "Gente & Gestão · Analista", principal: true, inicio: HOJE })]);
     expect(await adicionarPosicaoAoUsuario(u.id, "p_agg", gestor)).toEqual({ ok: false, erro: "JA_OCUPA" });
-    expect(await encerrarOcupacaoDoUsuario(u.id, ocs[0].ocupacaoId, gestor)).toEqual({ ok: true });
+    expect(await encerrarOcupacaoDoUsuario(u.id, ocs[0].ocupacaoId, gestor)).toMatchObject({ ok: true });
     const o = await db.ocupacao.findUniqueOrThrow({ where: { id: ocs[0].ocupacaoId } });
     expect(o.fim!.toISOString().slice(0, 10)).toBe(HOJE);
     expect(await ehEditorGG(u)).toBe(false);
@@ -345,7 +345,7 @@ describe("edição: adicionar e encerrar posição", () => {
     const u = await db.usuario.create({ data: { nome: "Edu Lima", email: "edu@ij.test", papel: "VISUALIZADOR" } });
     const edu = await db.membro.create({ data: { nome: "Edu Lima", status: "ATIVO" } });
     expect(await adicionarPosicaoAoUsuario(u.id, "p_agg", gestor)).toEqual({ ok: false, erro: "MEMBRO_MESMO_NOME", homonimos: [{ id: edu.id, nome: "Edu Lima" }] });
-    expect(await adicionarPosicaoAoUsuario(u.id, "p_agg", gestor, { ligarMembroId: edu.id })).toEqual({ ok: true });
+    expect(await adicionarPosicaoAoUsuario(u.id, "p_agg", gestor, { ligarMembroId: edu.id })).toMatchObject({ ok: true });
     expect(await db.membro.findUniqueOrThrow({ where: { id: edu.id } })).toMatchObject({ usuarioId: u.id, email: "edu@ij.test" });
   });
 
@@ -354,7 +354,7 @@ describe("edição: adicionar e encerrar posição", () => {
     const u = await db.usuario.create({ data: { nome: "Ivo", email: "ivo@ij.test", papel: "VISUALIZADOR" } });
     const m = await db.membro.create({ data: { nome: "Ivo", email: "ivo@ij.test", status: "INATIVO", usuarioId: u.id } });
     await db.vinculoIj.create({ data: { membroId: m.id, entrada: new Date("2025-01-10"), saida: new Date("2025-06-30") } });
-    expect(await adicionarPosicaoAoUsuario(u.id, "p_agg", gestor)).toEqual({ ok: true });
+    expect(await adicionarPosicaoAoUsuario(u.id, "p_agg", gestor)).toMatchObject({ ok: true });
     const r = await db.membro.findUniqueOrThrow({ where: { id: m.id }, include: { vinculos: true } });
     expect(r.status).toBe("ATIVO");
     expect(r.vinculos.filter((v) => v.saida === null).map((v) => v.entrada?.toISOString().slice(0, 10))).toEqual([HOJE]);
@@ -365,8 +365,8 @@ describe("edição: adicionar e encerrar posição", () => {
     const { gestor } = await semear();
     const u = await db.usuario.create({ data: { nome: "Lia", email: "lia@ij.test", papel: "PROJETOS", area: "PROJETOS" } });
     const m = await db.membro.create({ data: { nome: "Lia", email: "LIA@ij.test", status: "ATIVO" } });
-    expect(await adicionarPosicaoAoUsuario(u.id, "p_pm", gestor)).toEqual({ ok: true });
-    expect(await adicionarPosicaoAoUsuario(u.id, "p_agg", gestor)).toEqual({ ok: true });
+    expect(await adicionarPosicaoAoUsuario(u.id, "p_pm", gestor)).toMatchObject({ ok: true });
+    expect(await adicionarPosicaoAoUsuario(u.id, "p_agg", gestor)).toMatchObject({ ok: true });
     expect((await db.membro.findUniqueOrThrow({ where: { id: m.id } })).usuarioId).toBe(u.id);
     const ocs = await db.ocupacao.findMany({ where: { membroId: m.id }, orderBy: { criadoEm: "asc" } });
     expect(ocs.map((o) => [o.posicaoId, o.principal])).toEqual([
@@ -381,7 +381,7 @@ describe("edição: adicionar e encerrar posição", () => {
     expect(await adicionarPosicaoAoUsuario(gestor.id, "p_agg", gestor)).toEqual({ ok: false, erro: "NAO_PODE_ALTERAR_A_SI" });
     expect(await db.membro.count()).toBe(0);
     // Admin pode na própria conta (como no lado/cargo).
-    expect(await adicionarPosicaoAoUsuario(admin.id, "p_agg", admin)).toEqual({ ok: true });
+    expect(await adicionarPosicaoAoUsuario(admin.id, "p_agg", admin)).toMatchObject({ ok: true });
 
     const a = await db.usuario.create({ data: { nome: "Ana", email: "ana@ij.test", papel: "VENDEDOR" } });
     const b = await db.usuario.create({ data: { nome: "Bia", email: "bia@ij.test", papel: "VENDEDOR" } });
@@ -435,6 +435,38 @@ describe("GAB-107: conta derivada da posição", () => {
     expect(await ehEditorGG(u!)).toBe(true);
   });
 
+  it("ficha já colocada numa diretoria (pelo G&G), cadastrada sem posição: não vira GESTOR sem confirmação explícita da conta resultante", async () => {
+    const { gestor } = await semear();
+    const m = await db.membro.create({ data: { nome: "Davi", email: "davi@ij.test", status: "ATIVO" } });
+    await db.ocupacao.create({ data: { membroId: m.id, posicaoId: "p_dproj", principal: true } });
+    expect(await cadastrarPessoa({ nome: "Davi", email: "davi@ij.test" }, gestor)).toEqual({
+      ok: false,
+      erro: "CONFIRMAR_CONTA",
+      confirmarConta: { atual: "Visualizador (só leitura)", conta: "Gestor de Projetos · Diretor", posicoes: ["Projetos · Diretor"] },
+    });
+    expect(await conta("davi@ij.test")).toBeNull();
+    expect((await db.membro.findUniqueOrThrow({ where: { id: m.id } })).usuarioId).toBeNull();
+    // Confirmação velha (outra conta) não serve.
+    expect(await cadastrarPessoa({ nome: "Davi", email: "davi@ij.test" }, gestor, { confirmarConta: "Visualizador (só leitura)" })).toMatchObject({ erro: "CONFIRMAR_CONTA" });
+    const r = await cadastrarPessoa({ nome: "Davi", email: "davi@ij.test" }, gestor, { confirmarConta: "Gestor de Projetos · Diretor" });
+    expect(r).toMatchObject({ ok: true, membroId: m.id, conta: { papel: "GESTOR", area: "PROJETOS", cargos: ["DIRETOR"] } });
+    expect(await conta("davi@ij.test")).toMatchObject({ papel: "GESTOR", area: "PROJETOS", cargos: ["DIRETOR"] });
+  });
+
+  it("presidência + posição em Vendas = Gestor das duas áreas; diretoria numa subárea da Presidência não é presidência", async () => {
+    const { gestor } = await semear();
+    await semearDiretorias();
+    const m = await db.membro.create({ data: { nome: "Paulo", email: "paulo@ij.test", status: "ATIVO" } });
+    await db.ocupacao.create({ data: { membroId: m.id, posicaoId: "p_pres", principal: false } });
+    expect(await cadastrarPessoa({ nome: "Paulo", email: "paulo@ij.test", posicaoId: "p_gpv" }, gestor, { confirmarConta: "Gestor de Vendas e Projetos" })).toMatchObject({ ok: true });
+    expect(await conta("paulo@ij.test")).toMatchObject({ papel: "GESTOR", area: null, cargos: [] });
+    await db.areaOrg.create({ data: { id: "assess", nome: "Assessoria", tipo: "FRENTE", superiorId: "pres" } });
+    await db.posicao.create({ data: { id: "p_dassess", nome: "Diretoria da Assessoria", areaId: "assess", cargoId: "dir" } });
+    expect((await opcao("p_dassess")).sugestao).toEqual({ papel: "VISUALIZADOR", area: null, cargos: [] });
+    await cadastrarPessoa({ nome: "Assis", email: "assis@ij.test", posicaoId: "p_dassess" }, gestor);
+    expect(await conta("assis@ij.test")).toMatchObject({ papel: "VISUALIZADOR", area: null });
+  });
+
   it("só G&G (sem lado): Visualizador, entra no Geral", async () => {
     const { gestor } = await semear();
     await cadastrarPessoa({ nome: "Gabi", email: "gabi@ij.test", posicaoId: "p_arh" }, gestor);
@@ -463,17 +495,29 @@ describe("GAB-107: conta derivada da posição", () => {
   it("atribuir/encerrar posição recalcula a conta na mesma transação; encerrar a última deixa a conta como está", async () => {
     const { gestor } = await semear();
     const u = await db.usuario.create({ data: { nome: "Edu", email: "edu@ij.test", papel: "VISUALIZADOR" } });
-    expect(await adicionarPosicaoAoUsuario(u.id, "p_mv", gestor)).toEqual({ ok: true });
+    // Muda o papel (Visualizador → Vendedor): só com confirmação, e a confirmação tem de ser a conta resultante.
+    expect(await adicionarPosicaoAoUsuario(u.id, "p_mv", gestor)).toEqual({
+      ok: false,
+      erro: "CONFIRMAR_CONTA",
+      confirmarConta: { atual: "Visualizador (só leitura)", conta: "Membro de Vendas", posicoes: ["Vendas · Membro regular"] },
+    });
+    expect(await db.ocupacao.count()).toBe(0);
+    expect(await adicionarPosicaoAoUsuario(u.id, "p_mv", gestor, { confirmarConta: "Gestor de Vendas" })).toMatchObject({ erro: "CONFIRMAR_CONTA" });
+    expect(await adicionarPosicaoAoUsuario(u.id, "p_mv", gestor, { confirmarConta: "Membro de Vendas" })).toEqual({ ok: true, conta: "Membro de Vendas" });
     expect(await conta("edu@ij.test")).toMatchObject({ papel: "VENDEDOR", area: "VENDAS", cargos: [] });
     // Segunda posição (não principal): o lado segue a principal (Vendas), e a diretoria de Projetos não dá gestão de Vendas.
-    expect(await adicionarPosicaoAoUsuario(u.id, "p_dproj", gestor)).toEqual({ ok: true });
+    expect(await adicionarPosicaoAoUsuario(u.id, "p_dproj", gestor)).toEqual({ ok: true, conta: "Membro de Vendas" });
     expect(await conta("edu@ij.test")).toMatchObject({ papel: "VENDEDOR", area: "VENDAS", cargos: [] });
     const ocs = ocupacoesPorConta(await carregarBase())[u.id];
     const vendas = ocs.find((o) => o.rotulo === "Vendas · Membro regular")!;
-    expect(await encerrarOcupacaoDoUsuario(u.id, vendas.ocupacaoId, gestor)).toEqual({ ok: true });
+    // Encerrar Vendas promoveria a Gestor de Projetos: sem confirmação, nada é encerrado.
+    expect(await encerrarOcupacaoDoUsuario(u.id, vendas.ocupacaoId, gestor)).toMatchObject({ ok: false, erro: "CONFIRMAR_CONTA", confirmarConta: { conta: "Gestor de Projetos · Diretor" } });
+    expect((await db.ocupacao.findUniqueOrThrow({ where: { id: vendas.ocupacaoId } })).fim).toBeNull();
+    expect(await conta("edu@ij.test")).toMatchObject({ papel: "VENDEDOR" });
+    expect(await encerrarOcupacaoDoUsuario(u.id, vendas.ocupacaoId, gestor, { confirmarConta: "Gestor de Projetos · Diretor" })).toEqual({ ok: true, conta: "Gestor de Projetos · Diretor" });
     expect(await conta("edu@ij.test")).toMatchObject({ papel: "GESTOR", area: "PROJETOS", cargos: ["DIRETOR"] });
     const dir = ocs.find((o) => o.rotulo === "Projetos · Diretor")!;
-    expect(await encerrarOcupacaoDoUsuario(u.id, dir.ocupacaoId, gestor)).toEqual({ ok: true });
+    expect(await encerrarOcupacaoDoUsuario(u.id, dir.ocupacaoId, gestor)).toMatchObject({ ok: true });
     expect(await conta("edu@ij.test")).toMatchObject({ papel: "GESTOR", area: "PROJETOS", cargos: ["DIRETOR"] });
   });
 
@@ -489,10 +533,10 @@ describe("GAB-107: conta derivada da posição", () => {
 
   it("ADMIN nunca é rebaixado pela posição", async () => {
     const { admin } = await semear();
-    expect(await adicionarPosicaoAoUsuario(admin.id, "p_mv", admin)).toEqual({ ok: true });
+    expect(await adicionarPosicaoAoUsuario(admin.id, "p_mv", admin)).toMatchObject({ ok: true });
     expect(await conta("alice@ij.test")).toMatchObject({ papel: "ADMIN", area: null, cargos: [] });
     const [oc] = ocupacoesPorConta(await carregarBase())[admin.id];
-    expect(await encerrarOcupacaoDoUsuario(admin.id, oc.ocupacaoId, admin)).toEqual({ ok: true });
+    expect(await encerrarOcupacaoDoUsuario(admin.id, oc.ocupacaoId, admin)).toMatchObject({ ok: true });
     expect(await conta("alice@ij.test")).toMatchObject({ papel: "ADMIN" });
   });
 });

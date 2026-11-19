@@ -11,6 +11,10 @@ import type { AreaPosicoes, FichaLigada, OpcaoPosicao } from "@/lib/auth/cadastr
 import { descreverConta } from "@/lib/gg/modelo";
 import { criarConviteAction } from "./actions";
 import { CampoPosicao, localizarPosicao } from "./campo-posicao";
+import { ConfirmarConta } from "./confirmar-conta";
+
+/** Campo extra de um reenvio: escolha do homônimo ou a conta confirmada. */
+type Extra = [campo: "ligarMembroId" | "criarMembroNovo" | "confirmarConta", valor: string];
 
 type Posicoes = { areas: readonly AreaPosicoes[]; temAreaGG: boolean };
 const SEM_POSICOES: Posicoes = { areas: [], temAreaGG: false };
@@ -102,26 +106,33 @@ export function CorpoConvite({
   const [administrador, setAdministrador] = useState(false);
   const podeDarAdmin = papelAtor === "ADMIN";
 
-  function enviar(extra?: [campo: "ligarMembroId" | "criarMembroNovo", valor: string]) {
+  // Escolha do homônimo do último envio: a confirmação da conta reenvia com ela (senão o servidor perguntaria de novo).
+  const [ultimaEscolha, setUltimaEscolha] = useState<Extra | null>(null);
+
+  function enviar(extras: Extra[] = []) {
     const form = formRef.current;
     if (!form) return;
-    // A confirmação do homônimo vale para os dados que estão no form agora, que o navegador valida de novo.
-    if (extra && !form.reportValidity()) return;
+    // As confirmações valem para os dados que estão no form agora, que o navegador valida de novo.
+    if (extras.length && !form.reportValidity()) return;
     const f = new FormData(form);
-    if (extra) f.set(extra[0], extra[1]);
+    for (const [campo, valor] of extras) f.set(campo, valor);
+    setUltimaEscolha(extras.find(([campo]) => campo !== "confirmarConta") ?? null);
     startTransition(() => action(f));
   }
 
-  if (estado?.link && googleAtivo) return <CadastroComGoogle email={estado.email} link={estado.link} expiraEm={estado.expiraEm} fichaLigada={estado.fichaLigada} onFechar={onFechar} />;
+  if (estado?.link && googleAtivo)
+    return <CadastroComGoogle email={estado.email} link={estado.link} expiraEm={estado.expiraEm} fichaLigada={estado.fichaLigada} conta={estado.conta} onFechar={onFechar} />;
   if (estado?.link)
     return (
       <div className="space-y-4">
         {estado.fichaLigada ? <NotaFichaLigada ficha={estado.fichaLigada} /> : null}
+        {estado.conta ? <NotaConta conta={estado.conta} /> : null}
         <LinkGerado link={estado.link} expiraEm={estado.expiraEm} onFechar={onFechar} />
       </div>
     );
 
   const homonimos = estado?.homonimos ?? [];
+  const confirmarConta = estado?.confirmarConta;
   return (
     <form
       ref={formRef}
@@ -167,15 +178,17 @@ export function CorpoConvite({
           <p className="text-xs text-fg-faint">Ligar grava este e-mail na ficha e registra no histórico. Se for outra pessoa, um membro novo é criado.</p>
           <div className="flex flex-wrap gap-2">
             {homonimos.map((h, i) => (
-              <Button key={h.id} type="button" size="sm" disabled={pendente} onClick={() => enviar(["ligarMembroId", h.id])}>
+              <Button key={h.id} type="button" size="sm" disabled={pendente} onClick={() => enviar([["ligarMembroId", h.id]])}>
                 {homonimos.length === 1 ? "Ligar a ele e salvar" : `Ligar a "${h.nome}" (${i + 1})`}
               </Button>
             ))}
-            <Button type="button" size="sm" variant="outline" disabled={pendente} onClick={() => enviar(["criarMembroNovo", "1"])}>
+            <Button type="button" size="sm" variant="outline" disabled={pendente} onClick={() => enviar([["criarMembroNovo", "1"]])}>
               É outra pessoa: criar membro novo
             </Button>
           </div>
         </div>
+      ) : confirmarConta ? (
+        <ConfirmarConta pedido={confirmarConta} pendente={pendente} onConfirmar={() => enviar([...(ultimaEscolha ? [ultimaEscolha] : []), ["confirmarConta", confirmarConta.conta]])} />
       ) : estado?.erro ? (
         <p role="alert" className="text-sm text-danger">
           {estado.erro}
@@ -197,12 +210,36 @@ function NotaFichaLigada({ ficha }: { ficha: FichaLigada }) {
   );
 }
 
-function CadastroComGoogle({ email, link, expiraEm, fichaLigada, onFechar }: { email?: string; link: string; expiraEm?: string; fichaLigada?: FichaLigada; onFechar: () => void }) {
+/** Como a conta ficou no CRM (GAB-107): o que o servidor gravou, não a prévia. */
+function NotaConta({ conta }: { conta: string }) {
+  return (
+    <p className="text-sm">
+      Conta no CRM: <strong>{conta}</strong>
+    </p>
+  );
+}
+
+function CadastroComGoogle({
+  email,
+  link,
+  expiraEm,
+  fichaLigada,
+  conta,
+  onFechar,
+}: {
+  email?: string;
+  link: string;
+  expiraEm?: string;
+  fichaLigada?: FichaLigada;
+  conta?: string;
+  onFechar: () => void;
+}) {
   const [mostrarLink, setMostrarLink] = useState(false);
   if (mostrarLink) return <LinkGerado link={link} expiraEm={expiraEm} onFechar={onFechar} aviso="Mostrado só uma vez. Deixa de valer depois do primeiro login com Google." />;
   return (
     <div className="space-y-4">
       {fichaLigada ? <NotaFichaLigada ficha={fichaLigada} /> : null}
+      {conta ? <NotaConta conta={conta} /> : null}
       <div className="rounded-lg border border-border bg-muted p-3 text-sm">
         <p className="eyebrow mb-1">cadastrado</p>
         <p>

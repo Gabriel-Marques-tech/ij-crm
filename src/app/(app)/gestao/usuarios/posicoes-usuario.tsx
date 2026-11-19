@@ -2,18 +2,18 @@
 
 import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
-import { ROTULO_AREA, ROTULO_CARGO } from "@/lib/auth/areas";
-import type { AreaPosicoes, OcupacaoDaConta, OpcaoPosicao } from "@/lib/auth/cadastro";
-import { ROTULO_PAPEL } from "@/lib/auth/papeis";
-import { adicionarPosicaoUsuarioAction, encerrarOcupacaoUsuarioAction } from "./actions";
+import type { AreaPosicoes, ContaAConfirmar, OcupacaoDaConta, OpcaoPosicao } from "@/lib/auth/cadastro";
+import { adicionarPosicaoUsuarioAction, encerrarOcupacaoUsuarioAction, type EstadoPosicao } from "./actions";
 import { CampoPosicao } from "./campo-posicao";
+import { ConfirmarConta } from "./confirmar-conta";
 
 const fmtDia = (d: string) => d.split("-").reverse().join("/");
 
 /**
  * Posição na IJ na edição de usuário (GAB-105): as ocupações abertas, encerrar (hoje) e
  * adicionar (início hoje). Cada botão grava na hora, pelos serviços do G&G e com a régua da
- * Gestão. Papel/área/cargo da conta não mudam sozinhos: a sugestão aparece para quem edita aplicar.
+ * Gestão. GAB-107: a conta acompanha as posições (o servidor recalcula na mesma gravação) e a tela
+ * mostra como ficou; se o papel muda, o servidor pede confirmação e só grava com ela.
  */
 export function PosicoesUsuario({
   usuarioId,
@@ -33,42 +33,50 @@ export function PosicoesUsuario({
   const [pendente, startTransition] = useTransition();
   // Homônimo sem e-mail no G&G (só quando a conta ainda não tem membro): pergunta antes de criar outro.
   const [homonimo, setHomonimo] = useState<{ membros: { id: string; nome: string }[]; posicao: OpcaoPosicao } | null>(null);
+  // Mudança de papel pela posição: mostra a conta resultante e refaz a mesma operação com a confirmação.
+  const [confirmacao, setConfirmacao] = useState<{ pedido: ContaAConfirmar; refazer: (conta: string) => void } | null>(null);
 
-  function rodar(chamar: () => Promise<{ erro?: string; ok?: true; homonimos?: { id: string; nome: string }[] } | undefined>, depois: () => void, posicao?: OpcaoPosicao) {
+  function rodar(chamar: () => Promise<EstadoPosicao>, depois: (conta?: string) => void, refazer: (conta: string) => void, posicao?: OpcaoPosicao) {
     setErro(null);
     setAviso(null);
     setHomonimo(null);
+    setConfirmacao(null);
     startTransition(async () => {
       try {
         const r = await chamar();
         if (r?.homonimos?.length && posicao) setHomonimo({ membros: r.homonimos, posicao });
+        else if (r?.confirmarConta) setConfirmacao({ pedido: r.confirmarConta, refazer });
         else if (r?.erro) setErro(r.erro);
-        else depois();
+        else depois(r?.conta);
       } catch {
         setErro("Sem conexão com o servidor. Verifique a rede e tente de novo.");
       }
     });
   }
 
-  function adicionar(o: OpcaoPosicao | null = escolhida, confirmacao: { ligarMembroId?: string; criarMembroNovo?: boolean } = {}) {
+  const comConta = (texto: string, conta?: string) => (conta ? `${texto} Conta no CRM: ${conta}.` : texto);
+
+  function adicionar(o: OpcaoPosicao | null = escolhida, opcoes: { ligarMembroId?: string; criarMembroNovo?: boolean; confirmarConta?: string } = {}) {
     if (!o) return setErro("Escolha uma posição.");
     rodar(
-      () => adicionarPosicaoUsuarioAction(usuarioId, o.id, confirmacao),
-      () => {
-        const s = o.sugestao;
-        setAviso(
-          `Posição atribuída. O organograma sugere: ${ROTULO_PAPEL[s.papel]}${s.area ? ` · ${ROTULO_AREA[s.area]}` : ""}${s.cargos.length ? ` · ${s.cargos.map((c) => ROTULO_CARGO[c]).join(", ")}` : ""}. Ajuste papel e cargo abaixo se quiser.`,
-        );
+      () => adicionarPosicaoUsuarioAction(usuarioId, o.id, opcoes),
+      (conta) => {
+        setAviso(comConta("Posição atribuída.", conta));
         setEscolhida(null);
         setVersao((v) => v + 1);
       },
+      (conta) => adicionar(o, { ...opcoes, confirmarConta: conta }),
       o,
     );
   }
 
-  function encerrar(o: OcupacaoDaConta) {
-    if (!window.confirm(`Encerrar hoje a posição ${o.rotulo}?`)) return;
-    rodar(() => encerrarOcupacaoUsuarioAction(usuarioId, o.ocupacaoId), () => setAviso(`Posição ${o.rotulo} encerrada.`));
+  function encerrar(o: OcupacaoDaConta, confirmarConta?: string) {
+    if (!confirmarConta && !window.confirm(`Encerrar hoje a posição ${o.rotulo}?`)) return;
+    rodar(
+      () => encerrarOcupacaoUsuarioAction(usuarioId, o.ocupacaoId, confirmarConta ?? null),
+      (conta) => setAviso(comConta(`Posição ${o.rotulo} encerrada.`, conta)),
+      (conta) => encerrar(o, conta),
+    );
   }
 
   return (
@@ -118,6 +126,15 @@ export function PosicoesUsuario({
             </Button>
           </div>
         </div>
+      ) : null}
+      {confirmacao ? (
+        <ConfirmarConta
+          pedido={confirmacao.pedido}
+          pendente={pendente}
+          rotuloAtual="Hoje a conta é"
+          onConfirmar={() => confirmacao.refazer(confirmacao.pedido.conta)}
+          onCancelar={() => setConfirmacao(null)}
+        />
       ) : null}
       {aviso ? (
         <p role="status" className="text-xs text-fg-soft">

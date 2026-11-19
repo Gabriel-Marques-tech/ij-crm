@@ -111,8 +111,9 @@ export function validarImportacao(input: unknown, hoje: string): LinhaImportacao
 // ---------------------------------------------------------------- ponte organograma → CRM
 
 /**
- * O que o organograma diz sobre uma ocupação vigente: lado da área-raiz, se a área-raiz é
- * institucional (Presidência, Vice), categoria e marcas do cargo (GP = PM/GP; PO).
+ * O que o organograma diz sobre uma ocupação vigente: lado da área-raiz, se a área DA PRÓPRIA
+ * posição é institucional (Presidência, Vice; uma subárea abaixo delas não é), categoria e marcas
+ * do cargo (GP = PM/GP; PO).
  */
 export type PostoDerivavel = { ladoCrm: Area | null; institucional: boolean; categoria: CategoriaCargo; ehGp: boolean; ehPo: boolean; principal: boolean };
 
@@ -124,7 +125,8 @@ const ordenarCargos = (cs: Iterable<Cargo>): Cargo[] => CARGOS.filter((c) => [..
 /**
  * Área, papel e cargos que o organograma sugere para a conta do CRM (decisões da spec §3
  * e cargos de Projetos). Regra (GAB-107): a diretoria vê e edita tudo da ÁREA DELA, então
- * - diretoria de área institucional (Presidência, Vice) → GESTOR sem área (conta nas duas áreas);
+ * - diretoria em área institucional (Presidência, Vice) → GESTOR sem área (gestor das DUAS áreas),
+ *   o que quer que a pessoa ocupe além disso (sem lado, sem cargo, sem conflito);
  * - diretoria do lado da conta (Vendas/Projetos) → GESTOR desse lado (em Projetos, com cargo DIRETOR);
  * - diretoria de área sem lado no CRM (G&G, Marketing, ADM-FIN) não dá gestão: segue a regra de
  *   membro (a caneta do G&G vem de `ehGG`, não do papel), e diretoria do outro lado (não principal)
@@ -136,6 +138,7 @@ const ordenarCargos = (cs: Iterable<Cargo>): Cargo[] => CARGOS.filter((c) => [..
  */
 export function derivarDoOrganograma(postos: PostoDerivavel[]): Derivado {
   if (postos.length === 0) return { area: null, papel: null, cargos: [], conflito: null };
+  if (postos.some((p) => p.categoria === "DIRETORIA" && p.institucional)) return { area: null, papel: "GESTOR", cargos: [], conflito: null };
   const lados = [...new Set(postos.map((p) => p.ladoCrm).filter((l): l is Area => l !== null))];
   let area: Area | null = lados.length === 1 ? lados[0] : null;
   let conflito: Area[] | null = null;
@@ -144,7 +147,7 @@ export function derivarDoOrganograma(postos: PostoDerivavel[]): Derivado {
     if (principal) area = principal;
     else conflito = lados;
   }
-  const gestor = postos.some((p) => p.categoria === "DIRETORIA" && (p.institucional || (area !== null && p.ladoCrm === area)));
+  const gestor = area !== null && postos.some((p) => p.categoria === "DIRETORIA" && p.ladoCrm === area);
   const papel: Papel = gestor ? "GESTOR" : area === "PROJETOS" ? "PROJETOS" : area === "VENDAS" ? "VENDEDOR" : "VISUALIZADOR";
   const cargos = new Set<Cargo>();
   if (area !== null) {

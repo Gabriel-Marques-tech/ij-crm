@@ -128,8 +128,14 @@ describe("cadastro derivado da posição (GAB-107)", () => {
   });
   it("diretoria do outro lado (não principal) não dá gestão do lado da conta", () => {
     expect(derivarDoOrganograma([posto("VENDAS", "MEMBRO", false, true), posto("PROJETOS", "DIRETORIA", false, false)])).toEqual({ area: "VENDAS", papel: "VENDEDOR", cargos: [], conflito: null });
-    // Presidência + membro de Vendas: gestor, com o lado de Vendas.
-    expect(derivarDoOrganograma([posto("INST", "DIRETORIA"), posto("VENDAS", "MEMBRO")])).toMatchObject({ area: "VENDAS", papel: "GESTOR" });
+    // Presidência é gestão das DUAS áreas, o que mais a pessoa ocupe: com Vendas (até a principal) ou conflito, GESTOR sem área.
+    expect(derivarDoOrganograma([posto("INST", "DIRETORIA", false, false), posto("VENDAS", "LIDERANCA", true, true)])).toEqual({ area: null, papel: "GESTOR", cargos: [], conflito: null });
+    expect(derivarDoOrganograma([posto("INST", "DIRETORIA"), posto("VENDAS", "MEMBRO", false, false), posto("PROJETOS", "MEMBRO", false, false)])).toEqual({
+      area: null,
+      papel: "GESTOR",
+      cargos: [],
+      conflito: null,
+    });
   });
   it("contaDifere segue a mesma regra: diretor de G&G com conta Gestor difere (sugere Visualizador)", () => {
     const d = derivarDoOrganograma([posto(null, "DIRETORIA")]);

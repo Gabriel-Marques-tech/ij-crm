@@ -154,8 +154,8 @@ export function derivadoDe(base: BaseOrg, membroId: string): Derivado {
   return derivarDoOrganograma(
     postosDe(base, membroId).map((p) => {
       const cargo = base.cargos.find((c) => c.id === p.cargoId)!;
-      const raiz = raizDe(base.areas, p.areaId);
-      return { ladoCrm: raiz?.ladoCrm ?? null, institucional: raiz?.tipo === "INSTITUCIONAL", categoria: cargo.categoria, ehGp: cargo.ehGp, ehPo: ehCargoPo(cargo), principal: p.ocupacao.principal };
+      // Lado vem da área-raiz; "institucional" é da área da própria posição (subárea da Presidência não é Presidência).
+      return { ladoCrm: raizDe(base.areas, p.areaId)?.ladoCrm ?? null, institucional: base.areas.find((a) => a.id === p.areaId)?.tipo === "INSTITUCIONAL", categoria: cargo.categoria, ehGp: cargo.ehGp, ehPo: ehCargoPo(cargo), principal: p.ocupacao.principal };
     }),
   );
 }

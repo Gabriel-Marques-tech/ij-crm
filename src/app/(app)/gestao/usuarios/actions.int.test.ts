@@ -242,10 +242,26 @@ describe("cadastro único pela action (GAB-105)", () => {
     expect(await criarConviteAction(undefined, form({ nome: "Gabi", email: "gabi@ij.test", papel: "VISUALIZADOR", ladoNoForm: "1", area: "", posicaoId: "p_agg" }))).toHaveProperty("link");
     const u = await db.usuario.findUniqueOrThrow({ where: { email: "gabi@ij.test" }, include: { membro: { include: { ocupacoes: true } } } });
     expect(u.membro?.ocupacoes.map((o) => o.posicaoId)).toEqual(["p_agg"]);
+    // A tela de sucesso mostra a conta que o servidor gravou.
+    expect(await criarConviteAction(undefined, form({ nome: "Gil", email: "gil@ij.test", posicaoId: "p_agg" }))).toMatchObject({ conta: "Visualizador (só leitura)" });
     expect(await criarConviteAction(undefined, form({ nome: "Nina", email: "nina@ij.test", posicaoId: "" }))).toHaveProperty("link");
     const n = await db.usuario.findUniqueOrThrow({ where: { email: "nina@ij.test" }, include: { membro: { include: { ocupacoes: true } } } });
     expect(n.membro).toMatchObject({ nome: "Nina", status: "ATIVO" });
     expect(n.membro!.ocupacoes).toEqual([]);
+  });
+
+  it("GAB-107: ficha que daria outra conta pede confirmação; confirmada, segue (a escolha volta no form)", async () => {
+    await gestor();
+    await db.areaOrg.create({ data: { id: "pres", nome: "Presidência", tipo: "INSTITUCIONAL" } });
+    await db.cargoOrg.create({ data: { id: "presidente", nome: "Presidente", categoria: "DIRETORIA" } });
+    await db.posicao.create({ data: { id: "p_pres", nome: "Presidência", areaId: "pres", cargoId: "presidente" } });
+    const m = await db.membro.create({ data: { nome: "Pedro", email: "pedro@ij.test" } });
+    await db.ocupacao.create({ data: { membroId: m.id, posicaoId: "p_pres", principal: true } });
+    const r = await criarConviteAction(undefined, form({ nome: "Pedro", email: "pedro@ij.test" }));
+    expect(r).toMatchObject({ confirmarConta: { atual: "Visualizador (só leitura)", conta: "Gestor de Vendas e Projetos", posicoes: ["Presidência · Presidente"] } });
+    expect(await db.usuario.findUnique({ where: { email: "pedro@ij.test" } })).toBeNull();
+    expect(await criarConviteAction(undefined, form({ nome: "Pedro", email: "pedro@ij.test", confirmarConta: "Gestor de Vendas e Projetos" }))).toMatchObject({ conta: "Gestor de Vendas e Projetos" });
+    expect((await db.usuario.findUniqueOrThrow({ where: { email: "pedro@ij.test" } })).papel).toBe("GESTOR");
   });
 
   it("membro ligado a outra conta: mensagem clara e nada criado", async () => {
@@ -280,9 +296,9 @@ describe("cadastro único pela action (GAB-105)", () => {
   it("edição: adiciona e encerra posição pela action", async () => {
     await gestor();
     const u = await db.usuario.create({ data: { nome: "Edu", email: "edu@ij.test", papel: "VISUALIZADOR" } });
-    expect(await adicionarPosicaoUsuarioAction(u.id, "p_agg")).toEqual({ ok: true });
+    expect(await adicionarPosicaoUsuarioAction(u.id, "p_agg")).toEqual({ ok: true, conta: "Visualizador (só leitura)" });
     const o = await db.ocupacao.findFirstOrThrow({ where: { membro: { usuarioId: u.id } } });
-    expect(await encerrarOcupacaoUsuarioAction(u.id, o.id)).toEqual({ ok: true });
+    expect(await encerrarOcupacaoUsuarioAction(u.id, o.id)).toEqual({ ok: true, conta: "Visualizador (só leitura)" });
     expect((await db.ocupacao.findUniqueOrThrow({ where: { id: o.id } })).fim).not.toBeNull();
     expect(await encerrarOcupacaoUsuarioAction(u.id, o.id)).toEqual({ erro: expect.stringMatching(/não encontrada/) });
   });

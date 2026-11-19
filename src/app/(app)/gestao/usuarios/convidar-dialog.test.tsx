@@ -222,6 +222,26 @@ describe("cadastro: homônimo e ficha ligada", () => {
     expect(terceiro.get("papel")).toBeNull();
   });
 
+  it("conta diferente da prévia: mostra a conta e as posições; confirmar reenvia com ela e com a escolha do homônimo; sucesso mostra a conta", async () => {
+    acoes.criarConviteAction.mockReset();
+    acoes.criarConviteAction
+      .mockResolvedValueOnce({ erro: "x", homonimos: [{ id: "m1", nome: "Ana Souza" }] })
+      .mockResolvedValueOnce({ erro: "y", confirmarConta: { atual: "Visualizador (só leitura)", conta: "Gestor de Projetos · Diretor", posicoes: ["Projetos · Diretor"] } })
+      .mockResolvedValueOnce({ link: "https://crm/convite/x", expiraEm: new Date().toISOString(), email: "ana@ij.test", conta: "Gestor de Projetos · Diretor" });
+    montar();
+    fireEvent.change(screen.getByLabelText("Nome"), { target: { value: "Ana Souza" } });
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "ana@ij.test" } });
+    fireEvent.submit(screen.getByRole("button", { name: "Cadastrar" }).closest("form")!);
+    fireEvent.click(await screen.findByRole("button", { name: "Ligar a ele e salvar" }));
+    expect(await screen.findByText(/Por causa das posições: Projetos · Diretor/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Confirmar: Gestor de Projetos · Diretor" }));
+    await waitFor(() => expect(acoes.criarConviteAction).toHaveBeenCalledTimes(3));
+    const terceiro = acoes.criarConviteAction.mock.calls[2][1] as FormData;
+    expect(terceiro.get("confirmarConta")).toBe("Gestor de Projetos · Diretor");
+    expect(terceiro.get("ligarMembroId")).toBe("m1");
+    expect(await screen.findByText("Gestor de Projetos · Diretor")).toBeTruthy();
+  });
+
   it("com mais de um homônimo, mostra um botão para cada", async () => {
     acoes.criarConviteAction.mockReset();
     acoes.criarConviteAction.mockResolvedValueOnce({ erro: "x", homonimos: [{ id: "m1", nome: "Ana Souza" }, { id: "m2", nome: "ana souza" }] });
