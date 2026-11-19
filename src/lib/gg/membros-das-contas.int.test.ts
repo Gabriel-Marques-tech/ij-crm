@@ -204,18 +204,31 @@ describe("importação depois da migration (GAB-108)", () => {
     expect(m.vinculos.map((v) => [v.entrada?.toISOString().slice(0, 10), v.saida])).toEqual([["2025-03-03", null]]);
   });
 
-  it("linha sem e-mail com o nome de quem tem conta completa o mesmo membro; depois de completo, repetir recusa", async () => {
+  it("linha sem e-mail com o nome de quem tem conta recusa pedindo o e-mail; o membro da conta fica intocado", async () => {
     const ator = await semear();
-    const bia = await db.usuario.create({ data: { nome: "Bia Souza", email: "bia@ij.test" } });
+    const ana = await db.usuario.create({ data: { nome: "Ana Lima", email: "ana@ij.test" } });
     await rodarMigracao();
-    const criado = await db.membro.findUniqueOrThrow({ where: { usuarioId: bia.id } });
+    const antes = await db.membro.findUniqueOrThrow({ where: { usuarioId: ana.id }, include: { ocupacoes: true, vinculos: true } });
 
-    const lote = validarImportacao([{ nome: "bia souza", area: "Vendas", cargo: "Membro regular", entrada: "2025-04-01" }], HOJE);
-    expect(await importarMembros(lote, "00000000-0000-0000-0000-000000000109", ator)).toEqual({ ok: true, quantidade: 1 });
-    expect(await db.membro.count()).toBe(2); // Bia + Alice
-    expect(await db.ocupacao.count({ where: { membroId: criado.id } })).toBe(1);
-    expect((await db.vinculoIj.findMany({ where: { membroId: criado.id } })).map((v) => v.entrada?.toISOString().slice(0, 10))).toEqual(["2025-04-01"]);
+    // outra "Ana Lima", sem e-mail na planilha
+    const lote = validarImportacao([{ nome: "ana  lima", area: "Vendas", cargo: "Membro regular", entrada: "2025-04-01" }], HOJE);
+    expect(await importarMembros(lote, "00000000-0000-0000-0000-000000000109", ator)).toMatchObject({
+      ok: false,
+      erro: "IMPORTACAO",
+      detalhe: "Linha 1: já existe membro com conta e esse nome; informe o e-mail na planilha.",
+    });
+    expect(await db.membro.findUniqueOrThrow({ where: { id: antes.id }, include: { ocupacoes: true, vinculos: true } })).toEqual(antes);
+    expect(await db.membro.count()).toBe(2); // Ana + Alice
+  });
 
-    expect(await importarMembros(lote, "00000000-0000-0000-0000-000000000110", ator)).toMatchObject({ ok: false, detalhe: "Linha 1: membro já cadastrado." });
+  it("nome com _ ou % não é curinga: \"Al_ce\" vira membro próprio e não encosta na Alice", async () => {
+    const ator = await semear();
+    await rodarMigracao();
+    const alice = await db.membro.findUniqueOrThrow({ where: { usuarioId: ator.id }, include: { ocupacoes: true, vinculos: true } });
+
+    const lote = validarImportacao([{ nome: "Al_ce", area: "Vendas", cargo: "Membro regular" }, { nome: "%" }], HOJE);
+    expect(await importarMembros(lote, "00000000-0000-0000-0000-000000000110", ator)).toEqual({ ok: true, quantidade: 2 });
+    expect(await db.membro.findUniqueOrThrow({ where: { id: alice.id }, include: { ocupacoes: true, vinculos: true } })).toEqual(alice);
+    expect((await db.membro.findMany({ where: { usuarioId: null }, orderBy: { nome: "asc" } })).map((m) => m.nome)).toEqual(["%", "Al_ce"]);
   });
 });

@@ -675,13 +675,7 @@ export async function importarMembros(linhas: LinhaImportacao[], chave: string, 
         const chaveL = l.email ? chaveEmail(l.email) : null;
         if (chaveL && doLote.has(chaveL)) throw new Recusa("IMPORTACAO", `${linha}: membro repetido na importação.`);
         if (chaveL) doLote.add(chaveL);
-        let existente = chaveL ? porEmail.get(chaveL) : undefined;
-        if (!existente && !chaveL) {
-          // GAB-108: linha sem e-mail com o nome de UM membro só, ligado a uma conta e vazio (o criado pela
-          // migration das contas) completa esse membro. Qualquer outro homônimo segue recusando abaixo.
-          const xara = await tx.membro.findMany({ where: { nome: { equals: l.nome, mode: "insensitive" } }, select: { id: true, email: true, usuarioId: true } });
-          if (xara.length === 1 && xara[0].usuarioId && (await membroVazio(xara[0].id))) existente = xara[0];
-        }
+        const existente = chaveL ? porEmail.get(chaveL) : undefined;
         if (existente) {
           // GAB-105: membro com o mesmo e-mail ainda sem nada (sem ocupação; status não informado ou sem período) é
           // completado pela linha (conta, status, período, posição), sem derrubar o lote.
@@ -700,8 +694,15 @@ export async function importarMembros(linhas: LinhaImportacao[], chave: string, 
           await historico(tx, existente.id, "Atualizado pela importação em lote", ator);
           continue;
         }
-        // Como no importar_membros do G&G: já existe pelo nome (sem caixa) → recusa o lote.
-        if (await tx.membro.count({ where: { nome: { equals: l.nome, mode: "insensitive" } } })) throw new Recusa("IMPORTACAO", `${linha}: membro já cadastrado.`);
+        // Como no importar_membros do G&G: já existe pelo nome → recusa o lote. Comparação EXATA da chave do nome
+        // (`chaveNome`, em memória; nada de ILIKE, onde `_`/`%` seriam curinga). Nome não basta para dizer que é a
+        // mesma pessoa: linha sem e-mail com o nome de quem tem conta pede o e-mail (GAB-108).
+        const chaveN = chaveNome(l.nome);
+        const xaras = (await tx.membro.findMany({ select: { nome: true, usuarioId: true } })).filter((m) => chaveNome(m.nome) === chaveN);
+        if (xaras.length) {
+          if (!chaveL && xaras.some((m) => m.usuarioId)) throw new Recusa("IMPORTACAO", `${linha}: já existe membro com conta e esse nome; informe o e-mail na planilha.`);
+          throw new Recusa("IMPORTACAO", `${linha}: membro já cadastrado.`);
+        }
         const m = await tx.membro.create({ data: { nome: l.nome, email: l.email, status: l.status, usuarioId: await contaPorEmail(tx, l.email) } });
         await tx.vinculoIj.create({ data: { membroId: m.id, entrada } });
         await fecharSeInativo(m.id, l.status);
