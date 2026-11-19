@@ -80,10 +80,11 @@ describe("editarUsuarioAction (GAB-107): nome, telefone e Administrador; papel/l
     expect(await conta(v.id)).toMatchObject({ papel: "ADMIN", area: "VENDAS", cargos: ["GP"], areaEntrada: "VENDAS" });
 
     // Desmarcar: pede confirmação mostrando a conta que sai das posições; sem ela, continua admin.
-    expect(await editarUsuarioAction(undefined, form({ usuarioId: v.id, nome: "Vini", adminNoForm: "1" }))).toMatchObject({
+    // Pedido de confirmação não grava nada, nem o nome que veio junto.
+    expect(await editarUsuarioAction(undefined, form({ usuarioId: v.id, nome: "Vini Novo", adminNoForm: "1" }))).toMatchObject({
       confirmarConta: { atual: "Administrador · Vendas · GP", conta: "Membro de Vendas · GP", posicoes: ["Vendas · GP"] },
     });
-    expect((await conta(v.id)).papel).toBe("ADMIN");
+    expect(await conta(v.id)).toMatchObject({ papel: "ADMIN", nome: "Vini" });
     expect(await editarUsuarioAction(undefined, form({ usuarioId: v.id, nome: "Vini", adminNoForm: "1", confirmarConta: "Visualizador (só leitura)" }))).toHaveProperty("confirmarConta");
     expect(await editarUsuarioAction(undefined, form({ usuarioId: v.id, nome: "Vini", adminNoForm: "1", confirmarConta: "Membro de Vendas · GP" }))).toEqual({ ok: true, conta: "Membro de Vendas · GP" });
     expect(await conta(v.id)).toMatchObject({ papel: "VENDEDOR", area: "VENDAS", cargos: ["GP"] });

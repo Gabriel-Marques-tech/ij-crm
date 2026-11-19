@@ -17,13 +17,37 @@ export type ErroUsuario =
   | "SENHA_FRACA"
   | "CREDENCIAIS_INVALIDAS"
   | "NAO_PODE_ALTERAR_A_SI"
-  | "USUARIO_NAO_ENCONTRADO";
+  | "USUARIO_NAO_ENCONTRADO"
+  | "ULTIMO_ADMIN";
 
 export type Resultado<T = object> = ({ ok: true } & T) | { ok: false; erro: ErroUsuario };
 
 type Ator = Pick<Usuario, "id" | "papel">;
 
 class ErroConcorrencia extends Error {}
+
+/** Recusa das travas de admin (abaixo): desfaz a transação levando o erro. */
+export class RecusaAdmin extends Error {
+  constructor(readonly erro: "PAPEL_NAO_PERMITIDO" | "ULTIMO_ADMIN") {
+    super(erro);
+  }
+}
+
+/**
+ * Mexer em admin (tirar o papel, desativar) disputa com outro admin fazendo o mesmo: trava as linhas
+ * de quem age e do alvo (sempre na ordem do id, para dois pedidos cruzados não se travarem) e confere,
+ * já com a trava, que quem age ainda é admin ativo.
+ */
+export async function travarEntreAdminsTx(tx: Prisma.TransactionClient, atorId: string, alvoId: string): Promise<void> {
+  const ids = [...new Set([atorId, alvoId])].sort();
+  await tx.$queryRaw`SELECT id FROM usuario WHERE id = ANY(${ids}) ORDER BY id FOR UPDATE`;
+  if ((await tx.usuario.count({ where: { id: atorId, papel: "ADMIN", ativo: true } })) === 0) throw new RecusaAdmin("PAPEL_NAO_PERMITIDO");
+}
+
+/** Pós-condição: o CRM nunca fica sem admin ativo. Chamada depois da mudança, dentro da mesma transação. */
+export async function garantirAdminAtivoTx(tx: Prisma.TransactionClient): Promise<void> {
+  if ((await tx.usuario.count({ where: { papel: "ADMIN", ativo: true } })) === 0) throw new RecusaAdmin("ULTIMO_ADMIN");
+}
 
 function resolverTelefone(entrada: string | null | undefined): Resultado<{ telefone: string | null }> {
   if (entrada === undefined || entrada === null || entrada.trim() === "") return { ok: true, telefone: null };
@@ -210,7 +234,10 @@ export async function atualizarUsuario(
   if (tel && !tel.ok) return tel;
 
   try {
+    // Tirar o papel de admin ou desativar um admin: trava contra outro admin fazendo o mesmo ao mesmo tempo.
+    const tiraAdmin = alvo.papel === "ADMIN" && (dados.ativo === false || (dados.papel !== undefined && dados.papel !== "ADMIN"));
     await db.$transaction(async (tx) => {
+      if (tiraAdmin) await travarEntreAdminsTx(tx, por.id, usuarioId);
       // `papel: alvo.papel` no where: se o alvo foi promovido entre a leitura e
       // a escrita, a atualização não acontece (gestor nunca edita admin).
       const r = await tx.usuario.updateMany({
@@ -225,6 +252,7 @@ export async function atualizarUsuario(
         },
       });
       if (r.count === 0) throw new ErroConcorrencia();
+      if (tiraAdmin) await garantirAdminAtivoTx(tx);
       // GAB-87: quem não pode mais segurar a caneta (desativado, mudou de lado, perdeu escrita) a solta.
       if (dados.ativo === false || ladoMudou || (dados.papel !== undefined && dados.papel !== alvo.papel)) await liberarCanetasDe(tx, usuarioId, por.id);
       if (dados.ativo === false) {
@@ -234,6 +262,7 @@ export async function atualizarUsuario(
     });
   } catch (e) {
     if (e instanceof ErroConcorrencia) return { ok: false, erro: "PAPEL_NAO_PERMITIDO" };
+    if (e instanceof RecusaAdmin) return { ok: false, erro: e.erro };
     if (ehViolacaoDeUnique(e, "telefone_whatsapp")) return { ok: false, erro: "TELEFONE_EM_USO" };
     throw e;
   }

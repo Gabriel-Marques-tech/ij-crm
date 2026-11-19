@@ -7,7 +7,8 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { Papel } from "@prisma/client";
 import { dbTeste, limparBanco } from "@/test/db";
 import { carregarBase, ehEditorGG } from "@/lib/gg/organizacao";
-import { adicionarPosicaoAoUsuario, cadastrarPessoa, encerrarOcupacaoDoUsuario, ocupacoesPorConta, opcoesDePosicao, traduzir, type OpcaoPosicao } from "./cadastro";
+import { adicionarPosicaoAoUsuario, cadastrarPessoa, definirAdministrador, encerrarOcupacaoDoUsuario, ocupacoesPorConta, opcoesDePosicao, traduzir, type OpcaoPosicao } from "./cadastro";
+import { atualizarUsuario, garantirAdminAtivoTx } from "./usuarios";
 
 const db = dbTeste();
 const HOJE = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date());
@@ -533,12 +534,41 @@ describe("GAB-107: conta derivada da posição", () => {
     expect(await conta("lia@ij.test")).toMatchObject({ papel: "VISUALIZADOR" });
   });
 
-  it("ADMIN nunca é rebaixado pela posição", async () => {
+  it("ADMIN nunca é rebaixado pela posição, mas lado e cargos acompanham (com confirmação)", async () => {
     const { admin } = await semear();
-    expect(await adicionarPosicaoAoUsuario(admin.id, "p_mv", admin)).toMatchObject({ ok: true });
-    expect(await conta("alice@ij.test")).toMatchObject({ papel: "ADMIN", area: null, cargos: [] });
-    const [oc] = ocupacoesPorConta(await carregarBase())[admin.id];
-    expect(await encerrarOcupacaoDoUsuario(admin.id, oc.ocupacaoId, admin)).toMatchObject({ ok: true });
-    expect(await conta("alice@ij.test")).toMatchObject({ papel: "ADMIN" });
+    const outro = await db.usuario.create({ data: { nome: "Beto", email: "beto@ij.test", papel: "ADMIN" } });
+    expect(await adicionarPosicaoAoUsuario(outro.id, "p_gpv", admin)).toMatchObject({
+      erro: "CONFIRMAR_CONTA",
+      confirmarConta: { atual: "Administrador", conta: "Administrador · Vendas · GP" },
+    });
+    expect(await adicionarPosicaoAoUsuario(outro.id, "p_gpv", admin, { confirmarConta: "Administrador · Vendas · GP" })).toEqual({ ok: true, conta: "Administrador · Vendas · GP" });
+    expect(await conta("beto@ij.test")).toMatchObject({ papel: "ADMIN", area: "VENDAS", cargos: ["GP"] });
+    // Encerrar a última posição: a conta fica como está (continua admin, com o lado).
+    const [oc] = ocupacoesPorConta(await carregarBase())[outro.id];
+    expect(await encerrarOcupacaoDoUsuario(outro.id, oc.ocupacaoId, admin)).toEqual({ ok: true, conta: "Administrador · Vendas · GP" });
+    expect(await conta("beto@ij.test")).toMatchObject({ papel: "ADMIN", area: "VENDAS", cargos: ["GP"] });
+  });
+
+  it("corrida entre admins: quem age tem de ainda ser admin ativo (com a trava); o CRM nunca fica sem admin ativo", async () => {
+    const { admin, gestor } = await semear();
+    const beto = await db.usuario.create({ data: { nome: "Beto", email: "beto@ij.test", papel: "ADMIN" } });
+    // `por` diz ADMIN, mas no banco já não é (rebaixado/desativado por outro admin no meio): recusa e nada muda.
+    const velho = { id: gestor.id, papel: "ADMIN" as const };
+    expect(await definirAdministrador(beto.id, false, velho, { confirmarConta: "Visualizador (só leitura)" })).toEqual({ ok: false, erro: "PAPEL_NAO_PERMITIDO" });
+    expect(await atualizarUsuario(beto.id, { ativo: false }, velho)).toEqual({ ok: false, erro: "PAPEL_NAO_PERMITIDO" });
+    await db.usuario.update({ where: { id: admin.id }, data: { ativo: false } });
+    expect(await definirAdministrador(gestor.id, true, { id: admin.id, papel: "ADMIN" })).toEqual({ ok: false, erro: "PAPEL_NAO_PERMITIDO" });
+    expect(await conta("beto@ij.test")).toMatchObject({ papel: "ADMIN" });
+    // Pós-condição: com um admin ativo passa; sem nenhum, recusa (e quem chama desfaz a transação).
+    await expect(db.$transaction((tx) => garantirAdminAtivoTx(tx))).resolves.toBeUndefined();
+    await db.usuario.update({ where: { id: beto.id }, data: { ativo: false } });
+    await expect(db.$transaction((tx) => garantirAdminAtivoTx(tx))).rejects.toMatchObject({ erro: "ULTIMO_ADMIN" });
+  });
+
+  it("admin tira o Administrador de outro admin (dois ativos): passa; sobra um", async () => {
+    const { admin } = await semear();
+    const beto = await db.usuario.create({ data: { nome: "Beto", email: "beto@ij.test", papel: "ADMIN" } });
+    expect(await definirAdministrador(beto.id, false, admin, { confirmarConta: "Visualizador (só leitura)" })).toEqual({ ok: true, conta: "Visualizador (só leitura)" });
+    expect(await db.usuario.count({ where: { papel: "ADMIN", ativo: true } })).toBe(1);
   });
 });

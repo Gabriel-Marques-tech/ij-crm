@@ -39,7 +39,7 @@ import { liberarCanetasDe } from "@/lib/propostas/caneta-banco";
 import { diaEmFuso } from "@/lib/projetos/aging";
 import { resolverAreaEntrada } from "./areas";
 import { podeAtribuirPapel } from "./papeis";
-import { criarConvite, formatarLado, type DadosConvite, type ErroUsuario } from "./usuarios";
+import { criarConvite, formatarLado, garantirAdminAtivoTx, RecusaAdmin, travarEntreAdminsTx, type DadosConvite, type ErroUsuario } from "./usuarios";
 
 /**
  * `CONFLITO_DE_LADO`: posições vigentes em Vendas e em Projetos sem uma principal entre elas.
@@ -91,6 +91,7 @@ const hoje = () => diaEmFuso(new Date());
 /** Exportada para o teste do P2002 real. */
 export function traduzir(e: unknown): FalhaCadastro {
   if (e instanceof Desfaz) return { ok: false, erro: e.erro };
+  if (e instanceof RecusaAdmin) return { ok: false, erro: e.erro };
   if (e instanceof RecusaConfirmarConta) return { ok: false, erro: "CONFIRMAR_CONTA", confirmarConta: e.pedido };
   if (e instanceof RecusaHomonimo) return { ok: false, erro: e.erro, homonimos: e.membros };
   if (e instanceof Recusa) return { ok: false, erro: e.erro, ...(e.detalhe ? { detalhe: e.detalhe } : {}) };
@@ -231,7 +232,8 @@ async function papelMantido(tx: Prisma.TransactionClient, alvo: { id: string; pa
 
 /**
  * GAB-107: depois de atribuir/encerrar posição, a conta acompanha as posições que restam (mesma
- * transação). ADMIN nunca é rebaixado. Sem posição vigente, a conta fica como está: encerrar a
+ * transação). ADMIN nunca é rebaixado: continua ADMIN, mas lado e cargos acompanham as posições
+ * (sem edição à mão, é o único jeito de mudá-los). Sem posição vigente, a conta fica como está: encerrar a
  * última posição não tranca ninguém fora (nem vira Visualizador sozinho); a gestão decide.
  * Conflito de lado: ao atribuir, recusa (marque uma principal); ao encerrar, mantém a conta, para
  * o encerramento não ficar travado.
@@ -248,10 +250,9 @@ async function recalcularContaTx(
 ): Promise<{ conta: string; auditoria: string | null }> {
   const atual = await tx.usuario.findUniqueOrThrow({ where: { id: usuarioId }, select: { papel: true, area: true, cargos: true, areaEntrada: true } });
   const fica = { conta: descreverConta(atual), auditoria: null };
-  if (atual.papel === "ADMIN") return fica;
   const postos = await postosVigentesTx(tx, membroId);
   if (!postos.length) return fica;
-  const conta = contaDaDerivacao(derivarDoOrganograma(postos));
+  const conta = contaDaDerivacao(derivarDoOrganograma(postos), { administrador: atual.papel === "ADMIN" });
   if (!conta) {
     if (recusarConflito) throw new Desfaz("CONFLITO_DE_LADO");
     return fica;
@@ -302,6 +303,8 @@ export async function encerrarOcupacaoDoUsuario(usuarioId: string, ocupacaoId: s
  * (ninguém se rebaixa; com um admin só, não há outro admin para rebaixá-lo). Marcar: papel ADMIN,
  * mantendo o lado e os cargos. Desmarcar: a conta volta a sair das posições vigentes (sem posição,
  * Visualizador), e só com `confirmarConta` igual à conta resultante. Devolve como a conta ficou.
+ * Corrida entre dois admins (um tira o outro ao mesmo tempo): as linhas dos dois ficam travadas, quem
+ * age tem de ainda ser admin ativo, e se depois da mudança não sobrar admin ativo, tudo é desfeito.
  */
 export async function definirAdministrador(usuarioId: string, administrador: boolean, por: Ator, { confirmarConta = null }: { confirmarConta?: string | null } = {}): Promise<ResultadoCadastro<{ conta: string }>> {
   try {
@@ -311,6 +314,7 @@ export async function definirAdministrador(usuarioId: string, administrador: boo
     if ((alvo.papel === "ADMIN") === administrador) return { ok: true, conta: descreverConta(alvo) };
     if (alvo.id === por.id) throw new RecusaConta("NAO_PODE_ALTERAR_A_SI");
     const conta = await db.$transaction(async (tx) => {
+      await travarEntreAdminsTx(tx, por.id, alvo.id);
       await papelMantido(tx, alvo);
       if (administrador) {
         const areaEntrada = resolverAreaEntrada("ADMIN", alvo.area, alvo.areaEntrada ?? alvo.area ?? "GERAL");
@@ -323,6 +327,7 @@ export async function definirAdministrador(usuarioId: string, administrador: boo
       const resultado = descreverConta(nova);
       if (confirmarConta !== resultado) throw new RecusaConfirmarConta({ atual: descreverConta(alvo), conta: resultado, posicoes: m ? (await postosVigentesTx(tx, m.id)).map((x) => x.rotulo) : [] });
       await gravarConta(tx, alvo.id, nova, por.id, alvo);
+      await garantirAdminAtivoTx(tx);
       return nova;
     });
     console.info(`[auditoria] usuario.papel_alterado usuario=${alvo.id} por=${por.id} de=${alvo.papel} para=${conta.papel} lado=${formatarLado(conta)} origem=administrador`);

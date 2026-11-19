@@ -23,6 +23,7 @@ const MENSAGEM: Record<ErroUsuario, string> = {
   CREDENCIAIS_INVALIDAS: "Credenciais inválidas.",
   NAO_PODE_ALTERAR_A_SI: "Você não pode alterar seu próprio papel ou se desativar.",
   USUARIO_NAO_ENCONTRADO: "Usuário não encontrado.",
+  ULTIMO_ADMIN: "O CRM ficaria sem nenhum admin ativo. Outro admin precisa continuar com acesso.",
 };
 
 /** Cadastro único (GAB-105): conta + membro do G&G + posição. Mensagens do G&G ajustadas ao contexto da Gestão. */
@@ -164,16 +165,17 @@ export async function editarUsuarioAction(_prev: EstadoEdicao, form: FormData): 
     const parsed = edicaoSchema.safeParse({ usuarioId: form.get("usuarioId"), nome: form.get("nome") ?? undefined, telefone: form.get("telefone") ?? undefined });
     if (!parsed.success) return { erro: "Dados inválidos." };
     const { usuarioId, ...perfil } = parsed.data;
-    // Campos de papel/lado num FormData forjado são ignorados: só nome e telefone vão para a conta.
-    const r = await atualizarUsuario(usuarioId, perfil, ator);
-    if (!r.ok) return { erro: MENSAGEM[r.erro] };
     let conta: string | undefined;
     // "Administrador" só é lido do admin (o serviço confere de novo); de outro ator, o campo é ignorado.
+    // Vem antes de nome/telefone: se pedir confirmação (ou for recusado), nada foi gravado ainda.
     if (ator.papel === "ADMIN" && form.get("adminNoForm") === "1") {
       const a = await definirAdministrador(usuarioId, form.get("administrador") === "1", ator, { confirmarConta: textoCurto(form.get("confirmarConta")) });
       if (!a.ok) return falha(a);
       conta = a.conta;
     }
+    // Campos de papel/lado num FormData forjado são ignorados: só nome e telefone vão para a conta.
+    const r = await atualizarUsuario(usuarioId, perfil, ator);
+    if (!r.ok) return { erro: MENSAGEM[r.erro] };
     revalidatePath("/gestao/usuarios");
     revalidatePath("/membros", "layout");
     return { ok: true, ...(conta ? { conta } : {}) };
