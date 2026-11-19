@@ -641,6 +641,18 @@ export async function importarMembros(linhas: LinhaImportacao[], chave: string, 
         const r = await tx.vinculoIj.updateMany({ where: { membroId, saida: null }, data: { saida: instanteDoPrazo(saida) } });
         if (r.count) await historico(tx, membroId, "Saída da IJ registrada pela importação (data da importação)", ator, { saida });
       };
+      // Membro "vazio", que a linha completa: sem ocupação e (status não informado, ou sem período nenhum, ou —
+      // GAB-108 — ligado a uma conta só com períodos abertos sem data de entrada, como a migration das contas cria).
+      const membroVazio = async (membroId: string) => {
+        const ficha = await tx.membro.findUniqueOrThrow({
+          where: { id: membroId },
+          select: { status: true, usuarioId: true, _count: { select: { vinculos: true, ocupacoes: { where: { invalidadoEm: null } } } } },
+        });
+        if (ficha._count.ocupacoes > 0) return false;
+        if (ficha.status === "NAO_INFORMADO" || ficha._count.vinculos === 0) return true;
+        if (!ficha.usuarioId) return false;
+        return (await tx.vinculoIj.count({ where: { membroId, OR: [{ saida: { not: null } }, { entrada: { not: null } }] } })) === 0;
+      };
       for (const [i, l] of linhas.entries()) {
         const linha = `Linha ${i + 1}`;
         const area = l.area ? areas.find((a) => normalizar(a.nome) === normalizar(l.area!)) : null;
@@ -667,10 +679,9 @@ export async function importarMembros(linhas: LinhaImportacao[], chave: string, 
         if (existente) {
           // GAB-105: membro com o mesmo e-mail ainda sem nada (sem ocupação; status não informado ou sem período) é
           // completado pela linha (conta, status, período, posição), sem derrubar o lote.
-          // Só o membro "vazio": sem ocupação e (status não informado ou sem período nenhum). Os demais seguem a
+          // Só o membro "vazio" (`membroVazio`). Os demais seguem a
           // regra do G&G: recusa o lote.
-          const ficha = await tx.membro.findUniqueOrThrow({ where: { id: existente.id }, select: { status: true, _count: { select: { vinculos: true, ocupacoes: { where: { invalidadoEm: null } } } } } });
-          if (ficha._count.ocupacoes > 0 || (ficha.status !== "NAO_INFORMADO" && ficha._count.vinculos > 0)) throw new Recusa("IMPORTACAO", `${linha}: membro já cadastrado.`);
+          if (!(await membroVazio(existente.id))) throw new Recusa("IMPORTACAO", `${linha}: membro já cadastrado.`);
           await tx.membro.update({
             where: { id: existente.id },
             data: { ...(l.status !== "NAO_INFORMADO" ? { status: l.status } : {}), ...(existente.usuarioId ? {} : { usuarioId: await contaPorEmail(tx, l.email) }) },
@@ -683,8 +694,15 @@ export async function importarMembros(linhas: LinhaImportacao[], chave: string, 
           await historico(tx, existente.id, "Atualizado pela importação em lote", ator);
           continue;
         }
-        // Como no importar_membros do G&G: já existe pelo nome (sem caixa) → recusa o lote.
-        if (await tx.membro.count({ where: { nome: { equals: l.nome, mode: "insensitive" } } })) throw new Recusa("IMPORTACAO", `${linha}: membro já cadastrado.`);
+        // Como no importar_membros do G&G: já existe pelo nome → recusa o lote. Comparação EXATA da chave do nome
+        // (`chaveNome`, em memória; nada de ILIKE, onde `_`/`%` seriam curinga). Nome não basta para dizer que é a
+        // mesma pessoa: linha sem e-mail com o nome de quem tem conta pede o e-mail (GAB-108).
+        const chaveN = chaveNome(l.nome);
+        const xaras = (await tx.membro.findMany({ select: { nome: true, usuarioId: true } })).filter((m) => chaveNome(m.nome) === chaveN);
+        if (xaras.length) {
+          if (!chaveL && xaras.some((m) => m.usuarioId)) throw new Recusa("IMPORTACAO", `${linha}: já existe membro com conta e esse nome; informe o e-mail na planilha.`);
+          throw new Recusa("IMPORTACAO", `${linha}: membro já cadastrado.`);
+        }
         const m = await tx.membro.create({ data: { nome: l.nome, email: l.email, status: l.status, usuarioId: await contaPorEmail(tx, l.email) } });
         await tx.vinculoIj.create({ data: { membroId: m.id, entrada } });
         await fecharSeInativo(m.id, l.status);
