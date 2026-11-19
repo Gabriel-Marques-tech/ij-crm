@@ -42,6 +42,29 @@ export function descendentes(areas: { id: string; superiorId: string | null }[],
   return ids;
 }
 
+/**
+ * Cúpula do organograma (só exibição; a hierarquia guardada não muda): a partir de uma raiz
+ * institucional com exatamente UM filho institucional, esse filho sobe para a mesma linha
+ * (Presidência e Vice-Presidência lado a lado). No máximo 2 na linha: um 3º institucional fica abaixo. Os filhos da linha são os do
+ * último nó puxado, depois dos filhos não institucionais dos anteriores (nada some do desenho).
+ */
+export function cupula(itens: { id: string; superiorId: string | null; institucional: boolean }[], raiz: string): { ids: string[]; filhos: string[] } {
+  const ids = [raiz];
+  const sobras: string[] = [];
+  let atual = itens.find((x) => x.id === raiz);
+  while (ids.length < 2 && atual?.institucional) {
+    const filhos = itens.filter((x) => x.superiorId === atual!.id && !ids.includes(x.id));
+    const inst = filhos.filter((x) => x.institucional);
+    if (inst.length !== 1) break;
+    sobras.push(...filhos.filter((x) => x !== inst[0]).map((x) => x.id));
+    ids.push(inst[0].id);
+    atual = inst[0];
+  }
+  const ultimo = ids[ids.length - 1];
+  const finais = itens.filter((x) => x.superiorId === ultimo && !ids.includes(x.id)).map((x) => x.id);
+  return { ids, filhos: [...sobras, ...finais] };
+}
+
 /** Ligar `id` abaixo de `superior` criaria um ciclo? */
 export function temCiclo(itens: { id: string; superior: string | null }[], id: string, superior: string | null): boolean {
   const vistos = new Set([id]);

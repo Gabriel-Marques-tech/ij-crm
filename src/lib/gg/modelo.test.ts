@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { contaDifere, derivarDoOrganograma, descendentes, progresso, semestreDe, temCiclo, validarImportacao, vigente } from "./modelo";
+import { contaDifere, cupula, derivarDoOrganograma, descendentes, progresso, semestreDe, temCiclo, validarImportacao, vigente } from "./modelo";
 
 describe("vigente [início, fim)", () => {
   it("o dia do fim já não conta; início vazio não limita; invalidada nunca vale", () => {
@@ -94,5 +94,40 @@ describe("rotina", () => {
     expect(progresso(30, 62, 40)).toBe(31);
     expect(progresso(30, 62, 99)).toBe(100);
     expect(progresso(10, 10, 10)).toBe(100);
+  });
+});
+
+describe("cupula (organograma)", () => {
+  const no = (id: string, superiorId: string | null, institucional = false) => ({ id, superiorId, institucional });
+
+  it("forma do seed: Presidência → VP → diretorias vira uma linha com as diretorias abaixo", () => {
+    const itens = [no("pres", null, true), no("vp", "pres", true), no("dir_gg", "vp"), no("dir_proj", "vp"), no("ger_rh", "dir_gg")];
+    expect(cupula(itens, "pres")).toEqual({ ids: ["pres", "vp"], filhos: ["dir_gg", "dir_proj"] });
+  });
+
+  it("sem cadeia institucional: a raiz fica sozinha com os próprios filhos", () => {
+    const itens = [no("dir", null), no("ger", "dir"), no("an", "ger")];
+    expect(cupula(itens, "dir")).toEqual({ ids: ["dir"], filhos: ["ger"] });
+    // Raiz institucional com filho comum também não junta nada.
+    expect(cupula([no("pres", null, true), no("dir", "pres")], "pres")).toEqual({ ids: ["pres"], filhos: ["dir"] });
+    // Raiz comum com filho institucional: a regra só começa em institucional.
+    expect(cupula([no("dir", null), no("inst", "dir", true)], "dir")).toEqual({ ids: ["dir"], filhos: ["inst"] });
+  });
+
+  it("dois filhos institucionais: não junta (ambiguidade fica na árvore)", () => {
+    const itens = [no("pres", null, true), no("vp1", "pres", true), no("vp2", "pres", true), no("dir", "vp1")];
+    expect(cupula(itens, "pres")).toEqual({ ids: ["pres"], filhos: ["vp1", "vp2"] });
+  });
+
+  it("filhos não institucionais dos nós puxados continuam na linha de baixo", () => {
+    const itens = [no("pres", null, true), no("assessoria", "pres"), no("vp", "pres", true), no("dir", "vp")];
+    expect(cupula(itens, "pres")).toEqual({ ids: ["pres", "vp"], filhos: ["assessoria", "dir"] });
+  });
+
+  it("linha tem no máximo 2 (o 3º institucional fica abaixo); ciclo não trava", () => {
+    const longa = [no("a", null, true), no("b", "a", true), no("c", "b", true), no("d", "c")];
+    expect(cupula(longa, "a")).toEqual({ ids: ["a", "b"], filhos: ["c"] });
+    const ciclo = [no("a", "b", true), no("b", "a", true)];
+    expect(cupula(ciclo, "a")).toEqual({ ids: ["a", "b"], filhos: [] });
   });
 });

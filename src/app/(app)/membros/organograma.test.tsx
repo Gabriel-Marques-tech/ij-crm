@@ -46,4 +46,39 @@ describe("Organograma", () => {
     expect(screen.queryByText("Ex PM")).toBeNull();
     expect(screen.getAllByText("Vago")).toHaveLength(2);
   });
+
+  describe("cúpula (GAB-109)", () => {
+    const cupula = (): BaseOrg =>
+      base({
+        areas: [
+          { id: "pres", nome: "Presidência", tipo: "INSTITUCIONAL", superiorId: null, ladoCrm: null, ehGG: false },
+          { id: "vp", nome: "Vice-Presidência", tipo: "INSTITUCIONAL", superiorId: null, ladoCrm: null, ehGG: false },
+          { id: "proj", nome: "Projetos", tipo: "AREA", superiorId: null, ladoCrm: "PROJETOS", ehGG: false },
+        ],
+        cargos: [{ id: "dir", nome: "Diretor", categoria: "DIRETORIA", ehGp: false }],
+        posicoes: [
+          { id: "p_pres", nome: "Presidente", areaId: "pres", cargoId: "dir", liderancaId: null },
+          { id: "p_vp", nome: "Vice", areaId: "vp", cargoId: "dir", liderancaId: "p_pres" },
+          { id: "p_dir", nome: "Diretoria de Projetos", areaId: "proj", cargoId: "dir", liderancaId: "p_vp" },
+        ],
+      });
+
+    it("Presidência e Vice na mesma linha, diretorias abaixo; um só 'recolher'", () => {
+      const { container } = render(<Organograma base={cupula()} editor={false} cadastra={false} />);
+      const linha = container.querySelector(".org-cupula")!;
+      expect(linha.textContent).toContain("Presidente");
+      expect(linha.textContent).toContain("Vice");
+      expect(linha.textContent).not.toContain("Diretoria de Projetos");
+      expect(screen.getByText("Diretoria de Projetos")).toBeTruthy();
+      expect(screen.getAllByRole("link", { name: "▾ recolher" })).toHaveLength(1);
+      expect(screen.getByRole("link", { name: "▾ recolher" }).getAttribute("href")).toBe("/membros?visao=organograma&fechado=p_pres");
+    });
+
+    it("`?fechado=` antigo com a VP ainda recolhe a linha, e reabrir limpa os dois ids", () => {
+      render(<Organograma base={cupula()} editor={false} cadastra={false} fechado="p_vp,p_pres,outro" />);
+      expect(screen.queryByText("Diretoria de Projetos")).toBeNull();
+      const mostrar = screen.getByRole("link", { name: "▸ mostrar 1 abaixo" });
+      expect(mostrar.getAttribute("href")).toBe("/membros?visao=organograma&fechado=outro");
+    });
+  });
 });

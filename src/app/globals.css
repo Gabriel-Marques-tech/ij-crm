@@ -439,4 +439,9 @@
   .org-tree ul > li:first-child::before { left: 50%; }
   .org-tree ul > li:last-child::before { right: 50%; }
   .org-tree ul > li:only-child::before { display: none; }
+  /* Cúpula (Presidência ao lado da Vice): cartões numa linha, ligados por um elo; com galho aberto,
+     uma linha desce do meio da cúpula até o `ul::before` dos filhos. */
+  .org-cupula { position: relative; display: flex; align-items: stretch; justify-content: center; }
+  .org-cupula-elo { align-self: center; width: 40px; border-top: 1px solid color-mix(in oklch, var(--primary) 45%, var(--border-strong)); }
+  .org-cupula-desce::after { content: ""; position: absolute; top: 50%; bottom: 0; left: 50%; border-left: 1px solid color-mix(in oklch, var(--primary) 45%, var(--border-strong)); }
 }
