@@ -36,9 +36,9 @@ export function localizarPosicao(areas: readonly AreaPosicoes[], posicaoId: stri
  * frentes; "A própria área" para as posições direto nela) → Cargo (as posições ativas do nó; se
  * só houver uma, já vem escolhida). Trocar a área limpa frente e cargo; trocar a frente limpa o
  * cargo. O formulário recebe só o id da posição (`name`, hidden; vazio = sem posição) e o pai é
- * avisado a cada mudança (`onEscolher`), para pré-preencher papel, área e cargos do CRM.
+ * avisado a cada mudança (`onEscolher`), para mostrar a prévia da conta (GAB-107: papel, área e cargos saem da posição no servidor).
  * Sem área marcada `ehGG`, escolher uma área que parece de G&G mostra o aviso do pré-requisito.
- * `posicaoInicial` abre a cascata já nessa posição (o pai aplica a sugestão dela por conta própria).
+ * `posicaoInicial` abre a cascata já nessa posição (o pai mostra a prévia dela por conta própria).
  */
 export function CampoPosicao({
   areas,

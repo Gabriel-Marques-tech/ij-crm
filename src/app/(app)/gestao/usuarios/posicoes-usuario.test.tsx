@@ -2,9 +2,10 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AreaPosicoes } from "@/lib/auth/cadastro";
 
+type Estado = { ok?: true; erro?: string; conta?: string; homonimos?: { id: string; nome: string }[]; confirmarConta?: { atual: string; conta: string; posicoes: string[] } };
 const acoes = vi.hoisted(() => ({
-  adicionarPosicaoUsuarioAction: vi.fn<(...a: unknown[]) => Promise<{ ok?: true; erro?: string; homonimos?: { id: string; nome: string }[] }>>(async () => ({ ok: true })),
-  encerrarOcupacaoUsuarioAction: vi.fn(async (): Promise<{ ok?: true; erro?: string }> => ({ ok: true })),
+  adicionarPosicaoUsuarioAction: vi.fn<(...a: unknown[]) => Promise<Estado>>(async () => ({ ok: true, conta: "Membro de Projetos · PM" })),
+  encerrarOcupacaoUsuarioAction: vi.fn<(...a: unknown[]) => Promise<Estado>>(async () => ({ ok: true, conta: "Visualizador (só leitura)" })),
 }));
 vi.mock("./actions", () => acoes);
 
@@ -37,11 +38,11 @@ describe("edição: Posição na IJ", () => {
     expect(screen.getByText("Vendas · Membro")).toBeTruthy();
     expect(screen.getByText("desde 01/03/2026")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Encerrar" }));
-    await waitFor(() => expect(acoes.encerrarOcupacaoUsuarioAction).toHaveBeenCalledWith("u1", "o1"));
-    expect(await screen.findByText(/encerrada/)).toBeTruthy();
+    await waitFor(() => expect(acoes.encerrarOcupacaoUsuarioAction).toHaveBeenCalledWith("u1", "o1", null));
+    expect(await screen.findByText(/encerrada\. Conta no CRM: Visualizador \(só leitura\)\./)).toBeTruthy();
   });
 
-  it("adiciona a posição escolhida e mostra a sugestão para a conta", async () => {
+  it("adiciona a posição escolhida e mostra como a conta ficou", async () => {
     render(<PosicoesUsuario usuarioId="u1" ocupacoes={[]} areas={AREAS} temAreaGG />);
     expect(screen.getByText("Sem posição atual no organograma.")).toBeTruthy();
     const botao = screen.getByRole("button", { name: "Adicionar posição" }) as HTMLButtonElement;
@@ -51,7 +52,7 @@ describe("edição: Posição na IJ", () => {
     fireEvent.change(screen.getByLabelText("Cargo na IJ"), { target: { value: "p_pm" } });
     fireEvent.click(botao);
     await waitFor(() => expect(acoes.adicionarPosicaoUsuarioAction).toHaveBeenCalledWith("u1", "p_pm", {}));
-    expect(await screen.findByText(/sugere: Projetos · Projetos · PM/)).toBeTruthy();
+    expect(await screen.findByText("Posição atribuída. Conta no CRM: Membro de Projetos · PM.")).toBeTruthy();
   });
 
   it("erro da action aparece (com a ref, quando é do servidor)", async () => {
@@ -60,6 +61,24 @@ describe("edição: Posição na IJ", () => {
     escolherPm();
     fireEvent.click(screen.getByRole("button", { name: "Adicionar posição" }));
     expect((await screen.findByRole("alert")).textContent).toContain("ref: abcd1234");
+  });
+
+  it("mudança de papel: mostra a conta resultante; confirmar refaz com a conta confirmada (adicionar e encerrar)", async () => {
+    const pedido = { atual: "Visualizador (só leitura)", conta: "Gestor de Projetos · Diretor", posicoes: ["Projetos · Diretor"] };
+    acoes.adicionarPosicaoUsuarioAction.mockResolvedValueOnce({ erro: "x", confirmarConta: pedido }).mockResolvedValueOnce({ ok: true, conta: pedido.conta });
+    render(<PosicoesUsuario usuarioId="u1" ocupacoes={[{ ocupacaoId: "o1", rotulo: "Vendas · Membro", principal: true, inicio: null }]} areas={AREAS} temAreaGG />);
+    escolherPm();
+    fireEvent.click(screen.getByRole("button", { name: "Adicionar posição" }));
+    expect(await screen.findByText(/Hoje a conta é: Visualizador/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Confirmar: Gestor de Projetos · Diretor" }));
+    await waitFor(() => expect(acoes.adicionarPosicaoUsuarioAction).toHaveBeenLastCalledWith("u1", "p_pm", { confirmarConta: "Gestor de Projetos · Diretor" }));
+    expect(await screen.findByText(/Conta no CRM: Gestor de Projetos · Diretor/)).toBeTruthy();
+
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    acoes.encerrarOcupacaoUsuarioAction.mockResolvedValueOnce({ erro: "x", confirmarConta: { ...pedido, conta: "Membro de Projetos" } });
+    fireEvent.click(screen.getByRole("button", { name: "Encerrar" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Confirmar: Membro de Projetos" }));
+    await waitFor(() => expect(acoes.encerrarOcupacaoUsuarioAction).toHaveBeenLastCalledWith("u1", "o1", "Membro de Projetos"));
   });
 
   it("homônimo sem e-mail: pergunta e 'Ligar a ele' reenvia com o membro", async () => {

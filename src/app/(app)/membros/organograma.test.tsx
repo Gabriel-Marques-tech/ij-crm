@@ -30,6 +30,9 @@ describe("Organograma", () => {
     expect(screen.queryByRole("link", { name: /^Vago: cadastrar/ })).toBeNull();
     expect(screen.getByText("área inativa")).toBeTruthy();
     expect(screen.getByText("cargo inativo")).toBeTruthy();
+    // Um organograma só (o recorte "Inteli Júnior | Gente & Gestão" saiu).
+    expect(screen.queryByRole("navigation", { name: "Escopo" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Gente & Gestão" })).toBeNull();
   });
 
   it("quem cadastra: a vaga leva ao cadastro já na posição", () => {

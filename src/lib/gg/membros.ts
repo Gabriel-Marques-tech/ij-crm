@@ -70,8 +70,8 @@ export function hrefMembros(params: { visao: Visao } & Record<string, string | n
   return `${HREF_MEMBROS}?${q}`;
 }
 
-/** Parâmetros que as rotas antigas aceitavam e a nova continua lendo. */
-const PARAMETROS_ANTIGOS: Record<Visao, readonly string[]> = { lista: ["q", "area", "status"], organograma: ["escopo", "fechado"] };
+/** Parâmetros que as rotas antigas aceitavam e a nova continua lendo (`escopo` saiu: o organograma é um só). */
+const PARAMETROS_ANTIGOS: Record<Visao, readonly string[]> = { lista: ["q", "area", "status"], organograma: ["fechado"] };
 
 /** Destino de `/gg/membros` (lista) e `/gg/organograma` (organograma), levando os filtros. */
 export function destinoAntigo(visao: Visao, sp: Record<string, string | string[] | undefined>): string {

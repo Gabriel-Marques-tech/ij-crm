@@ -1,17 +1,20 @@
 "use client";
 
 import { startTransition, useActionState, useRef, useState } from "react";
-import type { Area, Cargo, Papel } from "@prisma/client";
+import type { Papel } from "@prisma/client";
 import { Copy, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { AreaPosicoes, FichaLigada, OpcaoPosicao } from "@/lib/auth/cadastro";
-import { podeAtribuirPapel } from "@/lib/auth/papeis";
+import { descreverConta } from "@/lib/gg/modelo";
 import { criarConviteAction } from "./actions";
 import { CampoPosicao, localizarPosicao } from "./campo-posicao";
-import { CamposPapelLado } from "./campos-lado";
+import { ConfirmarConta } from "./confirmar-conta";
+
+/** Campo extra de um reenvio: escolha do homônimo ou a conta confirmada. */
+type Extra = [campo: "ligarMembroId" | "criarMembroNovo" | "confirmarConta", valor: string];
 
 type Posicoes = { areas: readonly AreaPosicoes[]; temAreaGG: boolean };
 const SEM_POSICOES: Posicoes = { areas: [], temAreaGG: false };
@@ -71,13 +74,13 @@ export function ConvidarDialog({
   );
 }
 
-type Lado = { papel: Papel; area: Area | null; cargos: readonly Cargo[] };
-const LADO_PADRAO: Lado = { papel: "VENDEDOR", area: null, cargos: [] };
-
-/** Papel/área/cargos que a posição sugere, se quem cadastra pode dar esse papel; senão a nota explica. */
-function sugestaoDaPosicao(papelAtor: Papel, o: OpcaoPosicao): { lado: Lado | null; nota: string } {
-  if (!podeAtribuirPapel(papelAtor, o.sugestao.papel)) return { lado: null, nota: "O organograma sugere um papel que você não pode atribuir: escolha o papel abaixo." };
-  return { lado: o.sugestao, nota: "Papel, área e cargo preenchidos pela posição. Ajuste se precisar." };
+/**
+ * Prévia da conta (GAB-107): o que a posição dá no CRM, numa linha. Sem posição, Visualizador.
+ * Mesmo cálculo do servidor (`contaDaDerivacao`), que é quem grava; aqui é só para quem cadastra ver.
+ */
+function previaDaConta(o: OpcaoPosicao | null, administrador: boolean): string {
+  const s = o?.sugestao ?? { papel: "VISUALIZADOR" as const, area: null, cargos: [] };
+  return descreverConta(administrador ? { ...s, papel: "ADMIN" } : s);
 }
 
 export function CorpoConvite({
@@ -95,49 +98,41 @@ export function CorpoConvite({
 }) {
   const [estado, action, pendente] = useActionState(criarConviteAction, undefined);
   // Envio por onSubmit (não `<form action>`): o React não limpa o form depois da action, então o que a
-  // tela mostra (cascata, papel, campos) é sempre o que vai no próximo envio, inclusive na confirmação.
+  // tela mostra (cascata, administrador) é sempre o que vai no próximo envio, inclusive na confirmação.
   const formRef = useRef<HTMLFormElement>(null);
-  // A posição pré-preenche papel/área/cargos (`derivarDoOrganograma`, calculado no servidor); quem
-  // cadastra ajusta depois. Remontar os campos (key) aplica o novo valor inicial; o servidor reaplica a régua.
-  // Aberto por um cargo vago (GAB-106): a posição já vem na cascata e aplica a sugestão como se tivesse sido escolhida.
-  const [inicial] = useState(() => {
-    const o = localizarPosicao(posicoes.areas, posicaoInicial)?.opcao;
-    return o ? sugestaoDaPosicao(papelAtor, o) : null;
-  });
-  const [lado, setLado] = useState<Lado>(inicial?.lado ?? LADO_PADRAO);
-  const [versao, setVersao] = useState(0);
-  const [nota, setNota] = useState<string | null>(inicial?.nota ?? null);
+  // GAB-107: papel, área e cargos saem da posição (no servidor). A tela só mostra a prévia.
+  // Aberto por um cargo vago (GAB-106): a posição já vem na cascata.
+  const [posicao, setPosicao] = useState<OpcaoPosicao | null>(() => localizarPosicao(posicoes.areas, posicaoInicial)?.opcao ?? null);
+  const [administrador, setAdministrador] = useState(false);
+  const podeDarAdmin = papelAtor === "ADMIN";
 
-  function enviar(extra?: [campo: "ligarMembroId" | "criarMembroNovo", valor: string]) {
+  // Escolha do homônimo do último envio: a confirmação da conta reenvia com ela (senão o servidor perguntaria de novo).
+  const [ultimaEscolha, setUltimaEscolha] = useState<Extra | null>(null);
+
+  function enviar(extras: Extra[] = []) {
     const form = formRef.current;
     if (!form) return;
-    // A confirmação do homônimo vale para os dados que estão no form agora, que o navegador valida de novo.
-    if (extra && !form.reportValidity()) return;
+    // As confirmações valem para os dados que estão no form agora, que o navegador valida de novo.
+    if (extras.length && !form.reportValidity()) return;
     const f = new FormData(form);
-    if (extra) f.set(extra[0], extra[1]);
+    for (const [campo, valor] of extras) f.set(campo, valor);
+    setUltimaEscolha(extras.find(([campo]) => campo !== "confirmarConta") ?? null);
     startTransition(() => action(f));
   }
 
-  function escolherPosicao(o: OpcaoPosicao | null) {
-    // Sem posição (ou cargo ainda por escolher): o que já está nos campos fica como está.
-    if (!o) return setNota(null);
-    const s = sugestaoDaPosicao(papelAtor, o);
-    setNota(s.nota);
-    if (!s.lado) return;
-    setLado(s.lado);
-    setVersao((v) => v + 1);
-  }
-
-  if (estado?.link && googleAtivo) return <CadastroComGoogle email={estado.email} link={estado.link} expiraEm={estado.expiraEm} fichaLigada={estado.fichaLigada} onFechar={onFechar} />;
+  if (estado?.link && googleAtivo)
+    return <CadastroComGoogle email={estado.email} link={estado.link} expiraEm={estado.expiraEm} fichaLigada={estado.fichaLigada} conta={estado.conta} onFechar={onFechar} />;
   if (estado?.link)
     return (
       <div className="space-y-4">
         {estado.fichaLigada ? <NotaFichaLigada ficha={estado.fichaLigada} /> : null}
+        {estado.conta ? <NotaConta conta={estado.conta} /> : null}
         <LinkGerado link={estado.link} expiraEm={estado.expiraEm} onFechar={onFechar} />
       </div>
     );
 
   const homonimos = estado?.homonimos ?? [];
+  const confirmarConta = estado?.confirmarConta;
   return (
     <form
       ref={formRef}
@@ -159,9 +154,18 @@ export function CorpoConvite({
         <Label htmlFor="telefone">WhatsApp (DDD + número)</Label>
         <Input id="telefone" name="telefone" placeholder="11 99999-8888" inputMode="tel" />
       </div>
-      <CampoPosicao areas={posicoes.areas} temAreaGG={posicoes.temAreaGG} onEscolher={escolherPosicao} posicaoInicial={posicaoInicial} />
-      {nota ? <p className="-mt-2 text-xs text-fg-faint">{nota}</p> : null}
-      <CamposPapelLado key={versao} papelAtor={papelAtor} papel={lado.papel} area={lado.area} cargos={lado.cargos} />
+      <CampoPosicao areas={posicoes.areas} temAreaGG={posicoes.temAreaGG} onEscolher={setPosicao} posicaoInicial={posicaoInicial} />
+      <p className="-mt-2 text-xs text-fg-faint" aria-live="polite">
+        Conta no CRM: {previaDaConta(posicao, administrador)}
+      </p>
+      {/* O servidor compara a conta que vai gravar com o que a tela mostrou; se for outra, pede confirmação. */}
+      <input type="hidden" name="previaConta" value={previaDaConta(posicao, administrador)} />
+      {podeDarAdmin ? (
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" name="administrador" value="1" checked={administrador} onChange={(e) => setAdministrador(e.currentTarget.checked)} />
+          Administrador
+        </label>
+      ) : null}
       {homonimos.length ? (
         <div role="alert" className="space-y-2 rounded-lg border border-warn/50 bg-muted p-3 text-sm">
           <p>
@@ -176,15 +180,17 @@ export function CorpoConvite({
           <p className="text-xs text-fg-faint">Ligar grava este e-mail na ficha e registra no histórico. Se for outra pessoa, um membro novo é criado.</p>
           <div className="flex flex-wrap gap-2">
             {homonimos.map((h, i) => (
-              <Button key={h.id} type="button" size="sm" disabled={pendente} onClick={() => enviar(["ligarMembroId", h.id])}>
+              <Button key={h.id} type="button" size="sm" disabled={pendente} onClick={() => enviar([["ligarMembroId", h.id]])}>
                 {homonimos.length === 1 ? "Ligar a ele e salvar" : `Ligar a "${h.nome}" (${i + 1})`}
               </Button>
             ))}
-            <Button type="button" size="sm" variant="outline" disabled={pendente} onClick={() => enviar(["criarMembroNovo", "1"])}>
+            <Button type="button" size="sm" variant="outline" disabled={pendente} onClick={() => enviar([["criarMembroNovo", "1"]])}>
               É outra pessoa: criar membro novo
             </Button>
           </div>
         </div>
+      ) : confirmarConta ? (
+        <ConfirmarConta pedido={confirmarConta} pendente={pendente} onConfirmar={() => enviar([...(ultimaEscolha ? [ultimaEscolha] : []), ["confirmarConta", confirmarConta.conta]])} />
       ) : estado?.erro ? (
         <p role="alert" className="text-sm text-danger">
           {estado.erro}
@@ -206,12 +212,36 @@ function NotaFichaLigada({ ficha }: { ficha: FichaLigada }) {
   );
 }
 
-function CadastroComGoogle({ email, link, expiraEm, fichaLigada, onFechar }: { email?: string; link: string; expiraEm?: string; fichaLigada?: FichaLigada; onFechar: () => void }) {
+/** Como a conta ficou no CRM (GAB-107): o que o servidor gravou, não a prévia. */
+function NotaConta({ conta }: { conta: string }) {
+  return (
+    <p className="text-sm">
+      Conta no CRM: <strong>{conta}</strong>
+    </p>
+  );
+}
+
+function CadastroComGoogle({
+  email,
+  link,
+  expiraEm,
+  fichaLigada,
+  conta,
+  onFechar,
+}: {
+  email?: string;
+  link: string;
+  expiraEm?: string;
+  fichaLigada?: FichaLigada;
+  conta?: string;
+  onFechar: () => void;
+}) {
   const [mostrarLink, setMostrarLink] = useState(false);
   if (mostrarLink) return <LinkGerado link={link} expiraEm={expiraEm} onFechar={onFechar} aviso="Mostrado só uma vez. Deixa de valer depois do primeiro login com Google." />;
   return (
     <div className="space-y-4">
       {fichaLigada ? <NotaFichaLigada ficha={fichaLigada} /> : null}
+      {conta ? <NotaConta conta={conta} /> : null}
       <div className="rounded-lg border border-border bg-muted p-3 text-sm">
         <p className="eyebrow mb-1">cadastrado</p>
         <p>

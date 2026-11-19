@@ -4,8 +4,8 @@
  * temCiclo, validarImportacao); o resto é a ponte com o CRM e a rotina (fase B).
  * Spec: docs/superpowers/specs/2026-11-05-gg-no-crm-design.md
  */
-import type { Area, Cargo, CategoriaCargo, CategoriaEvento, FuncaoProjeto, Papel, StatusMembro, TipoAreaOrg, TipoDemanda } from "@prisma/client";
-import { CARGO_GP_DO_LADO, CARGOS, resolverAreaCargos } from "@/lib/auth/areas";
+import type { Area, AreaEntrada, Cargo, CategoriaCargo, CategoriaEvento, FuncaoProjeto, Papel, StatusMembro, TipoAreaOrg, TipoDemanda } from "@prisma/client";
+import { CARGO_GP_DO_LADO, CARGOS, resolverAreaCargos, resolverAreaEntrada, ROTULO_AREA, ROTULO_CARGO } from "@/lib/auth/areas";
 
 export const ROTULO_STATUS_MEMBRO: Record<StatusMembro, string> = { NAO_INFORMADO: "Não informado", ATIVO: "Ativo", AFASTADO: "Afastado", INATIVO: "Desligado" };
 export const STATUS_MEMBRO = Object.keys(ROTULO_STATUS_MEMBRO) as StatusMembro[];
@@ -110,8 +110,12 @@ export function validarImportacao(input: unknown, hoje: string): LinhaImportacao
 
 // ---------------------------------------------------------------- ponte organograma → CRM
 
-/** O que o organograma diz sobre uma ocupação vigente: lado da área-raiz, categoria e marcas do cargo (GP = PM/GP; PO). */
-export type PostoDerivavel = { ladoCrm: Area | null; categoria: CategoriaCargo; ehGp: boolean; ehPo: boolean; principal: boolean };
+/**
+ * O que o organograma diz sobre uma ocupação vigente: lado da área-raiz, se a área DA PRÓPRIA
+ * posição é institucional (Presidência, Vice; uma subárea abaixo delas não é), categoria e marcas
+ * do cargo (GP = PM/GP; PO).
+ */
+export type PostoDerivavel = { ladoCrm: Area | null; institucional: boolean; categoria: CategoriaCargo; ehGp: boolean; ehPo: boolean; principal: boolean };
 
 export type Derivado = { area: Area | null; papel: Papel | null; cargos: Cargo[]; conflito: Area[] | null };
 
@@ -120,14 +124,21 @@ const ordenarCargos = (cs: Iterable<Cargo>): Cargo[] => CARGOS.filter((c) => [..
 
 /**
  * Área, papel e cargos que o organograma sugere para a conta do CRM (decisões da spec §3
- * e cargos de Projetos): diretoria → GESTOR (e, se a diretoria é da área de Projetos, cargo
- * DIRETOR); lado da área (Projetos/Vendas) → PROJETOS/VENDEDOR; outra área → VISUALIZADOR;
+ * e cargos de Projetos). Regra (GAB-107): a diretoria vê e edita tudo da ÁREA DELA, então
+ * - diretoria em área institucional (Presidência, Vice) → GESTOR sem área (gestor das DUAS áreas),
+ *   o que quer que a pessoa ocupe além disso (sem lado, sem cargo, sem conflito);
+ * - diretoria do lado da conta (Vendas/Projetos) → GESTOR desse lado (em Projetos, com cargo DIRETOR);
+ * - diretoria de área sem lado no CRM (G&G, Marketing, ADM-FIN) não dá gestão: segue a regra de
+ *   membro (a caneta do G&G vem de `ehGG`, não do papel), e diretoria do outro lado (não principal)
+ *   também não dá gestão do lado da conta;
+ * lado da área (Projetos/Vendas) → PROJETOS/VENDEDOR; outra área → VISUALIZADOR;
  * cargo marcado como GP → o GP do lado (PM em Projetos, GP em Vendas); cargo PO em Projetos → PO.
  * Só contam cargos de postos no lado escolhido. Duas áreas: vale a ocupação principal; sem
  * principal entre elas, conflito (e nenhum cargo).
  */
 export function derivarDoOrganograma(postos: PostoDerivavel[]): Derivado {
   if (postos.length === 0) return { area: null, papel: null, cargos: [], conflito: null };
+  if (postos.some((p) => p.categoria === "DIRETORIA" && p.institucional)) return { area: null, papel: "GESTOR", cargos: [], conflito: null };
   const lados = [...new Set(postos.map((p) => p.ladoCrm).filter((l): l is Area => l !== null))];
   let area: Area | null = lados.length === 1 ? lados[0] : null;
   let conflito: Area[] | null = null;
@@ -136,7 +147,7 @@ export function derivarDoOrganograma(postos: PostoDerivavel[]): Derivado {
     if (principal) area = principal;
     else conflito = lados;
   }
-  const gestor = postos.some((p) => p.categoria === "DIRETORIA");
+  const gestor = area !== null && postos.some((p) => p.categoria === "DIRETORIA" && p.ladoCrm === area);
   const papel: Papel = gestor ? "GESTOR" : area === "PROJETOS" ? "PROJETOS" : area === "VENDAS" ? "VENDEDOR" : "VISUALIZADOR";
   const cargos = new Set<Cargo>();
   if (area !== null) {
@@ -158,6 +169,41 @@ export function contaDifere(conta: { papel: Papel; area: Area | null; cargos: re
   if (d.papel === null || d.conflito || conta.papel === "ADMIN") return false;
   const daConta = ordenarCargos(resolverAreaCargos(conta.papel, conta.area, conta.cargos).cargos);
   return conta.papel !== d.papel || conta.area !== d.area || daConta.join() !== d.cargos.join();
+}
+
+/** A conta do CRM que o cadastro grava (GAB-107): tudo vem da posição; `areaEntrada` já normalizada. */
+export type ContaDerivada = { papel: Papel; area: Area | null; cargos: Cargo[]; areaEntrada: AreaEntrada | null };
+
+/**
+ * Conta que o cadastro grava a partir do organograma (GAB-107): papel, lado e cargos de
+ * `derivarDoOrganograma` (sem posição ou só em área sem lado = VISUALIZADOR; presidência e
+ * diretorias = GESTOR). `administrador` (só o admin marca, conferido no servidor) troca o papel por
+ * ADMIN e mantém o lado. Área de entrada não é perguntada: a área derivada, senão Geral (e quem
+ * entra pela própria área não guarda valor, `resolverAreaEntrada`). Conflito (dois lados sem
+ * principal): null, quem chama recusa.
+ */
+export function contaDaDerivacao(d: Derivado, { administrador = false }: { administrador?: boolean } = {}): ContaDerivada | null {
+  if (d.conflito) return null;
+  const papel: Papel = administrador ? "ADMIN" : (d.papel ?? "VISUALIZADOR");
+  const lado = resolverAreaCargos(papel, d.area, d.cargos);
+  return { papel, area: lado.area, cargos: ordenarCargos(lado.cargos), areaEntrada: resolverAreaEntrada(papel, lado.area, lado.area ?? "GERAL") };
+}
+
+/** Uma linha para a prévia do cadastro: "Gestor de Vendas", "Membro de Projetos · PM", "Visualizador (só leitura)". */
+export function descreverConta(c: { papel: Papel; area: Area | null; cargos: readonly Cargo[] }): string {
+  const cargos = c.cargos.length ? ` · ${c.cargos.map((x) => ROTULO_CARGO[x]).join(", ")}` : "";
+  const lado = c.area ? ROTULO_AREA[c.area] : null;
+  switch (c.papel) {
+    case "ADMIN":
+      return `Administrador${lado ? ` · ${lado}` : ""}${cargos}`;
+    case "GESTOR":
+      return `Gestor de ${lado ?? "Vendas e Projetos"}${cargos}`;
+    case "VENDEDOR":
+    case "PROJETOS":
+      return `Membro de ${lado ?? ROTULO_AREA[c.papel === "VENDEDOR" ? "VENDAS" : "PROJETOS"]}${cargos}`;
+    default:
+      return "Visualizador (só leitura)";
+  }
 }
 
 // ---------------------------------------------------------------- rotina (fase B)

@@ -14,7 +14,6 @@ type Contexto = {
   base: BaseOrg;
   posicoes: PosicaoB[];
   fechados: Set<string>;
-  escopo?: string;
   editor: boolean;
   cadastra: boolean;
   opcoesPosicao: { id: string; nome: string }[];
@@ -28,24 +27,23 @@ type Contexto = {
  * posição (`?cadastrar=`); o editor de G&G tem o menu ⋯ da posição, como antes; os demais só leem.
  * A cúpula institucional (Presidência → Vice-Presidência) aparece lado a lado numa linha só, com as
  * diretorias abaixo das duas (`cupula`, só exibição: a hierarquia guardada não muda).
- * `?escopo=gg` mostra só G&G; `?fechado=` guarda os galhos recolhidos. HTML/CSS (`.org-tree`), sem
- * biblioteca de grafo; a árvore rola dentro do quadro, nunca a página.
+ * Uma visão só, a IJ inteira (o recorte "só Gente & Gestão" saiu: link antigo com `?escopo=gg` mostra
+ * tudo). `?fechado=` guarda os galhos recolhidos. HTML/CSS (`.org-tree`), sem biblioteca de grafo; a
+ * árvore rola dentro do quadro, nunca a página.
  */
-export function Organograma({ base, editor, cadastra, escopo, fechado }: { base: BaseOrg; editor: boolean; cadastra: boolean; escopo?: string; fechado?: string }) {
-  const so = escopo === "gg" ? areasGG(base.areas) : null;
-  const posicoes = base.posicoes.filter((p) => !so || so.has(p.areaId));
+export function Organograma({ base, editor, cadastra, fechado }: { base: BaseOrg; editor: boolean; cadastra: boolean; fechado?: string }) {
+  const posicoes = base.posicoes;
   const raizes = posicoes.filter((p) => !p.liderancaId || !posicoes.some((x) => x.id === p.liderancaId));
-  // Na IJ inteira, o ramo de G&G (o maior) começa recolhido; no escopo Gente & Gestão, aberto.
+  // O ramo de G&G (o maior) começa recolhido.
   const gg = areasGG(base.areas);
-  const raizGG = base.posicoes.find((p) => gg.has(p.areaId) && !gg.has(base.posicoes.find((x) => x.id === p.liderancaId)?.areaId ?? ""));
-  const fechados = new Set((fechado ?? (escopo === "gg" ? "" : (raizGG?.id ?? ""))).split(",").filter(Boolean));
+  const raizGG = posicoes.find((p) => gg.has(p.areaId) && !gg.has(posicoes.find((x) => x.id === p.liderancaId)?.areaId ?? ""));
+  const fechados = new Set((fechado ?? raizGG?.id ?? "").split(",").filter(Boolean));
   const semPosicao = base.membros.filter((m) => m.status === "ATIVO" && !postosDe(base, m.id).length);
   const vagas = posicoes.filter((p) => !base.ocupacoes.some((o) => o.posicaoId === p.id && vigente(o, base.hoje))).length;
   const ctx: Contexto = {
     base,
     posicoes,
     fechados,
-    escopo,
     editor,
     cadastra,
     opcoesPosicao: base.posicoes.map((p) => ({ id: p.id, nome: p.nome })),
@@ -55,21 +53,6 @@ export function Organograma({ base, editor, cadastra, escopo, fechado }: { base:
   return (
     <>
       <div className="flex flex-wrap items-center gap-3">
-        <nav aria-label="Escopo" className="inline-flex rounded-lg border border-border-strong p-0.5 text-sm">
-          {[
-            ["", "Inteli Júnior"],
-            ["gg", "Gente & Gestão"],
-          ].map(([v, n]) => (
-            <Link
-              key={v}
-              href={hrefMembros({ visao: "organograma", escopo: v })}
-              aria-current={(escopo ?? "") === v ? "page" : undefined}
-              className={cn("rounded-md px-3 py-1", (escopo ?? "") === v ? "bg-surface-strong text-foreground" : "text-fg-mute hover:text-foreground")}
-            >
-              {n}
-            </Link>
-          ))}
-        </nav>
         <span className="font-mono text-xs text-fg-faint">
           {posicoes.length} posições · {vagas} vagas
         </span>
@@ -78,7 +61,7 @@ export function Organograma({ base, editor, cadastra, escopo, fechado }: { base:
         <CentralizarNaRaiz alvo="org-canvas" />
         <p className="eyebrow sticky left-0 mb-8 flex items-center gap-2">
           <span aria-hidden className="size-1.5 rounded-full bg-primary" />
-          {escopo === "gg" ? "gente & gestão" : "inteli júnior"}
+          inteli júnior
         </p>
         <ul className="org-tree">
           {raizes.map((p) => (
@@ -108,7 +91,7 @@ export function Organograma({ base, editor, cadastra, escopo, fechado }: { base:
 
 /** Raiz da árvore: se começa uma cúpula institucional, as posições dela dividem a mesma linha. */
 function Raiz({ p, ctx }: { p: PosicaoB; ctx: Contexto }) {
-  const { base, posicoes, fechados, escopo } = ctx;
+  const { base, posicoes, fechados } = ctx;
   const institucional = new Set(base.areas.filter((a) => a.tipo === "INSTITUCIONAL").map((a) => a.id));
   const { ids, filhos: idsFilhos } = cupula(
     posicoes.map((x) => ({ id: x.id, superiorId: x.liderancaId, institucional: institucional.has(x.areaId) })),
@@ -121,7 +104,7 @@ function Raiz({ p, ctx }: { p: PosicaoB; ctx: Contexto }) {
   // reabrir limpa todos. O total conta tudo abaixo da linha.
   const fechado = ids.some((id) => fechados.has(id));
   const abaixo = filhos.reduce((n, f) => n + contarAbaixo(f.id, posicoes) + 1, 0);
-  const alternar = filhos.length ? { href: hrefAlternar(ids, fechados, escopo), fechado, abaixo } : null;
+  const alternar = filhos.length ? { href: hrefAlternar(ids, fechados), fechado, abaixo } : null;
   return (
     <li>
       <div className={cn("org-cupula", filhos.length && !fechado && "org-cupula-desce")}>
@@ -144,10 +127,10 @@ function Raiz({ p, ctx }: { p: PosicaoB; ctx: Contexto }) {
 }
 
 function No({ p, ctx }: { p: PosicaoB; ctx: Contexto }) {
-  const { posicoes, fechados, escopo } = ctx;
+  const { posicoes, fechados } = ctx;
   const filhos = posicoes.filter((x) => x.liderancaId === p.id);
   const fechado = fechados.has(p.id);
-  const alternar = filhos.length ? { href: hrefAlternar([p.id], fechados, escopo), fechado, abaixo: contarAbaixo(p.id, posicoes) } : null;
+  const alternar = filhos.length ? { href: hrefAlternar([p.id], fechados), fechado, abaixo: contarAbaixo(p.id, posicoes) } : null;
   return (
     <li>
       <Cartao p={p} ctx={ctx} temFilhos={filhos.length > 0} alternar={alternar} />
@@ -163,7 +146,7 @@ function No({ p, ctx }: { p: PosicaoB; ctx: Contexto }) {
 }
 
 function Cartao({ p, ctx, temFilhos, alternar }: { p: PosicaoB; ctx: Contexto; temFilhos: boolean; alternar: { href: string; fechado: boolean; abaixo: number } | null }) {
-  const { base, fechados, escopo, editor, cadastra } = ctx;
+  const { base, fechados, editor, cadastra } = ctx;
   // Área ou cargo desativado com a posição ainda ativa: o cartão avisa em vez de derrubar a página.
   const area = base.areas.find((a) => a.id === p.areaId);
   const cargo = base.cargos.find((c) => c.id === p.cargoId);
@@ -207,7 +190,7 @@ function Cartao({ p, ctx, temFilhos, alternar }: { p: PosicaoB; ctx: Contexto; t
         })
       ) : cadastra ? (
         <Link
-          href={hrefMembros({ visao: "organograma", escopo, fechado: [...fechados].join(","), cadastrar: p.id })}
+          href={hrefMembros({ visao: "organograma", fechado: [...fechados].join(","), cadastrar: p.id })}
           scroll={false}
           aria-label={`Vago: cadastrar pessoa em ${p.nome}`}
           className="group mt-3 flex items-center gap-2 border-t border-border pt-2.5 text-xs text-fg-faint hover:text-primary"
@@ -230,14 +213,12 @@ function Cartao({ p, ctx, temFilhos, alternar }: { p: PosicaoB; ctx: Contexto; t
 }
 
 /** Alterna o galho de `ids` (um nó, ou a linha da cúpula pela raiz `ids[0]`): recolhido → tira todos; aberto → recolhe pela raiz. */
-function hrefAlternar(ids: string[], fechados: Set<string>, escopo?: string): string {
+function hrefAlternar(ids: string[], fechados: Set<string>): string {
   const n = new Set(fechados);
   if (ids.some((id) => n.has(id))) for (const id of ids) n.delete(id);
   else n.add(ids[0]);
   // `fechado` vazio ainda vai na URL: diz "nenhum recolhido", diferente de "o padrão" (G&G recolhido).
-  const q = new URLSearchParams({ visao: "organograma" });
-  if (escopo) q.set("escopo", escopo);
-  q.set("fechado", [...n].join(","));
+  const q = new URLSearchParams({ visao: "organograma", fechado: [...n].join(",") });
   return `${HREF_MEMBROS}?${q}`;
 }
 
