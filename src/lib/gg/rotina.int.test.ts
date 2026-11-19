@@ -13,6 +13,7 @@ import {
   criarProcesso,
   definirRaci,
   eventosDoUsuario,
+  excluirProcesso,
   lembrarEventosGG,
   medirFonte,
   listarAusencias,
@@ -133,5 +134,29 @@ describe("metas e RACI", () => {
     expect((await carregarRaci()).processos[0].papeis).toEqual({ dir: "R", ger: "A", sm: "C" });
     await definirRaci(p.id!, "sm", null, helena.ator);
     expect((await carregarRaci()).processos[0].papeis).toEqual({ dir: "R", ger: "A" });
+  });
+
+  it("excluir processo (GAB-110): só editor G&G; some da matriz; aba velha não edita o excluído", async () => {
+    const { helena, lucas, admin } = await semear();
+    const p = await criarProcesso("Onboarding", helena.ator);
+    const outro = await criarProcesso("Offboarding", helena.ator);
+    if (!p.ok || !outro.ok) throw new Error();
+    await definirRaci(p.id!, "ger", "A", helena.ator);
+
+    expect(await excluirProcesso(p.id!, lucas.ator)).toEqual({ ok: false, erro: "SEM_PERMISSAO" });
+    expect((await carregarRaci()).processos.map((x) => x.nome)).toEqual(["Offboarding", "Onboarding"]);
+
+    expect(await excluirProcesso(p.id!, helena.ator)).toEqual({ ok: true });
+    expect((await carregarRaci()).processos.map((x) => x.nome)).toEqual(["Offboarding"]);
+    // Exclusão suave: a linha e o RACI continuam no banco.
+    expect(await db.processo.findUniqueOrThrow({ where: { id: p.id! }, select: { ativo: true } })).toEqual({ ativo: false });
+    expect(await db.raci.count({ where: { processoId: p.id! } })).toBe(1);
+
+    expect(await definirRaci(p.id!, "sm", "C", helena.ator)).toEqual({ ok: false, erro: "NAO_ENCONTRADO" });
+    expect(await definirRaci(p.id!, "ger", null, admin)).toEqual({ ok: false, erro: "NAO_ENCONTRADO" });
+    expect(await db.raci.findMany({ where: { processoId: p.id! }, select: { cargoId: true, papel: true } })).toEqual([{ cargoId: "ger", papel: "A" }]);
+    expect(await excluirProcesso(p.id!, helena.ator)).toEqual({ ok: false, erro: "NAO_ENCONTRADO" });
+    expect(await excluirProcesso("nao-existe", helena.ator)).toEqual({ ok: false, erro: "NAO_ENCONTRADO" });
+    expect(await definirRaci(outro.id!, "sm", "C", helena.ator)).toEqual({ ok: true });
   });
 });

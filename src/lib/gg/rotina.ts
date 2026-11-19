@@ -374,10 +374,23 @@ export async function carregarRaci() {
 
 export const criarProcesso = (nome: string, ator: AtorGG) => editando(ator, async () => (await db.processo.create({ data: { nome: texto(nome) } })).id);
 
-/** Define o papel de um cargo num processo (null limpa). Um A por processo: o A anterior vira R, na mesma transação. */
+/** Exclusão suave: o processo sai da matriz (`ativo = false`) e guarda o RACI, caso precise voltar. */
+export const excluirProcesso = (processoId: string, ator: AtorGG) =>
+  editando(ator, async () => {
+    const r = await db.processo.updateMany({ where: { id: processoId, ativo: true }, data: { ativo: false } });
+    if (!r.count) throw new Recusa("NAO_ENCONTRADO");
+  });
+
+/**
+ * Define o papel de um cargo num processo (null limpa). Um A por processo: o A anterior vira R, na mesma transação.
+ * Processo excluído (inativo) recusa: uma aba velha não edita o que já saiu da matriz.
+ */
 export const definirRaci = (processoId: string, cargoId: string, papel: PapelRaci | null, ator: AtorGG) =>
   editando(ator, async () => {
     await db.$transaction(async (tx) => {
+      // Trava a linha do processo: uma exclusão simultânea espera esta edição (ou vice-versa).
+      const vivo = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM processo WHERE id = ${processoId} AND ativo FOR UPDATE`;
+      if (!vivo.length) throw new Recusa("NAO_ENCONTRADO");
       if (papel === "A") await tx.raci.updateMany({ where: { processoId, papel: "A", NOT: { cargoId } }, data: { papel: "R" } });
       if (papel === null) await tx.raci.deleteMany({ where: { processoId, cargoId } });
       else await tx.raci.upsert({ where: { processoId_cargoId: { processoId, cargoId } }, create: { processoId, cargoId, papel }, update: { papel } });
